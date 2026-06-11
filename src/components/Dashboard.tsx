@@ -10,6 +10,29 @@ import {
 } from "lucide-react";
 import { Installment, Receipt as ReceiptType } from "../types";
 import { getContractTiming } from "../db";
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
+
+const COLORS = {
+  "مدى": "#38bdf8",     // Bright Sky Blue (Premium)
+  "تحويل": "#fbbf24",   // Amber Gold (Premium)
+  "نقداً": "#34d399",   // Emerald Mint (Premium)
+};
+const DEFAULT_COLOR = "#94a3b8"; // Slate
+
+const CustomTooltip = ({ active, payload }: any) => {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    return (
+      <div className="bg-slate-950/95 border border-slate-800/80 p-3 rounded-2xl shadow-2xl text-right z-50">
+        <p className="text-xs font-black text-white mb-1">{data.name}</p>
+        <p className="text-sm font-black text-amber-400 font-mono">
+          {Number(data.value).toLocaleString()} <span className="text-[10px] font-bold text-slate-400">ريال</span>
+        </p>
+      </div>
+    );
+  }
+  return null;
+};
 
 interface DashboardProps {
   installments: Installment[];
@@ -82,6 +105,40 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const latestReceiptsFeed = [...receipts]
     .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))
     .slice(0, 5);
+
+  // Calculate distribution of collection amounts by payment method (نقداً، مدى، تحويل)
+  const methodDistribution = React.useMemo(() => {
+    const sums: Record<string, number> = {
+      "مدى": 0,
+      "تحويل": 0,
+      "نقداً": 0,
+    };
+
+    receipts.forEach((rec) => {
+      const amt = Number(rec.amount || 0);
+      const m = (rec.method || "").trim();
+      
+      if (m.includes("مدى") || m.includes("مدي")) {
+        sums["مدى"] += amt;
+      } else if (m.includes("تحويل")) {
+        sums["تحويل"] += amt;
+      } else if (m.includes("نقدا") || m.includes("نقداً") || m.includes("نقدي") || m.includes("كاش") || m.includes("نقد")) {
+        sums["نقداً"] += amt;
+      } else {
+        if (m) {
+          if (!sums[m]) sums[m] = 0;
+          sums[m] += amt;
+        } else {
+          sums["نقداً"] += amt;
+        }
+      }
+    });
+
+    return Object.entries(sums).map(([name, value]) => ({
+      name,
+      value,
+    }));
+  }, [receipts]);
 
   // Upcoming collections based on start date and paid sums
   const upcomingPaymentsFeed = analyzedContracts
@@ -199,7 +256,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
 
         {/* قائمة المتأخرين */}
-        <div className="lg:col-span-12 bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
+        <div className="lg:col-span-8 bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 border-b border-slate-800/80 pb-4">
             <div>
               <h3 className="text-base font-black text-white flex items-center gap-2">
@@ -258,6 +315,86 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+
+        {/* توزيع مبالغ التحصيل حسب طريقة الدفع (Pie Chart) */}
+        <div className="lg:col-span-4 bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl flex flex-col justify-between relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 rounded-full blur-3xl pointer-events-none" />
+          
+          <div>
+            <h3 className="text-base font-black text-white flex items-center gap-2 border-b border-slate-800/80 pb-3 mb-4">
+              <span className="p-1.5 rounded-lg bg-amber-600/20 border border-amber-500/30 text-amber-400">📊</span>
+              توزيع التحصيل حسب طريقة الدفع
+            </h3>
+
+            <div className="h-[200px] w-full flex items-center justify-center relative mt-4">
+              {/* Central Text for Donut Chart */}
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-10">
+                <span className="text-[9px] font-bold text-slate-450 uppercase tracking-widest leading-none">إجمالي التحصيل</span>
+                <span className="text-lg font-black text-white mt-2 font-mono leading-none">
+                  {totalCollectedReceipts.toLocaleString()}
+                </span>
+                <span className="text-[10px] font-black text-amber-500 mt-1">ريال</span>
+              </div>
+
+              {totalCollectedReceipts === 0 ? (
+                <div className="text-center text-slate-500 font-bold text-xs space-y-1.5 z-20">
+                  <p>🚫 لا توجد بيانات تحصيل حالياً لعرضها</p>
+                  <p className="text-[10px] font-normal text-slate-600">سجل عمليات القبض لتحديث المخطط</p>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={methodDistribution}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={62}
+                      outerRadius={82}
+                      paddingAngle={4}
+                      dataKey="value"
+                    >
+                      {methodDistribution.map((entry, index) => {
+                        const name = entry.name as keyof typeof COLORS;
+                        return (
+                          <Cell
+                            key={`cell-${index}`}
+                            fill={COLORS[name] || DEFAULT_COLOR}
+                            stroke="#0f172a"
+                            strokeWidth={3}
+                          />
+                        );
+                      })}
+                    </Pie>
+                    <Tooltip content={<CustomTooltip />} />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+
+            {/* Premium Legend & Distribution % */}
+            <div className="grid grid-cols-3 gap-2 text-center mt-4 border-t border-slate-850/60 pt-4">
+              {methodDistribution.map((item, index) => {
+                const name = item.name as keyof typeof COLORS;
+                const percent = totalCollectedReceipts > 0 ? Math.round((item.value / totalCollectedReceipts) * 100) : 0;
+                return (
+                  <div key={index} className="bg-slate-950/40 border border-slate-850/60 p-2 rounded-2xl flex flex-col justify-between hover:border-slate-800 transition-all">
+                    <div className="flex items-center justify-center gap-1.5">
+                      <span
+                        className="w-2 h-2 rounded-full shrink-0"
+                        style={{ backgroundColor: COLORS[name] || DEFAULT_COLOR }}
+                      />
+                      <span className="text-[10px] font-black text-slate-400">{item.name}</span>
+                    </div>
+                    <div className="mt-1.5">
+                      <b className="block text-xs font-black text-white font-mono">{item.value.toLocaleString()}</b>
+                      <span className="block text-[9px] font-bold text-slate-500 mt-0.5">{percent}%</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
 
