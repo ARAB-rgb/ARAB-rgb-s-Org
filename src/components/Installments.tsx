@@ -22,14 +22,23 @@ interface InstallmentsProps {
 }
 
 const getStoredTreasuries = (): string[] => {
+  const defaults = ["خزنة الشركة", "خزنة التحصيل", "خزنة التحويل", "نقاط البيع"];
   const saved = localStorage.getItem("aw_treasuries");
   if (saved) {
     try {
       const arr = JSON.parse(saved);
-      if (Array.isArray(arr) && arr.length > 0) return arr;
+      if (Array.isArray(arr) && arr.length > 0) {
+        const merged = [...arr];
+        defaults.forEach(d => {
+          if (!merged.includes(d)) {
+            merged.push(d);
+          }
+        });
+        return merged;
+      }
     } catch {}
   }
-  return ["خزنة الشركة", "خزنة التحصيل"];
+  return defaults;
 };
 
 export const Installments: React.FC<InstallmentsProps> = ({
