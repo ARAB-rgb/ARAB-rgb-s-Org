@@ -1,0 +1,249 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Authorized employee profile with fine-grained visual permissions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "code": { "type": "string" },
+        "password": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "employee"] },
+        "worker_id": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "perms": {
+          "type": "object",
+          "properties": {
+            "region": { "type": "string" },
+            "installmentsView": { "type": "boolean" },
+            "installmentsAdd": { "type": "boolean" },
+            "installmentsEdit": { "type": "boolean" },
+            "installmentsDelete": { "type": "boolean" },
+            "quotes": { "type": "boolean" },
+            "receipts": { "type": "boolean" },
+            "payments": { "type": "boolean" },
+            "expenses": { "type": "boolean" },
+            "treasury": { "type": "boolean" },
+            "projects": { "type": "boolean" },
+            "workers": { "type": "boolean" },
+            "users": { "type": "boolean" },
+            "sessions": { "type": "boolean" },
+            "print": { "type": "boolean" },
+            "dashTopCards": { "type": "boolean" },
+            "dashCollection": { "type": "boolean" },
+            "dashPulse": { "type": "boolean" },
+            "dashLateClients": { "type": "boolean" },
+            "dashLastReceipts": { "type": "boolean" },
+            "dashUpcomingPaid": { "type": "boolean" }
+          }
+        }
+      },
+      "required": ["id", "name", "code", "role"]
+    },
+    "Installment": {
+      "title": "Installment",
+      "description": "Installment contracts detailing total amounts, paid schedules, and target regions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "client": { "type": "string" },
+        "identity": { "type": "string" },
+        "nationality": { "type": "string" },
+        "phone": { "type": "string" },
+        "no": { "type": "string" },
+        "amount": { "type": "number" },
+        "paid": { "type": "number" },
+        "remaining": { "type": "number" },
+        "type": { "type": "string", "enum": ["daily"] },
+        "start_date": { "type": "string" },
+        "end_date": { "type": "string" },
+        "next_due": { "type": "string" },
+        "periods": { "type": "number" },
+        "installment": { "type": "number" },
+        "discount": { "type": "number" },
+        "after_discount": { "type": "number" },
+        "project": { "type": "string" },
+        "workplace": { "type": "string" },
+        "guarantor": { "type": "string" },
+        "status": { "type": "string", "enum": ["منتظم", "متأخر", "متعثر", "مكتمل"] },
+        "notes": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "client", "identity", "phone", "no", "amount", "paid", "remaining"]
+    },
+    "Quote": {
+      "title": "Quote",
+      "description": "Sales quotes sent to clients, requiring status and financial breakdown",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "no": { "type": "string" },
+        "client": { "type": "string" },
+        "phone": { "type": "string" },
+        "project": { "type": "string" },
+        "amount": { "type": "number" },
+        "vat": { "type": "number" },
+        "total": { "type": "number" },
+        "date": { "type": "string" },
+        "status": { "type": "string", "enum": ["جديد", "مرسل", "مقبول", "مرفوض"] },
+        "notes": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "no", "client", "amount"]
+    },
+    "Receipt": {
+      "title": "Receipt",
+      "description": "Receipt vouchers verifying client payments on installments",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "no": { "type": "string" },
+        "from_name": { "type": "string" },
+        "amount": { "type": "number" },
+        "method": { "type": "string" },
+        "date": { "type": "string" },
+        "project": { "type": "string" },
+        "notes": { "type": "string" },
+        "installment_id": { "type": "string" },
+        "contract_no": { "type": "string" },
+        "identity": { "type": "string" },
+        "phone": { "type": "string" },
+        "nationality": { "type": "string" },
+        "remaining_before": { "type": "number" },
+        "remaining_after": { "type": "number" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "no", "from_name", "amount", "method", "date"]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "Payment outflow voucher",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "no": { "type": "string" },
+        "to_name": { "type": "string" },
+        "amount": { "type": "number" },
+        "method": { "type": "string" },
+        "date": { "type": "string" },
+        "project": { "type": "string" },
+        "notes": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "no", "to_name", "amount", "method", "date"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Operational and materials expenses",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "no": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string", "enum": ["مواد", "عمالة", "نقل", "إيجار", "وقود", "أخرى"] },
+        "amount": { "type": "number" },
+        "date": { "type": "string" },
+        "project": { "type": "string" },
+        "supplier": { "type": "string" },
+        "notes": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "no", "name", "category", "amount", "date"]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "Project profiles detailing building coordinates and budget guidelines",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "location": { "type": "string" },
+        "engineer": { "type": "string" },
+        "budget": { "type": "number" },
+        "start_date": { "type": "string" },
+        "end_date": { "type": "string" },
+        "progress": { "type": "number" },
+        "status": { "type": "string", "enum": ["نشط", "متوقف", "منتهي"] },
+        "notes": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "status"]
+    },
+    "Worker": {
+      "title": "Worker",
+      "description": "Laborer registry and historical advance notes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "worker_id": { "type": "string" },
+        "phone": { "type": "string" },
+        "job": { "type": "string", "enum": ["حداد", "نجار", "كهربائي", "سباك", "عامل", "مشرف"] },
+        "project": { "type": "string" },
+        "daily": { "type": "number" },
+        "days": { "type": "number" },
+        "advance": { "type": "number" },
+        "total": { "type": "number" },
+        "balance": { "type": "number" },
+        "status": { "type": "string", "enum": ["على رأس العمل", "إجازة", "موقوف"] },
+        "notes": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "worker_id", "job", "status"]
+    },
+    "DbSession": {
+      "title": "DbSession",
+      "description": "Audit and trace logs for system state transformations",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "code": { "type": "string" },
+        "role": { "type": "string" },
+        "time": { "type": "string" },
+        "action": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "code", "role", "time", "action"]
+    }
+  },
+  "firestore": {
+    "users": {
+      "schema": "User",
+      "description": "ERP permissions and users"
+    },
+    "installments": {
+      "schema": "Installment",
+      "description": "Contracts and payments schedule"
+    },
+    "quotes": {
+      "schema": "Quote",
+      "description": "Client proposals"
+    },
+    "receipts": {
+      "schema": "Receipt",
+      "description": "Receipt vouchers"
+    },
+    "payments": {
+      "schema": "Payment",
+      "description": "Outgoing payments"
+    },
+    "expenses": {
+      "schema": "Expense",
+      "description": "Company material and logistics expenses"
+    },
+    "projects": {
+      "schema": "Project",
+      "description": "Construction and field projects"
+    },
+    "workers": {
+      "schema": "Worker",
+      "description": "Worker logs, salary parameters, and advances"
+    },
+    "sessions": {
+      "schema": "DbSession",
+      "description": "Audit logging data"
+    }
+  }
+}

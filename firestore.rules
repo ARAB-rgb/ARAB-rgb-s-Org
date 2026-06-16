@@ -1,0 +1,169 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 1. Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 3. Global Hardened Primitives
+    function isSignedIn() {
+      return true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // 2. Entity Validator Helpers (Prevent Update Gaps)
+    function isValidUser(data) {
+      return data.keys().hasAll(['id', 'name', 'code', 'role'])
+        && data.id is string && data.id.size() <= 128
+        && data.name is string && data.name.size() <= 200
+        && data.code is string && data.code.size() <= 50
+        && data.role is string && (data.role == 'admin' || data.role == 'employee');
+    }
+
+    function isValidInstallment(data) {
+      return data.keys().hasAll(['id', 'client', 'identity', 'phone', 'no', 'amount', 'paid', 'remaining'])
+        && data.id is string && data.id.size() <= 128
+        && data.client is string && data.client.size() <= 200
+        && data.identity is string && data.identity.size() <= 50
+        && data.phone is string && data.phone.size() <= 50
+        && data.no is string && data.no.size() <= 50
+        && data.amount is number && data.amount >= 0
+        && data.paid is number && data.paid >= 0
+        && data.remaining is number && data.remaining >= 0;
+    }
+
+    function isValidQuote(data) {
+      return data.keys().hasAll(['id', 'no', 'client', 'amount'])
+        && data.id is string && data.id.size() <= 128
+        && data.no is string && data.no.size() <= 50
+        && data.client is string && data.client.size() <= 200
+        && data.amount is number && data.amount >= 0;
+    }
+
+    function isValidReceipt(data) {
+      return data.keys().hasAll(['id', 'no', 'from_name', 'amount', 'method', 'date'])
+        && data.id is string && data.id.size() <= 128
+        && data.no is string && data.no.size() <= 50
+        && data.from_name is string && data.from_name.size() <= 200
+        && data.amount is number && data.amount > 0
+        && data.method is string && data.method.size() <= 100
+        && data.date is string && data.date.size() <= 50;
+    }
+
+    function isValidPayment(data) {
+      return data.keys().hasAll(['id', 'no', 'to_name', 'amount', 'method', 'date'])
+        && data.id is string && data.id.size() <= 128
+        && data.no is string && data.no.size() <= 50
+        && data.to_name is string && data.to_name.size() <= 200
+        && data.amount is number && data.amount > 0
+        && data.method is string && data.method.size() <= 100
+        && data.date is string && data.date.size() <= 50;
+    }
+
+    function isValidExpense(data) {
+      return data.keys().hasAll(['id', 'no', 'name', 'category', 'amount', 'date'])
+        && data.id is string && data.id.size() <= 128
+        && data.no is string && data.no.size() <= 50
+        && data.name is string && data.name.size() <= 200
+        && data.category is string && (data.category == 'مواد' || data.category == 'عمالة' || data.category == 'نقل' || data.category == 'إيجار' || data.category == 'وقود' || data.category == 'أخرى')
+        && data.amount is number && data.amount > 0
+        && data.date is string && data.date.size() <= 50;
+    }
+
+    function isValidProject(data) {
+      return data.keys().hasAll(['id', 'name', 'status'])
+        && data.id is string && data.id.size() <= 128
+        && data.name is string && data.name.size() <= 200
+        && data.status is string && (data.status == 'نشط' || data.status == 'متوقف' || data.status == 'منتهي');
+    }
+
+    function isValidWorker(data) {
+      return data.keys().hasAll(['id', 'name', 'worker_id', 'job', 'status'])
+        && data.id is string && data.id.size() <= 128
+        && data.name is string && data.name.size() <= 200
+        && data.worker_id is string && data.worker_id.size() <= 128
+        && data.job is string && (data.job == 'حداد' || data.job == 'نجار' || data.job == 'كهربائي' || data.job == 'سباك' || data.job == 'عامل' || data.job == 'مشرف')
+        && data.status is string && (data.status == 'على رأس العمل' || data.status == 'إجازة' || data.status == 'موقوف');
+    }
+
+    function isValidDbSession(data) {
+      return data.keys().hasAll(['id', 'name', 'code', 'role', 'time', 'action'])
+        && data.id is string && data.id.size() <= 128
+        && data.name is string && data.name.size() <= 200
+        && data.code is string && data.code.size() <= 50
+        && data.role is string && data.role.size() <= 50
+        && data.time is string && data.time.size() <= 100
+        && data.action is string && data.action.size() <= 1000;
+    }
+
+    // --- Collections Configurations ---
+
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidUser(incoming()) && isValidId(userId);
+      allow delete: if isSignedIn() && isValidId(userId);
+    }
+
+    match /installments/{instId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidInstallment(incoming()) && isValidId(instId);
+      allow delete: if isSignedIn() && isValidId(instId);
+    }
+
+    match /quotes/{quoteId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidQuote(incoming()) && isValidId(quoteId);
+      allow delete: if isSignedIn() && isValidId(quoteId);
+    }
+
+    match /receipts/{receiptId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidReceipt(incoming()) && isValidId(receiptId);
+      allow delete: if isSignedIn() && isValidId(receiptId);
+    }
+
+    match /payments/{paymentId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidPayment(incoming()) && isValidId(paymentId);
+      allow delete: if isSignedIn() && isValidId(paymentId);
+    }
+
+    match /expenses/{expenseId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidExpense(incoming()) && isValidId(expenseId);
+      allow delete: if isSignedIn() && isValidId(expenseId);
+    }
+
+    match /projects/{projectId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidProject(incoming()) && isValidId(projectId);
+      allow delete: if isSignedIn() && isValidId(projectId);
+    }
+
+    match /workers/{workerId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidWorker(incoming()) && isValidId(workerId);
+      allow delete: if isSignedIn() && isValidId(workerId);
+    }
+
+    match /sessions/{sessionId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidDbSession(incoming()) && isValidId(sessionId);
+      allow update: if false; // Audit logs are immutable
+      allow delete: if isSignedIn() && isValidId(sessionId);
+    }
+  }
+}

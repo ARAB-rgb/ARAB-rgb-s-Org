@@ -864,7 +864,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
                 <th className="py-3 px-4 font-black">المستلم</th>
                 <th className="py-3 px-4 font-black">المتبقي</th>
                 <th className="py-3 px-4 font-black">الحالة</th>
-                <th className="py-3 px-4 font-black text-center">فتح الملف</th>
+                <th className="py-3 px-4 font-black text-center">الإجراءات</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-850/30">
@@ -920,12 +920,28 @@ export const Installments: React.FC<InstallmentsProps> = ({
                         </span>
                       </td>
                       <td className="py-3.5 px-4 text-center">
-                        <button
-                          onClick={() => setSelectedFileContract(item)}
-                          className="px-3 py-1.5 bg-slate-950/40 border border-slate-800 text-xs font-bold text-blue-400 hover:text-white rounded-lg hover:bg-blue-600/25 transition-all"
-                        >
-                          فتح الملف
-                        </button>
+                        <div className="flex items-center justify-center gap-2">
+                          <button
+                            onClick={() => setSelectedFileContract(item)}
+                            className="px-3 py-1.5 bg-slate-950/40 border border-slate-800 text-xs font-bold text-blue-400 hover:text-white rounded-lg hover:bg-blue-600/25 transition-all cursor-pointer whitespace-nowrap"
+                            title="فتح ملف العقد"
+                          >
+                            فتح الملف
+                          </button>
+                          {(currentUser?.role === "admin" || currentUser?.perms?.installmentsDelete) && (
+                            <button
+                              onClick={() => {
+                                if (confirm(`هل أنت متأكد من حذف العقد الخاص بـ (${item.client}) ورقم العقد (${item.no}) بشكل نهائي؟ لا يمكن التراجع عن هذا الإجراء!`)) {
+                                  onDeleteInstallment(item.id);
+                                }
+                              }}
+                              className="p-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/20 rounded-lg transition-all cursor-pointer"
+                              title="حذف العقد"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );

@@ -15,7 +15,8 @@ import {
   sb, logSession, getContractTiming, awExtractRegion, awCleanNotes,
   awBuildNotesWithRegion, awBuildNotesWithRegionAndTreasury, awBuildNotesWithRegionAndTreasuryAndCapital, awExtractTreasury, awExtractCapital, generateNextNo,
   awExtractCapitalSource, awExtractCapitalCompany, awExtractCapitalCollection,
-  awExtractWorkerContract, awExtractWorkerLeaves, awBuildWorkerNotes, awCleanWorkerNotes
+  awExtractWorkerContract, awExtractWorkerLeaves, awBuildWorkerNotes, awCleanWorkerNotes,
+  getSupabaseCredentials, saveSupabaseCredentials, checkSupabaseHealth
 } from "./db";
 
 import { Toast, ToastItem, ToastType } from "./components/Shared/Toast";
@@ -65,7 +66,7 @@ export default function App() {
   // Alert Notifications
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const showToast = (message: string, type: ToastType = "success") => {
-    const id = Date.now().toString();
+    const id = Date.now().toString() + "-" + Math.random().toString(36).substring(2, 7);
     setToasts((prev) => [...prev, { id, message, type }]);
     setTimeout(() => {
       removeToast(id);
@@ -95,6 +96,13 @@ export default function App() {
   const [editWorkerId, setEditWorkerId] = useState<string | null>(null);
   const [editUserId, setEditUserId] = useState<string | null>(null);
   const [selfSelectedWorkerId, setSelfSelectedWorkerId] = useState<string>("");
+
+  // Supabase Dynamic Integration Settings
+  const [sbUrl, setSbUrl] = useState("");
+  const [sbKey, setSbKey] = useState("");
+  const [sbStatus, setSbStatus] = useState<"checking" | "connected" | "fallback">("checking");
+  const [sbTesting, setSbTesting] = useState(false);
+  const [sbConfigExpanded, setSbConfigExpanded] = useState(false);
 
   // Forms Hooks
   // 1. Quotes Forms
@@ -295,6 +303,64 @@ export default function App() {
       }
     } catch {
       showToast("تنبيه: فشل في الاتصال بقاعدة البيانات", "error");
+    }
+  };
+
+  // Load current Supabase credentials and health on mount
+  useEffect(() => {
+    const creds = getSupabaseCredentials();
+    setSbUrl(creds.url);
+    setSbKey(creds.key);
+    
+    checkSupabaseHealth().then((healthy) => {
+      setSbStatus(healthy ? "connected" : "fallback");
+    });
+  }, []);
+
+  const testAndSaveSupabaseStatus = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSbTesting(true);
+    try {
+      const isOk = await saveSupabaseCredentials(sbUrl, sbKey);
+      if (isOk) {
+        setSbStatus("connected");
+        showToast("🟢 تم الاتصال بقاعدة Supabase بنجاح! تم حفظ البيانات وتفعيلها بنشاط.", "success");
+        if (currentUser) {
+          loadEverything();
+        }
+      } else {
+        setSbStatus("fallback");
+        showToast("⚠️ لم نتمكن من الاتصال بـ Supabase (قد يكون بسبب حصة الاستهلاك أو كود خاطئ). مستمرون عبر Firestore كخلفية متينة.", "info");
+      }
+    } catch (err: any) {
+      setSbStatus("fallback");
+      showToast("❌ خطأ في الاتصال: " + (err.message || err), "error");
+    } finally {
+      setSbTesting(false);
+    }
+  };
+
+  const restoreSupabaseDefaultStatus = async () => {
+    setSbTesting(true);
+    try {
+      const isOk = await saveSupabaseCredentials("", "");
+      const creds = getSupabaseCredentials();
+      setSbUrl(creds.url);
+      setSbKey(creds.key);
+      if (isOk) {
+        setSbStatus("connected");
+        showToast("🟢 تم استعادة إعدادات الاتصال الافتراضية بنجاح!", "success");
+      } else {
+        setSbStatus("fallback");
+        showToast("⚠️ السيرفر الافتراضي تخطى الحدود. تم تفعيل نظام Firestore الاحتياطي تلقائياً.", "info");
+      }
+      if (currentUser) {
+        loadEverything();
+      }
+    } catch {
+      showToast("❌ فشل في الاستعادة لمعايير النظام الافتراضية", "error");
+    } finally {
+      setSbTesting(false);
     }
   };
 
@@ -1939,6 +2005,7 @@ td{border:1px solid #d8dee9;padding:8px;text-align:center;font-weight:600}
                     <input placeholder="بحث في سندات القبض..." value={rSearch} onChange={(e) => setRSearch(e.target.value)} className="px-4 py-2 bg-slate-950/60 border border-slate-800 rounded-xl text-xs font-bold text-white w-full md:w-64" />
                     <select value={rSort} onChange={(e) => setRSort(e.target.value)} className="px-4 py-2 bg-slate-950/60 border border-slate-800 rounded-xl text-xs font-bold text-white">
                       <option value="date_desc">الأحدث أولاً</option>
+                      <option value="name_asc">الاسم (من أ إلى ي)</option>
                       <option value="amount_desc">الأعلى ماليًا</option>
                       <option value="amount_asc">الأقل ماليًا</option>
                     </select>
@@ -1971,6 +2038,11 @@ td{border:1px solid #d8dee9;padding:8px;text-align:center;font-weight:600}
                           return !query || text.includes(query);
                         })
                         .sort((a, b) => {
+                          if (rSort === "name_asc") {
+                            const nameCompare = String(a.from_name || "").localeCompare(String(b.from_name || ""), "ar");
+                            if (nameCompare !== 0) return nameCompare;
+                            return String(b.date || "").localeCompare(String(a.date || ""));
+                          }
                           if (rSort === "amount_desc") return Number(b.amount || 0) - Number(a.amount || 0);
                           if (rSort === "amount_asc") return Number(a.amount || 0) - Number(b.amount || 0);
                           return String(b.date).localeCompare(String(a.date));
@@ -2659,6 +2731,223 @@ td{border:1px solid #d8dee9;padding:8px;text-align:center;font-weight:600}
           {/* Secure permissions and User configuration block */}
           {activeSection === "users" && (currentUser?.role === "admin" || can("users")) && (
             <div className="space-y-6">
+              {/* Supabase Connection Setup Card */}
+              <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl space-y-5">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-850 pb-4 gap-3">
+                  <div>
+                    <h3 className="text-base font-black text-white flex items-center gap-2">
+                      <span className="text-amber-500">⚡</span>
+                      <span>ربط ومزامنة قاعدة بيانات Supabase الخارجية</span>
+                    </h3>
+                    <p className="text-[10px] text-slate-400 font-bold mt-1">
+                      تمكين المزامنة السحابية للنسخ الاحتياطي لجميع فروع ومكاتب الشركة.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {sbStatus === "connected" ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-md shadow-emerald-500/5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        Supabase متصل ونشط
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black bg-amber-500/10 text-amber-400 border border-amber-500/20 shadow-md shadow-amber-500/5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                        Firestore نشط كبديل آمن
+                      </span>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => setSbConfigExpanded(!sbConfigExpanded)}
+                      className="px-3.5 py-1.5 rounded-xl text-[11px] font-black transition-all border border-slate-700 bg-slate-800/80 hover:bg-slate-750 text-white flex items-center gap-1 cursor-pointer"
+                    >
+                      {sbConfigExpanded ? "🙈 إخفاء تفاصيل الربط" : "⚙️ إدارة ربط قاعدة البيانات"}
+                    </button>
+                  </div>
+                </div>
+
+                {sbConfigExpanded && (
+                  <div className="space-y-5 pt-1">
+                    <form onSubmit={testAndSaveSupabaseStatus} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-1 md:col-span-2">
+                        <p className="text-xs text-slate-300 leading-relaxed">
+                          البرنامج مهيأ بميزة <b>المزامنة الهجينة التلقائية</b>. في حال واجهت قاعدة بيانات Supabase أي قيود أو تخطي في باقة الاستهلاك (Egress Exceeded)، يقوم التطبيق تلقائياً وبكل سلاسة بحفظ واسترجاع كافة البيانات عبر قاعدة <b>Firebase Firestore</b> المؤمنة والبديلة، مما يضمن أن عملك وعمل فروعك لا يتوقف أبداً!
+                        </p>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-slate-400 font-black block">رابط مشروع Supabase (API URL)</label>
+                        <input
+                          required
+                          type="url"
+                          placeholder="https://your-project.supabase.co"
+                          value={sbUrl}
+                          onChange={(e) => setSbUrl(e.target.value)}
+                          className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 font-sans"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-slate-400 font-black block">مفتاح المشروع (Public Anon Key)</label>
+                        <input
+                          required
+                          type="password"
+                          placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..."
+                          value={sbKey}
+                          onChange={(e) => setSbKey(e.target.value)}
+                          className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 font-sans"
+                        />
+                      </div>
+
+                      <div className="md:col-span-2 flex flex-wrap justify-between items-center pt-2 gap-3 border-t border-slate-850/60">
+                        <div className="text-[10px] text-slate-500">
+                          * اضغط استعادة الإعدادات في حال رغبت بالرجوع للبيانات الافتراضية للشركة.
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={restoreSupabaseDefaultStatus}
+                            disabled={sbTesting}
+                            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 rounded-xl text-xs font-black transition-colors"
+                          >
+                            استعادة الافتراضي
+                          </button>
+                          <button
+                            type="submit"
+                            disabled={sbTesting}
+                            className="px-5 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 shadow-lg shadow-amber-500/10"
+                          >
+                            {sbTesting ? (
+                              <>
+                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                جاري فحص الاتصال...
+                              </>
+                            ) : (
+                              <>
+                                <span>💾</span>
+                                حفظ وتفعيل الاتصال
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    </form>
+
+                    {/* Database Tables Setup Helper */}
+                    <div className="bg-slate-950/30 p-4 rounded-2xl border border-slate-800/80 space-y-3">
+                      <h4 className="text-xs font-black text-indigo-400 flex items-center gap-1 pb-1">
+                        <span>💡</span>
+                        <span>خطوات إعداد جداول Supabase في حسابك الخاص:</span>
+                      </h4>
+                      <p className="text-[10.5px] text-slate-400 leading-relaxed font-medium">
+                        إذا قمت بإنشاء مشروع Supabase جديد، يمكنك تهيئة الجداول فوراً وبكبسة زر واحدة. تفضل بالذهاب إلى <b>SQL Editor</b> في لوحة تحكم Supabase الخاصة بك، والصق الكود التالي لإنشاء الجداول اللازمة لتهيئة النظام بشكل فوري:
+                      </p>
+                      <pre className="p-3 bg-slate-950 rounded-xl text-[9px] text-emerald-400/90 font-mono overflow-x-auto max-h-48 border border-white/5 select-all leading-normal" dir="ltr">
+{`-- SQL لإنشاء جداول النظام وتفعيلها فوراً في Supabase
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  name TEXT,
+  code TEXT UNIQUE,
+  password TEXT,
+  role TEXT,
+  perms JSONB,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS installments (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  buyer_name TEXT,
+  buyer_phone TEXT,
+  national_id TEXT,
+  guarantor_name TEXT,
+  guarantor_phone TEXT,
+  guarantor_national_id TEXT,
+  ref_no TEXT UNIQUE,
+  amount_with_interest NUMERIC,
+  amount_paid NUMERIC DEFAULT 0,
+  months INT,
+  is_approved BOOLEAN DEFAULT false,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS quotes (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  client TEXT,
+  phone TEXT,
+  project TEXT,
+  amount NUMERIC,
+  vat NUMERIC DEFAULT 15,
+  status TEXT DEFAULT 'جديد',
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS receipts (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  installment_id TEXT,
+  ref_no TEXT,
+  buyer_name TEXT,
+  amount NUMERIC,
+  method TEXT,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS payments (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  payment_to TEXT,
+  ref_no TEXT,
+  amount NUMERIC,
+  method TEXT,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS expenses (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  category TEXT,
+  amount NUMERIC,
+  notes TEXT,
+  receiver TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  name TEXT,
+  manager TEXT,
+  budget NUMERIC,
+  status TEXT DEFAULT 'تحت التنفيذ',
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS workers (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  worker_id TEXT UNIQUE,
+  name TEXT,
+  job TEXT,
+  salary NUMERIC,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  user_id TEXT,
+  user_name TEXT,
+  event TEXT,
+  action_type TEXT,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);`}
+                      </pre>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <form onSubmit={saveUserLogic} className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl space-y-6">
                 <div className="border-b border-slate-850 pb-3">
                   <h3 className="text-base font-black text-white flex items-center gap-2"><span>👤</span> تهيئة الصلاحيات الإدارية وربط حساب الموظفين</h3>
