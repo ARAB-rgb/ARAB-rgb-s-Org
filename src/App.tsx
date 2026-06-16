@@ -2079,7 +2079,14 @@ td{border:1px solid #d8dee9;padding:8px;text-align:center;font-weight:600}
                         })
                         .map((r, idx) => (
                           <tr key={idx} className="border-b border-slate-850 hover:bg-slate-800/10 transition-colors">
-                            <td className="py-3 px-3 font-mono font-bold text-slate-300">{r.no}</td>
+                            <td className="py-3 px-3 font-mono">
+                              {awExtractExternalNo(r.notes || "") && (
+                                <span className="block text-[11px] text-emerald-300 font-sans font-extrabold bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-500/40 mb-1 w-max">
+                                  📄 سند خارجي: {awExtractExternalNo(r.notes || "")}
+                                </span>
+                              )}
+                              <span className="block font-bold text-slate-300">{r.no}</span>
+                            </td>
                             <td className="py-3 px-3 font-mono text-slate-400">{r.date}</td>
                             <td className="py-3 px-3 font-black text-white">{r.from_name}</td>
                             <td className="py-3 px-3 font-mono">
@@ -2087,9 +2094,6 @@ td{border:1px solid #d8dee9;padding:8px;text-align:center;font-weight:600}
                               <div className="flex flex-wrap gap-1.5 items-center mt-0.5">
                                 <span className="text-[9px] text-amber-500 font-sans font-extrabold">{awExtractRegion(r.notes || "")}</span>
                                 <span className="text-[9px] text-cyan-400 font-sans font-extrabold bg-cyan-950/45 px-1.5 py-0.5 rounded border border-cyan-850">🏦 {awExtractTreasury(r.notes || "") || "خزنة التحصيل"}</span>
-                                {awExtractExternalNo(r.notes || "") && (
-                                  <span className="text-[9px] text-emerald-400 font-sans font-extrabold bg-emerald-950/45 px-1.5 py-0.5 rounded border border-emerald-850">📄 {awExtractExternalNo(r.notes || "")}</span>
-                                )}
                               </div>
                             </td>
                             <td className="py-3 px-3 font-black text-emerald-400 font-mono">+{Number(r.amount || 0).toLocaleString()} ريال</td>
