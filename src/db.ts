@@ -489,6 +489,13 @@ export function awExtractTreasury(notes: string): string {
   return "";
 }
 
+export function awExtractExternalNo(notes: string): string {
+  const text = String(notes || "");
+  const m1 = text.match(/\[السند_الخارجي:\s*([^\]]+)\]/);
+  if (m1) return m1[1].trim();
+  return "";
+}
+
 export function awExtractCapital(notes: string): number {
   const text = String(notes || "");
   const m1 = text.match(/\[رأس_المال:\s*(\d+(\.\d+)?)\]/);
@@ -534,6 +541,7 @@ export function awCleanNotes(notes: string): string {
     .replace(/\s*\[رأس_المال_المصدر:\s*[^\]]+\]\s*/g, " ")
     .replace(/\s*\[رأس_المال_شركة:\s*[^\]]+\]\s*/g, " ")
     .replace(/\s*\[رأس_المال_تحصيل:\s*[^\]]+\]\s*/g, " ")
+    .replace(/\s*\[السند_الخارجي:\s*[^\]]+\]\s*/g, " ")
     .replace(/\s*\[\[?AW_BRANCH:\s*[^\]\s]+\]?\]\s*/gi, " ")
     .trim();
 }
@@ -549,6 +557,17 @@ export function awBuildNotesWithRegionAndTreasury(notes: string, region: string,
   let extraArr = [];
   if (region) extraArr.push(`[الإدارة: ${region}]`);
   if (treasury) extraArr.push(`[الخزنة: ${treasury}]`);
+  
+  if (extraArr.length === 0) return clean;
+  return extraArr.join(" ") + (clean ? "\n" : "") + clean;
+}
+
+export function awBuildNotesWithRegionAndTreasuryAndExternalNo(notes: string, region: string, treasury: string, externalNo: string): string {
+  const clean = awCleanNotes(notes);
+  let extraArr = [];
+  if (region) extraArr.push(`[الإدارة: ${region}]`);
+  if (treasury) extraArr.push(`[الخزنة: ${treasury}]`);
+  if (externalNo && externalNo.trim()) extraArr.push(`[السند_الخارجي: ${externalNo.trim()}]`);
   
   if (extraArr.length === 0) return clean;
   return extraArr.join(" ") + (clean ? "\n" : "") + clean;

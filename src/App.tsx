@@ -16,7 +16,8 @@ import {
   awBuildNotesWithRegion, awBuildNotesWithRegionAndTreasury, awBuildNotesWithRegionAndTreasuryAndCapital, awExtractTreasury, awExtractCapital, generateNextNo,
   awExtractCapitalSource, awExtractCapitalCompany, awExtractCapitalCollection,
   awExtractWorkerContract, awExtractWorkerLeaves, awBuildWorkerNotes, awCleanWorkerNotes,
-  getSupabaseCredentials, saveSupabaseCredentials, checkSupabaseHealth
+  getSupabaseCredentials, saveSupabaseCredentials, checkSupabaseHealth,
+  awExtractExternalNo, awBuildNotesWithRegionAndTreasuryAndExternalNo
 } from "./db";
 
 import { Toast, ToastItem, ToastType } from "./components/Shared/Toast";
@@ -123,6 +124,8 @@ export default function App() {
   const [rDate, setRDate] = useState(new Date().toISOString().slice(0, 10));
   const [rProject, setRProject] = useState("");
   const [rNotes, setRNotes] = useState("");
+  const [rTreasury, setRTreasury] = useState("خزنة التحصيل");
+  const [rExternalNo, setRExternalNo] = useState("");
 
   // Search/Sort filters for receipts
   const [rSearch, setRSearch] = useState("");
@@ -145,6 +148,7 @@ export default function App() {
   const [eProject, setEProject] = useState("");
   const [eSupplier, setESupplier] = useState("");
   const [eNotes, setENotes] = useState("");
+  const [eTreasury, setETreasury] = useState("خزنة الشركة");
 
   // 5. Projects Forms
   const [pName, setPName] = useState("");
@@ -700,7 +704,7 @@ td{border:1px solid #d8dee9;padding:8px;text-align:center;font-weight:600}
     const afterAmt = linked ? Math.max(0, beforeAmt - amt) : 0;
 
     const rRegion = linked ? (awExtractRegion(linked.notes || "") || userRegionFilter) : userRegionFilter;
-    const notesAppended = awBuildNotesWithRegion(rNotes, rRegion);
+    const notesAppended = awBuildNotesWithRegionAndTreasuryAndExternalNo(rNotes, rRegion, rTreasury, rExternalNo);
 
     const row = {
       no: generateNextNo("AW-REC", receipts, "no"),
@@ -744,6 +748,8 @@ td{border:1px solid #d8dee9;padding:8px;text-align:center;font-weight:600}
       setRAmount("");
       setRProject("");
       setRNotes("");
+      setRTreasury("خزنة التحصيل");
+      setRExternalNo("");
       await loadEverything();
       showToast("تم حفظ السند وتحديث العقد التابع بنجاح!");
     } catch {
@@ -831,7 +837,7 @@ td{border:1px solid #d8dee9;padding:8px;text-align:center;font-weight:600}
       date: eDate,
       project: eProject.trim(),
       supplier: eSupplier.trim(),
-      notes: awBuildNotesWithRegion(eNotes, userRegionFilter),
+      notes: awBuildNotesWithRegionAndTreasury(eNotes, userRegionFilter, eTreasury),
     };
 
     setIsLoading(true);
@@ -853,6 +859,7 @@ td{border:1px solid #d8dee9;padding:8px;text-align:center;font-weight:600}
       setEProject("");
       setESupplier("");
       setENotes("");
+      setETreasury("خزنة الشركة");
       await loadEverything();
       showToast("تم توثيق المصروف في الدفتر المالي!");
     } catch {
@@ -1975,6 +1982,29 @@ td{border:1px solid #d8dee9;padding:8px;text-align:center;font-weight:600}
                   </div>
 
                   <div className="space-y-1">
+                    <label className="text-[10px] font-black text-amber-500">الخزنة المستهدفة بالقيد</label>
+                    <select
+                      value={rTreasury}
+                      onChange={(e) => setRTreasury(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 transition-colors cursor-pointer bg-slate-950"
+                    >
+                      {getStoredTreasuries().map((tName) => (
+                        <option key={tName} value={tName} className="bg-slate-950 text-white">💰 {tName}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-emerald-400">رقم السند الخارجي</label>
+                    <input
+                      placeholder="رقم السند الخارجي (إن وُجد)"
+                      value={rExternalNo}
+                      onChange={(e) => setRExternalNo(e.target.value)}
+                      className="w-full px-3 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-emerald-500 transition-colors"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
                     <label className="text-[10px] font-black text-slate-400">ماتبقى من العقد (قبل القبض)</label>
                     <input readOnly value={rSelectedInstallment ? `${Number(rSelectedInstallment.remaining).toLocaleString()} ريال` : "غير مرتبط"} className="w-full px-3 py-2.5 bg-slate-950/70 border border-slate-800 rounded-xl text-xs font-bold text-slate-400" />
                   </div>
@@ -1992,7 +2022,7 @@ td{border:1px solid #d8dee9;padding:8px;text-align:center;font-weight:600}
 
                 <div className="flex gap-2 justify-end">
                   {editReceiptId && (
-                    <button type="button" onClick={() => { setEditReceiptId(null); setRContractQuery(""); setRSelectedInstallment(null); setRFrom(""); setRAmount(""); setRProject(""); setRNotes(""); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
+                    <button type="button" onClick={() => { setEditReceiptId(null); setRContractQuery(""); setRSelectedInstallment(null); setRFrom(""); setRAmount(""); setRProject(""); setRNotes(""); setRTreasury("خزنة التحصيل"); setRExternalNo(""); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
                   )}
                   <button type="submit" className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black">{editReceiptId ? "استبدال السند" : "حفظ وقيد سند القبض ماليًا"}</button>
                 </div>
@@ -2054,7 +2084,13 @@ td{border:1px solid #d8dee9;padding:8px;text-align:center;font-weight:600}
                             <td className="py-3 px-3 font-black text-white">{r.from_name}</td>
                             <td className="py-3 px-3 font-mono">
                               <span className="block">{r.contract_no || "عام"}</span>
-                              <span className="block text-[9px] text-amber-500 font-sans font-bold">{awExtractRegion(r.notes || "")}</span>
+                              <div className="flex flex-wrap gap-1.5 items-center mt-0.5">
+                                <span className="text-[9px] text-amber-500 font-sans font-extrabold">{awExtractRegion(r.notes || "")}</span>
+                                <span className="text-[9px] text-cyan-400 font-sans font-extrabold bg-cyan-950/45 px-1.5 py-0.5 rounded border border-cyan-850">🏦 {awExtractTreasury(r.notes || "") || "خزنة التحصيل"}</span>
+                                {awExtractExternalNo(r.notes || "") && (
+                                  <span className="text-[9px] text-emerald-400 font-sans font-extrabold bg-emerald-950/45 px-1.5 py-0.5 rounded border border-emerald-850">📄 {awExtractExternalNo(r.notes || "")}</span>
+                                )}
+                              </div>
                             </td>
                             <td className="py-3 px-3 font-black text-emerald-400 font-mono">+{Number(r.amount || 0).toLocaleString()} ريال</td>
                             <td className="py-3 px-3 font-black text-slate-300 font-mono">{Number(r.remaining_after || 0).toLocaleString()} ريال</td>
@@ -2063,7 +2099,7 @@ td{border:1px solid #d8dee9;padding:8px;text-align:center;font-weight:600}
                               {awCleanNotes(r.notes || "")}
                             </td>
                             <td className="py-3 px-3 text-center space-x-1">
-                              <button onClick={() => { setEditReceiptId(r.id); handleAutoFillReceipt(r.contract_no || ""); setRFrom(r.from_name || ""); setRAmount(r.amount || ""); setRMethod(r.method || ""); setRDate(r.date || ""); setRProject(r.project || ""); setRNotes(awCleanNotes(r.notes || "")); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
+                              <button onClick={() => { setEditReceiptId(r.id); handleAutoFillReceipt(r.contract_no || ""); setRFrom(r.from_name || ""); setRAmount(r.amount || ""); setRMethod(r.method || ""); setRDate(r.date || ""); setRProject(r.project || ""); setRNotes(awCleanNotes(r.notes || "")); setRTreasury(awExtractTreasury(r.notes || "") || "خزنة التحصيل"); setRExternalNo(awExtractExternalNo(r.notes || "")); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
                               <button onClick={() => deleteReceiptLogic(r.id, r.installment_id)} className="p-1 text-rose-400 hover:text-rose-500"><Trash2 className="w-3.5 h-3.5" /></button>
                             </td>
                           </tr>
@@ -2096,7 +2132,7 @@ td{border:1px solid #d8dee9;padding:8px;text-align:center;font-weight:600}
                     <select
                       value={payTreasury}
                       onChange={(e) => setPayTreasury(e.target.value)}
-                      className="w-full px-3 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 transition-colors cursor-pointer bg-slate-955"
+                      className="w-full px-3 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 transition-colors cursor-pointer bg-slate-950"
                     >
                       {getStoredTreasuries().map((tName) => (
                         <option key={tName} value={tName} className="bg-slate-950 text-white">💰 {tName}</option>
@@ -2189,11 +2225,20 @@ td{border:1px solid #d8dee9;padding:8px;text-align:center;font-weight:600}
                   <input type="date" value={eDate} onChange={(e) => setEDate(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none" />
                   <input placeholder="المشروع التابع" value={eProject} onChange={(e) => setEProject(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none" />
                   <input placeholder="المورد أو المستفيد" value={eSupplier} onChange={(e) => setESupplier(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none" />
-                  <textarea placeholder="ملاحظات" value={eNotes} onChange={(e) => setENotes(e.target.value)} className="w-full px-3 py-1.5 h-[41px] bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white sm:col-span-2 focus:outline-none" />
+                  <select
+                    value={eTreasury}
+                    onChange={(e) => setETreasury(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none cursor-pointer bg-slate-950"
+                  >
+                    {getStoredTreasuries().map((tName) => (
+                      <option key={tName} value={tName} className="bg-slate-950 text-white">💰 {tName}</option>
+                    ))}
+                  </select>
+                  <textarea placeholder="ملاحظات" value={eNotes} onChange={(e) => setENotes(e.target.value)} className="w-full px-3 py-1.5 h-[41px] bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none" />
                 </div>
                 <div className="flex gap-2 justify-end">
                   {editExpenseId && (
-                    <button type="button" onClick={() => { setEditExpenseId(null); setEName(""); setEAmount(""); setEProject(""); setESupplier(""); setENotes(""); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
+                    <button type="button" onClick={() => { setEditExpenseId(null); setEName(""); setEAmount(""); setEProject(""); setESupplier(""); setENotes(""); setETreasury("خزنة الشركة"); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
                   )}
                   <button type="submit" className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-black">{editExpenseId ? "تعديل القيّد" : "قيد المصروف ماليًا"}</button>
                 </div>
@@ -2208,7 +2253,7 @@ td{border:1px solid #d8dee9;padding:8px;text-align:center;font-weight:600}
                       <th className="py-2.5 px-3 font-bold">اسم المصروف وفئته</th>
                       <th className="py-2.5 px-3 font-bold">المبلغ المدفوع</th>
                       <th className="py-2.5 px-3 font-bold">المورد والمشروع</th>
-                      <th className="py-2.5 px-3 font-bold">البيانات الإضافية</th>
+                      <th className="py-2.5 px-3 font-bold">البيانات الإضافية والمصدر</th>
                       <th className="py-2.5 px-3 font-bold text-center">إجراء</th>
                     </tr>
                   </thead>
@@ -2226,9 +2271,12 @@ td{border:1px solid #d8dee9;padding:8px;text-align:center;font-weight:600}
                           <span className="block font-bold text-slate-200">{e.supplier || "مورد كلي"}</span>
                           <span className="block text-[10px] text-slate-400 font-bold mt-0.5">{e.project}</span>
                         </td>
-                        <td className="py-3 px-3 text-slate-400 max-w-xs truncate">{awCleanNotes(e.notes || "")}</td>
+                        <td className="py-3 px-3">
+                          <span className="block text-slate-400 max-w-xs truncate">{awCleanNotes(e.notes || "")}</span>
+                          <span className="inline-block text-[9px] text-cyan-400 font-sans font-extrabold bg-cyan-950/45 px-1.5 py-0.5 rounded border border-cyan-850 mt-1">🏦 {awExtractTreasury(e.notes || "") || "خزنة الشركة"}</span>
+                        </td>
                         <td className="py-3 px-3 text-center space-x-1">
-                          <button onClick={() => { setEditExpenseId(e.id); setEName(e.name || ""); setECategory(e.category || ""); setEAmount(e.amount || ""); setEDate(e.date || ""); setEProject(e.project || ""); setESupplier(e.supplier || ""); setENotes(awCleanNotes(e.notes || "")); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => { setEditExpenseId(e.id); setEName(e.name || ""); setECategory(e.category || ""); setEAmount(e.amount || ""); setEDate(e.date || ""); setEProject(e.project || ""); setESupplier(e.supplier || ""); setENotes(awCleanNotes(e.notes || "")); setETreasury(awExtractTreasury(e.notes || "") || "خزنة الشركة"); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
                           <button onClick={() => { if(confirm("تأكيد الحذف؟")) { sb.from("expenses").delete().eq("id", e.id).then(() => loadEverything()); } }} className="p-1 text-rose-400 hover:text-rose-500"><Trash2 className="w-3.5 h-3.5" /></button>
                         </td>
                       </tr>
