@@ -1663,16 +1663,16 @@ td{border:1px solid #d8dee9;padding:8px;text-align:center;font-weight:600}
   const navigationItems = [
     { key: "dashboard", label: "الرئيسية", icon: Home, visible: true },
     { key: "my_profile", label: "ملفي الوظيفي والخدمات الذاتية", icon: User, visible: true },
-    { key: "installments", label: "التقسيط والعقود", icon: ClipboardList, visible: can("installmentsView") },
-    { key: "quotes", label: "عروض الأسعار", icon: FileText, visible: can("quotes") },
-    { key: "receipts", label: "سند قبض", icon: Landmark, visible: can("receipts") },
-    { key: "payments", label: "سند صرف", icon: TrendingUp, visible: can("payments") },
-    { key: "expenses", label: "المصروفات", icon: TrendingDown, visible: can("expenses") },
-    { key: "treasury", label: "الخزنة الفرعية", icon: Shield, visible: can("treasury") },
-    { key: "projects", label: "المشاريع الجارية", icon: Briefcase, visible: can("projects") },
-    { key: "workers", label: "العمال والسلفيات", icon: Users, visible: can("workers") },
-    { key: "users", label: "الموظفين والصلاحية", icon: Settings, visible: can("users") || currentUser?.role === "admin" },
-    { key: "sessions", label: "سجل حركات النظام", icon: Clock, visible: can("sessions") || currentUser?.role === "admin" },
+    { key: "installments", label: "التقسيط والعقود", icon: ClipboardList, visible: true },
+    { key: "quotes", label: "عروض الأسعار", icon: FileText, visible: true },
+    { key: "receipts", label: "سند قبض", icon: Landmark, visible: true },
+    { key: "payments", label: "سند صرف", icon: TrendingUp, visible: true },
+    { key: "expenses", label: "المصروفات", icon: TrendingDown, visible: true },
+    { key: "treasury", label: "الخزنة الفرعية", icon: Shield, visible: true },
+    { key: "projects", label: "المشاريع الجارية", icon: Briefcase, visible: true },
+    { key: "workers", label: "العمال والسلفيات", icon: Users, visible: true },
+    { key: "users", label: "الموظفين والصلاحية", icon: Settings, visible: true },
+    { key: "sessions", label: "سجل حركات النظام", icon: Clock, visible: true },
   ];
 
   // Auth Layout rendering check
