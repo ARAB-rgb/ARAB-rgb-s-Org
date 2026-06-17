@@ -7,7 +7,7 @@ import React, { useState, useEffect } from "react";
 import {
   Home, ClipboardList, FileText, Landmark, TrendingUp, TrendingDown, Briefcase, Users,
   Settings, LogOut, Calendar, MapPin, User, Phone, Shield, Search, Plus,
-  Edit2, Trash2, Download, AlertTriangle, Sparkles, Clock, RefreshCw, Key
+  Edit2, Trash2, Download, AlertTriangle, Sparkles, Clock, RefreshCw, Key, Printer
 } from "lucide-react";
 
 import { User as AuthUser, Installment, Quote, Receipt, Payment, Expense, Project, Worker, DbSession } from "./types";
@@ -751,6 +751,93 @@ td{border:1px solid #d8dee9;padding:8px;text-align:center;font-weight:600}
   <table><thead><tr><th>رقم العقد</th><th>مشروع العمل</th><th>موقع المشغل</th><th>المبلغ الكلي</th><th>المستلم</th><th>المتبقي المعلق</th><th>القسط اليومي</th><th>أيام الأقساط</th><th>الوضعية</th></tr></thead><tbody>${rowsHtml}</tbody></table>
   <div class="signs"><div class="sign">بصمة وتوقيع العميل الضامن</div><div class="sign">اعتماد وختم شركة عرب وورلد للحلول العقارية</div></div>
   <div class="footer">تم تحرير مستندات العقد ومراجعته ماليًا في فرع السداد وتوثيق التوقيعات إبراء للذمة</div>
+</div>
+</body>
+</html>`);
+    w.document.close();
+  };
+
+  const onPrintReceipt = (id: string) => {
+    const r = receipts.find((a) => a.id === id);
+    if (!r) return;
+
+    const w = window.open("", "_blank");
+    if (!w) {
+      showToast("تنبيه: ملقم المتصفح حظر نافذة الطباعة التلقائية!", "info");
+      return;
+    }
+
+    w.document.write(`
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>سند قبض مالي - رقم ${r.no}</title>
+<style>
+*{box-sizing:border-box;font-family:Tahoma,Arial}
+body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
+.page{width:210mm;min-height:297mm;margin:auto;background:white;padding:20mm;box-shadow:0 10px 35px #0002;position:relative;border-radius:12px}
+.head{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #10b981;padding-bottom:18px;margin-bottom:20px}
+.brand{text-align:center;flex:1}
+.brand h1{margin:0;font-size:28px;color:#07153a}
+.brand p{margin:8px 0 0;color:#059669;font-weight:bold}
+.logo{width:54px;height:65px;position:relative;margin:auto}
+.logo:before,.logo:after{content:"";position:absolute;border:5px solid #111827;border-left:0;border-bottom:0;transform:skewY(-25deg)}
+.logo:before{width:30px;height:55px;right:18px;top:0}
+.logo:after{width:16px;height:45px;right:8px;top:10px;border-color:#10b981}
+.title{background:linear-gradient(90deg,#07153a,#10b981);color:white;text-align:center;padding:12px;border-radius:10px;font-size:20px;margin:20px 0;letter-spacing:1px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+.box{border:1px solid #d9dee8;border-radius:10px;padding:9.5px;background:#fbfcff;min-height:54px}
+.box b{display:block;color:#047857;margin-bottom:4px;font-size:11px}
+.box span{font-size:13.5px;font-weight:bold}
+.amount-wrapper{text-align:center;background:#ecfdf5;border:2px dashed #34d399;border-radius:12px;padding:18px;margin:25px 0}
+.amount-wrapper b{display:block;color:#065f46;font-size:14px;margin-bottom:6px}
+.amount-wrapper span{font-size:28px;color:#047857;font-weight:900;font-family:monospace}
+.signs{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:45px}
+.sign{height:100px;border-top:1px dashed #777;padding-top:10px;text-align:center;color:#333;font-weight:bold;font-size:12px}
+.footer{position:absolute;bottom:12mm;left:20mm;right:20mm;text-align:center;color:#666;font-size:10px;border-top:1px solid #eee;padding-top:10px}
+.no-print{position:fixed;top:15px;left:15px;display:flex;gap:8px}
+.no-print button{border:0;border-radius:10px;padding:10px 15px;color:white;cursor:pointer;font-weight:bold}
+.print{background:#10b981}.close{background:#64748b}
+@media print{body{background:white;padding:0}.page{box-shadow:none;margin:0;width:auto;min-height:auto}.no-print{display:none}}
+</style>
+</head>
+<body>
+<div class="no-print">
+<button class="print" onclick="window.print()">طباعة / حفظ PDF</button>
+<button class="close" onclick="window.close()">إغلاق</button>
+</div>
+<div class="page">
+  <div class="head">
+    <div style="width:120px;text-align:center"><div class="logo"></div></div>
+    <div class="brand"><h1>شركة عرب وورلد</h1><p>سندات القبض المالي والحسابات الرقمية</p></div>
+    <div style="width:120px;font-size:11px;line-height:1.7"><b>رقم السند:</b><br>${r.no}<br><b>التاريخ:</b><br>${r.date}</div>
+  </div>
+  <div class="title">سند قبض مالي مقيد محاسبيًا</div>
+  <div class="grid">
+    <div class="box"><b>الجهة المسددة (استلمنا من)</b><span>${r.from_name}</span></div>
+    <div class="box"><b>رقم عقد التقسيط التابع</b><span>${r.contract_no || "سند عام غير تابع لعقد معين"}</span></div>
+    <div class="box"><b>طريقة ووسيلة الاستلام</b><span>${r.method}</span></div>
+    <div class="box"><b>الفرع الإداري للتحصيل</b><span>${awExtractRegion(r.notes || "") || "غير محدد"}</span></div>
+    <div class="box"><b>حساب الخزنة المقيد</b><span>${awExtractTreasury(r.notes || "") || "خزنة التحصيل"}</span></div>
+    <div class="box"><b>رقم السند الخارجي الموازي</b><span>${awExtractExternalNo(r.notes || "") || "لا يوجد"}</span></div>
+    <div class="box"><b>المشروع المرفق</b><span>${r.project || "عام"}</span></div>
+    <div class="box"><b>المتبقي الكلي قبل القبض</b><span>${r.remaining_before ? Number(r.remaining_before).toLocaleString() + " ريال" : "تحت المزامنة"}</span></div>
+    <div class="box"><b>المتبقي الكلي بعد القبض</b><span>${r.remaining_after ? Number(r.remaining_after).toLocaleString() + " ريال" : "تحت المزامنة"}</span></div>
+    <div class="box" style="grid-column: span 3"><b>البيان وشرائح الملاحظة</b><span>${awCleanNotes(r.notes || "") || "لا يوجد"}</span></div>
+  </div>
+  <div class="amount-wrapper">
+    <b>مبلغ وقدره المقيد لحسابكم ماليًا</b>
+    <span>${Number(r.amount || 0).toLocaleString()} ريال سعودي</span>
+  </div>
+  <div class="signs">
+    <div class="sign">أمين صندوق التحصيل</div>
+    <div class="sign">الحسابات والتدقيق المالي</div>
+    <div class="sign">توقيع أو بصمة المسدد</div>
+  </div>
+  <div class="footer">
+    تم ترحيل وقيد سند القبض ماليًا في الدفتر اليومي العام وإصدار مقتضى إثبات السداد وتوثيق المستندات إلكترونيًا.
+  </div>
 </div>
 </body>
 </html>`);
@@ -2221,9 +2308,10 @@ td{border:1px solid #d8dee9;padding:8px;text-align:center;font-weight:600}
                               <b className="text-white text-[11px] block">{r.method}</b>
                               {awCleanNotes(r.notes || "")}
                             </td>
-                            <td className="py-3 px-3 text-center space-x-1">
-                              <button onClick={() => { setEditReceiptId(r.id); handleAutoFillReceipt(r.contract_no || ""); setRFrom(r.from_name || ""); setRAmount(r.amount || ""); setRMethod(r.method || ""); setRDate(r.date || ""); setRProject(r.project || ""); setRNotes(awCleanNotes(r.notes || "")); setRTreasury(awExtractTreasury(r.notes || "") || "خزنة التحصيل"); setRExternalNo(awExtractExternalNo(r.notes || "")); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
-                              <button onClick={() => deleteReceiptLogic(r.id, r.installment_id)} className="p-1 text-rose-400 hover:text-rose-500"><Trash2 className="w-3.5 h-3.5" /></button>
+                            <td className="py-3 px-3 text-center flex items-center justify-center gap-1">
+                              <button onClick={() => onPrintReceipt(r.id)} className="p-1 text-emerald-400 hover:text-white" title="طباعة سند القبض"><Printer className="w-3.5 h-3.5" /></button>
+                              <button onClick={() => { setEditReceiptId(r.id); handleAutoFillReceipt(r.contract_no || ""); setRFrom(r.from_name || ""); setRAmount(r.amount || ""); setRMethod(r.method || ""); setRDate(r.date || ""); setRProject(r.project || ""); setRNotes(awCleanNotes(r.notes || "")); setRTreasury(awExtractTreasury(r.notes || "") || "خزنة التحصيل"); setRExternalNo(awExtractExternalNo(r.notes || "")); }} className="p-1 text-blue-400 hover:text-white" title="تعديل"><Edit2 className="w-3.5 h-3.5" /></button>
+                              <button onClick={() => deleteReceiptLogic(r.id, r.installment_id)} className="p-1 text-rose-400 hover:text-rose-500" title="حذف"><Trash2 className="w-3.5 h-3.5" /></button>
                             </td>
                           </tr>
                         ))}
