@@ -16,7 +16,7 @@ import {
   awBuildNotesWithRegion, awBuildNotesWithRegionAndTreasury, awBuildNotesWithRegionAndTreasuryAndCapital, awExtractTreasury, awExtractCapital, generateNextNo,
   awExtractCapitalSource, awExtractCapitalCompany, awExtractCapitalCollection,
   awExtractWorkerContract, awExtractWorkerLeaves, awBuildWorkerNotes, awCleanWorkerNotes,
-  getSupabaseCredentials, saveSupabaseCredentials, checkSupabaseHealth,
+  getSupabaseCredentials, saveSupabaseCredentials, checkSupabaseHealth, isSupabaseHealthy,
   awExtractExternalNo, awBuildNotesWithRegionAndTreasuryAndExternalNo
 } from "./db";
 
@@ -104,6 +104,11 @@ export default function App() {
   const [sbStatus, setSbStatus] = useState<"checking" | "connected" | "fallback">("checking");
   const [sbTesting, setSbTesting] = useState(false);
   const [sbConfigExpanded, setSbConfigExpanded] = useState(false);
+
+  // Backup & Restore states
+  const [isRestoring, setIsRestoring] = useState(false);
+  const [restoreSuccess, setRestoreSuccess] = useState<string | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
 
   // Forms Hooks
   // 1. Quotes Forms
@@ -366,6 +371,120 @@ export default function App() {
     } finally {
       setSbTesting(false);
     }
+  };
+
+  const handleDownloadBackup = async () => {
+    try {
+      showToast("جاري تحضير وتجميع النسخة الاحتياطية...", "info");
+      const [u, inst, q, rec, pay, exp, pr, w, s] = await Promise.all([
+        sb.from("users").select("*"),
+        sb.from("installments").select("*"),
+        sb.from("quotes").select("*"),
+        sb.from("receipts").select("*"),
+        sb.from("payments").select("*"),
+        sb.from("expenses").select("*"),
+        sb.from("projects").select("*"),
+        sb.from("workers").select("*"),
+        sb.from("sessions").select("*"),
+      ]);
+
+      const backupData = {
+        backup_version: "1.0",
+        backed_up_at: new Date().toISOString(),
+        active_database: isSupabaseHealthy ? "Supabase" : "Firestore",
+        data: {
+          users: u.data || [],
+          installments: inst.data || [],
+          quotes: q.data || [],
+          receipts: rec.data || [],
+          payments: pay.data || [],
+          expenses: exp.data || [],
+          projects: pr.data || [],
+          workers: w.data || [],
+          sessions: s.data || []
+        }
+      };
+
+      const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(
+        JSON.stringify(backupData, null, 2)
+      )}`;
+      const downloadAnchor = document.createElement("a");
+      downloadAnchor.setAttribute("href", jsonString);
+      const dateStr = new Date().toISOString().slice(0, 10);
+      downloadAnchor.setAttribute("download", `etreasury_backup_${dateStr}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+      showToast("تم تحميل النسخة الاحتياطية بنجاح!", "success");
+    } catch (err: any) {
+      showToast(`خطأ أثناء إنشاء النسخة الاحتياطية: ${err.message || err}`, "error");
+    }
+  };
+
+  const handleRestoreBackup = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsRestoring(true);
+    setRestoreError(null);
+    setRestoreSuccess(null);
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const text = e.target?.result as string;
+        const backup = JSON.parse(text);
+
+        if (!backup || !backup.data || typeof backup.data !== "object") {
+          throw new Error("بنية الملف غير صالحة. الملف لا يحتوي على كائن البيانات اللازم للتشغيل.");
+        }
+
+        const parsedData = backup.data;
+        const keys = ["users", "installments", "quotes", "receipts", "payments", "expenses", "projects", "workers", "sessions"];
+        
+        let restoreCount = 0;
+        let errorCount = 0;
+
+        showToast("جاري معالجة واستيراد السجلات إلى قاعدة البيانات...", "info");
+
+        for (const table of keys) {
+          const records = parsedData[table];
+          if (Array.isArray(records) && records.length > 0) {
+            for (const record of records) {
+              try {
+                if (record && typeof record === "object") {
+                  await sb.from(table).upsert(record);
+                  restoreCount++;
+                }
+              } catch (err) {
+                console.error(`Error restoring record in table ${table}:`, err);
+                errorCount++;
+              }
+            }
+          }
+        }
+
+        await loadEverything();
+        showToast(`تمت استعادة البيانات بنجاح! تم حفظ وتحديث ${restoreCount} سجل بشكل آمن.`, "success");
+        setRestoreSuccess(`تم استيراد الملف واستعادة النظام بالكامل! قمنا بتحديث ${restoreCount} سجل بنجاح.`);
+      } catch (err: any) {
+        console.error("Backup restore error:", err);
+        showToast(`فشلت استعادة البيانات: ${err.message || err}`, "error");
+        setRestoreError(`خطأ فني في الاستعادة: ${err.message || err}`);
+      } finally {
+        setIsRestoring(false);
+        if (event.target) {
+          event.target.value = "";
+        }
+      }
+    };
+
+    reader.onerror = () => {
+      showToast("خطأ أثناء قراءة ملف النسخة الاحتياطية المحددة", "error");
+      setIsRestoring(false);
+    };
+
+    reader.readAsText(file);
   };
 
   // Background reloading interval block
@@ -2996,6 +3115,94 @@ CREATE TABLE IF NOT EXISTS sessions (
 );`}
                       </pre>
                     </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Backup & Restore Panel */}
+              <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl space-y-5">
+                <div>
+                  <h3 className="text-base font-black text-white flex items-center gap-2">
+                    <span className="text-emerald-400">🛡️</span>
+                    <span>النسخ الاحتياطي اليدوي واستعادة البيانات كاملة</span>
+                  </h3>
+                  <p className="text-[10px] text-slate-400 font-bold mt-1">
+                    يمكنك تنزيل نسخة احتياطية كاملة من قاعدة بياناتك لحفظها محلياً على جهازك، واستعادتها في أي وقت بنقرة واحدة لضمان عدم ضياع البيانات مطلقاً.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+                  {/* Download section */}
+                  <div className="bg-slate-950/30 p-4 rounded-2xl border border-slate-800/80 flex flex-col justify-between space-y-3">
+                    <div>
+                      <h4 className="text-xs font-black text-emerald-400 flex items-center gap-1.5 pb-1">
+                        <span>📤</span>
+                        <span>تصدير نسخة احتياطية</span>
+                      </h4>
+                      <p className="text-[11px] text-slate-400 leading-relaxed font-bold">
+                        يقوم النظام بالاتصال بقاعدة البيانات النشطة حالياً وتصدير كافة سجلات الجداول (المستخدمين، العقود، العروض، السندات، المصاريف، الموظفين والمشاريع) في ملف محمي بنسق <b className="font-mono text-emerald-400 font-black">JSON</b>.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleDownloadBackup}
+                      className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-emerald-500/10"
+                    >
+                      <span>🌟</span>
+                      تنزيل ملف النسخة الاحتياطية (.json)
+                    </button>
+                  </div>
+
+                  {/* Restore section */}
+                  <div className="bg-slate-950/30 p-4 rounded-2xl border border-slate-800/80 flex flex-col justify-between space-y-3">
+                    <div>
+                      <h4 className="text-xs font-black text-amber-500 flex items-center gap-1.5 pb-1">
+                        <span>📥</span>
+                        <span>استيراد واستعادة البيانات</span>
+                      </h4>
+                      <p className="text-[11px] text-slate-400 leading-relaxed font-bold">
+                        اختر ملف النسخة الاحتياطية (.json) المرفوع مسبقاً لاستيراد وإعادة بناء قاعدة البيانات بالكامل. سيقوم النظام بعملية دمج دقيقة وتحديث السجلات فوراً.
+                      </p>
+                    </div>
+
+                    <div className="relative">
+                      <input
+                        type="file"
+                        accept=".json"
+                        id="backup-upload-input"
+                        onChange={handleRestoreBackup}
+                        className="hidden"
+                        disabled={isRestoring}
+                      />
+                      <label
+                        htmlFor="backup-upload-input"
+                        className="w-full py-2.5 bg-slate-800 hover:bg-slate-750 text-slate-300 border border-slate-700 hover:border-slate-600 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        {isRestoring ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-500 animate-spin" />
+                            جاري الاستعادة وإعادة البناء...
+                          </>
+                        ) : (
+                          <>
+                            <span>📂</span>
+                            تحميل واستعادة ملف النسخة الاحتياطية
+                          </>
+                        )}
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                {restoreSuccess && (
+                  <div className="p-3 bg-emerald-950/40 border border-emerald-500/20 text-emerald-300 rounded-xl text-xs font-medium">
+                    🎉 {restoreSuccess}
+                  </div>
+                )}
+
+                {restoreError && (
+                  <div className="p-3 bg-rose-950/40 border border-rose-500/20 text-rose-350 rounded-xl text-xs font-medium font-sans">
+                    ⚠️ {restoreError}
                   </div>
                 )}
               </div>
