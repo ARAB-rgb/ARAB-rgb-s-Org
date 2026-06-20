@@ -26,6 +26,8 @@ export interface UserPerms {
   dashLateClients: boolean;
   dashLastReceipts: boolean;
   dashUpcomingPaid: boolean;
+  is_authorized?: boolean;
+  use_global?: boolean;
 }
 
 export interface User {

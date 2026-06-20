@@ -535,32 +535,40 @@ export default function App() {
     if (currentUser.role === "admin") return companies;
     
     const hasCompanyPerms = currentUser.company_perms && Object.keys(currentUser.company_perms).length > 0;
-    if (!hasCompanyPerms) return companies;
+    if (!hasCompanyPerms) {
+      return companies.slice(0, 1);
+    }
     
     return companies.filter((c) => {
       const p = currentUser.company_perms?.[c.id];
       if (!p) return false;
-      return Object.values(p).some((val) => val === true);
+      return !!(p.is_authorized || p.use_global || Object.values(p).some((val) => val === true));
     });
   };
 
   const isCompanyAuthorized = (compId: string | undefined | null) => {
     if (!currentUser) return false;
     if (currentUser.role === "admin") return true;
+    if (!compId) return false;
     
     const hasCompanyPerms = currentUser.company_perms && Object.keys(currentUser.company_perms).length > 0;
-    if (!hasCompanyPerms) return true;
+    if (!hasCompanyPerms) {
+      return companies.length > 0 && compId === companies[0].id;
+    }
     
-    if (!compId) return false;
     const p = currentUser.company_perms?.[compId];
     if (!p) return false;
-    return Object.values(p).some((val) => val === true);
+    return !!(p.is_authorized || p.use_global || Object.values(p).some((val) => val === true));
   };
 
   const getActivePerms = () => {
     if (!currentUser) return null;
     if (selectedCompanyId && selectedCompanyId !== "all" && currentUser.company_perms?.[selectedCompanyId]) {
-      return currentUser.company_perms[selectedCompanyId];
+      const compPerm = currentUser.company_perms[selectedCompanyId];
+      if (compPerm.use_global) {
+        return currentUser.perms;
+      }
+      return compPerm;
     }
     return currentUser.perms;
   };
@@ -4259,50 +4267,125 @@ CREATE TABLE IF NOT EXISTS sessions (
                         className="px-3 py-1 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-amber-400 focus:outline-none focus:border-amber-500 cursor-pointer font-sans"
                       >
                         <option value="global">⚙️ الصلاحيات العامة (الافتراضية لجميع الشركات)</option>
-                        {companies.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            🏢 {c.name} {uCompanyPerms[c.id] ? "⭐️ (مخصصة)" : ""}
-                          </option>
-                        ))}
+                        {companies.map((c) => {
+                          const conf = uCompanyPerms[c.id];
+                          const labelSuffix = !conf 
+                            ? "❌ (غير مصرح)" 
+                            : (conf.use_global ? "🟢 (صلاحيات عامة)" : "⭐️ (صلاحيات مخصصة)");
+                          return (
+                            <option key={c.id} value={c.id}>
+                              🏢 {c.name} {labelSuffix}
+                            </option>
+                          );
+                        })}
                       </select>
                     </div>
                   </div>
 
                   {selectedCompanyIdForPerms !== "global" && (
-                    <div className="flex items-center gap-2 mb-3 bg-amber-500/10 border border-amber-500/20 px-3 py-2 rounded-xl transition-all">
-                      <input
-                        type="checkbox"
-                        id="has-custom-perms-toggle"
-                        checked={!!uCompanyPerms[selectedCompanyIdForPerms]}
-                        onChange={(e) => {
-                          const compId = selectedCompanyIdForPerms;
-                          if (e.target.checked) {
-                            setUCompanyPerms((prev) => ({
-                              ...prev,
-                              [compId]: { ...uPerms }
-                            }));
-                          } else {
-                            setUCompanyPerms((prev) => {
-                              const copy = { ...prev };
-                              delete copy[compId];
-                              return copy;
-                            });
-                          }
-                        }}
-                        className="w-4 h-4 cursor-pointer accent-amber-500"
-                      />
-                      <label htmlFor="has-custom-perms-toggle" className="text-xs font-black text-amber-300 cursor-pointer select-none font-sans">
-                        تفعيل صلاحيات مخصصة ومنفصلة لهذه الشركة فقط (بخلاف الصلاحيات العامة للموظف)
-                      </label>
+                    <div className="bg-slate-900/60 p-4 border border-slate-850 rounded-2xl space-y-4">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-indigo-400">حالة تفويض الدخول لشركة:</span>
+                          <span className="text-xs font-black text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-md font-sans">
+                            {companies.find((c) => c.id === selectedCompanyIdForPerms)?.name || ""}
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-slate-400 font-bold font-sans">
+                          {!uCompanyPerms[selectedCompanyIdForPerms] 
+                            ? "🔒 هذا الموظف لا يملك إذن رؤية أو تصفح هذه الشركة حالياً" 
+                            : (uCompanyPerms[selectedCompanyIdForPerms].use_global 
+                                ? "📁 الموظف يرى هذه الشركة بنفس الصلاحيات العامة أدناه" 
+                                : "⚙️ الموظف لديه صلاحيات مخصصة ومستقلة لهذه الشركة")}
+                        </span>
+                      </div>
+                      
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <label className={`flex items-center gap-2 px-3 py-2 sm:py-2.5 rounded-xl border cursor-pointer text-xs font-bold select-none transition-all ${
+                          !uCompanyPerms[selectedCompanyIdForPerms] 
+                            ? "bg-rose-500/10 border-rose-500/30 text-rose-400" 
+                            : "bg-slate-950/60 border-slate-850 text-slate-400 hover:text-slate-300"
+                        }`}>
+                          <input
+                            type="radio"
+                            name="company-auth-status"
+                            checked={!uCompanyPerms[selectedCompanyIdForPerms]}
+                            onChange={() => {
+                              const compId = selectedCompanyIdForPerms;
+                              setUCompanyPerms((prev) => {
+                                const copy = { ...prev };
+                                delete copy[compId];
+                                return copy;
+                              });
+                            }}
+                            className="accent-rose-500 w-4 h-4 cursor-pointer"
+                          />
+                          <span>❌ غير مصرح له بالدخول</span>
+                        </label>
+
+                        <label className={`flex items-center gap-2 px-3 py-2 sm:py-2.5 rounded-xl border cursor-pointer text-xs font-bold select-none transition-all ${
+                          !!uCompanyPerms[selectedCompanyIdForPerms] && !!uCompanyPerms[selectedCompanyIdForPerms].use_global
+                            ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                            : "bg-slate-950/60 border-slate-850 text-slate-400 hover:text-slate-300"
+                        }`}>
+                          <input
+                            type="radio"
+                            name="company-auth-status"
+                            checked={!!uCompanyPerms[selectedCompanyIdForPerms] && !!uCompanyPerms[selectedCompanyIdForPerms].use_global}
+                            onChange={() => {
+                              const compId = selectedCompanyIdForPerms;
+                              setUCompanyPerms((prev) => ({
+                                ...prev,
+                                [compId]: {
+                                  ...uPerms,
+                                  is_authorized: true,
+                                  use_global: true
+                                }
+                              }));
+                            }}
+                            className="accent-emerald-500 w-4 h-4 cursor-pointer"
+                          />
+                          <span>🟢 مصرح (بالصلاحيات العامة)</span>
+                        </label>
+
+                        <label className={`flex items-center gap-2 px-3 py-2 sm:py-2.5 rounded-xl border cursor-pointer text-xs font-bold select-none transition-all ${
+                          !!uCompanyPerms[selectedCompanyIdForPerms] && !uCompanyPerms[selectedCompanyIdForPerms].use_global
+                            ? "bg-amber-500/10 border-amber-500/30 text-amber-400"
+                            : "bg-slate-950/60 border-slate-850 text-slate-400 hover:text-slate-300"
+                        }`}>
+                          <input
+                            type="radio"
+                            name="company-auth-status"
+                            checked={!!uCompanyPerms[selectedCompanyIdForPerms] && !uCompanyPerms[selectedCompanyIdForPerms].use_global}
+                            onChange={() => {
+                              const compId = selectedCompanyIdForPerms;
+                              setUCompanyPerms((prev) => ({
+                                ...prev,
+                                [compId]: {
+                                  ...(prev[compId] || uPerms),
+                                  is_authorized: true,
+                                  use_global: false
+                                }
+                              }));
+                            }}
+                            className="accent-amber-500 w-4 h-4 cursor-pointer"
+                          />
+                          <span>⭐️ مصرح (بصلاحيات مخصصة للشركة)</span>
+                        </label>
+                      </div>
                     </div>
                   )}
 
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 bg-slate-950/40 p-4 border border-slate-850 rounded-2xl">
                     {Object.keys(uPerms).map((k) => {
-                      const isCustomActive = selectedCompanyIdForPerms === "global" || !!uCompanyPerms[selectedCompanyIdForPerms];
+                      const hasCompObj = !!uCompanyPerms[selectedCompanyIdForPerms];
+                      const isCustomActive = selectedCompanyIdForPerms === "global" || (hasCompObj && !uCompanyPerms[selectedCompanyIdForPerms].use_global);
+                      
                       const val = selectedCompanyIdForPerms === "global" 
                         ? !!uPerms[k] 
-                        : (uCompanyPerms[selectedCompanyIdForPerms] ? !!uCompanyPerms[selectedCompanyIdForPerms][k] : !!uPerms[k]);
+                        : (hasCompObj 
+                            ? (uCompanyPerms[selectedCompanyIdForPerms].use_global ? !!uPerms[k] : !!uCompanyPerms[selectedCompanyIdForPerms][k])
+                            : !!uPerms[k]);
                       
                       return (
                         <label 
@@ -4316,7 +4399,7 @@ CREATE TABLE IF NOT EXISTS sessions (
                           <input
                             type="checkbox"
                             checked={val}
-                            disabled={selectedCompanyIdForPerms !== "global" && !uCompanyPerms[selectedCompanyIdForPerms]}
+                            disabled={selectedCompanyIdForPerms !== "global" && (!hasCompObj || !!uCompanyPerms[selectedCompanyIdForPerms].use_global)}
                             onChange={(e) => {
                               const checked = e.target.checked;
                               if (selectedCompanyIdForPerms === "global") {
@@ -4408,9 +4491,15 @@ CREATE TABLE IF NOT EXISTS sessions (
                               <div className="mt-1.5 flex flex-wrap gap-1.5 justify-start">
                                 {Object.keys(u.company_perms).map((cId) => {
                                   const compName = companies.find((c) => c.id === cId)?.name || "شركة فرعية";
+                                  const compConf = u.company_perms?.[cId];
+                                  const isGlobal = compConf?.use_global;
                                   return (
-                                    <span key={cId} className="inline-block text-[9px] font-bold text-amber-300 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded-md font-sans">
-                                      🏢 {compName}: صلاحيات مخصصة
+                                    <span key={cId} className={`inline-block text-[9px] font-bold px-1.5 py-0.5 rounded-md font-sans ${
+                                      isGlobal 
+                                        ? "text-emerald-300 bg-emerald-500/10 border border-emerald-500/20" 
+                                        : "text-amber-300 bg-amber-500/10 border border-amber-500/20"
+                                    }`}>
+                                      🏢 {compName}: {isGlobal ? "صلاحيات عامة" : "صلاحيات مخصصة"}
                                     </span>
                                   );
                                 })}
