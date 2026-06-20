@@ -19,6 +19,7 @@ export interface UserPerms {
   users: boolean;
   sessions: boolean;
   print: boolean;
+  companies: boolean;
   dashTopCards: boolean;
   dashCollection: boolean;
   dashPulse: boolean;
@@ -34,12 +35,14 @@ export interface User {
   password?: string;
   role: "admin" | "employee";
   perms: UserPerms;
+  company_perms?: Record<string, UserPerms>;
   worker_id?: string;
   created_at?: string;
 }
 
 export interface Installment {
   id: string;
+  company_id?: string;
   client: string;
   identity: string;
   nationality: string;
@@ -66,6 +69,7 @@ export interface Installment {
 
 export interface Quote {
   id: string;
+  company_id?: string;
   no: string;
   client: string;
   phone: string;
@@ -81,6 +85,7 @@ export interface Quote {
 
 export interface Receipt {
   id: string;
+  company_id?: string;
   no: string;
   from_name: string;
   amount: number;
@@ -100,6 +105,7 @@ export interface Receipt {
 
 export interface Payment {
   id: string;
+  company_id?: string;
   no: string;
   to_name: string;
   amount: number;
@@ -112,6 +118,7 @@ export interface Payment {
 
 export interface Expense {
   id: string;
+  company_id?: string;
   no: string;
   name: string;
   category: "مواد" | "عمالة" | "نقل" | "إيجار" | "وقود" | "أخرى";
@@ -125,6 +132,7 @@ export interface Expense {
 
 export interface Project {
   id: string;
+  company_id?: string;
   name: string;
   location: string;
   engineer: string;
@@ -139,6 +147,7 @@ export interface Project {
 
 export interface Worker {
   id: string;
+  company_id?: string;
   name: string;
   worker_id: string;
   phone: string;
@@ -163,3 +172,31 @@ export interface DbSession {
   action: string;
   created_at?: string;
 }
+
+export interface Company {
+  id: string;
+  name: string;
+  record_no?: string; // Commercial Registration / السجل التجاري
+  manager?: string;   // مدير الشركة للتعميدات والتوقيع
+  phone?: string;
+  address?: string;
+  notes?: string;     // بنود وشروط إضافية للعقود
+  promissory_note_template?: string; // صيغة سند الأمر الافتراضية للشركة
+  created_at?: string;
+}
+
+export interface Extract {
+  id: string;
+  no: string;         // رقم المستخلص
+  company_id: string; // تبعية الشركة
+  project_id: string; // المشروع المعني
+  client_name: string;// الجهة المالكة للمستخلص / العميل
+  total_amount: number; // المبلغ الإجمالي المعتمد
+  deductions: number;  // نسبة أو قيمة خصومات الغرامات/المواد
+  net_amount: number;  // المبلغ الصافي للاستلام
+  date: string;       // تاريخ إصدار المستخلص
+  status: "مسودة" | "تحت المراجعة" | "مقبول" | "مسدد جزئياً" | "تم السداد";
+  notes?: string;
+  created_at?: string;
+}
+

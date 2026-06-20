@@ -206,6 +206,43 @@
         "created_at": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "name", "code", "role", "time", "action"]
+    },
+    "Company": {
+      "title": "Company",
+      "description": "Companies and branches in the workspace",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "record_no": { "type": "string" },
+        "manager": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "notes": { "type": "string" },
+        "promissory_note_template": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name"]
+    },
+    "Extract": {
+      "title": "Extract",
+      "description": "Contract progress extracts",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "no": { "type": "string" },
+        "company_id": { "type": "string" },
+        "project_id": { "type": "string" },
+        "client_name": { "type": "string" },
+        "total_amount": { "type": "number" },
+        "deductions": { "type": "number" },
+        "net_amount": { "type": "number" },
+        "date": { "type": "string" },
+        "status": { "type": "string", "enum": ["مسودة", "تحت المراجعة", "مقبول", "مسدد جزئياً", "تم السداد"] },
+        "notes": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "no", "company_id", "project_id", "client_name", "total_amount", "net_amount", "date", "status"]
     }
   },
   "firestore": {
@@ -244,6 +281,14 @@
     "sessions": {
       "schema": "DbSession",
       "description": "Audit logging data"
+    },
+    "companies": {
+      "schema": "Company",
+      "description": "Company profiles and corporate identities"
+    },
+    "extracts": {
+      "schema": "Extract",
+      "description": "Project progress and payment extracts"
     }
   }
 }

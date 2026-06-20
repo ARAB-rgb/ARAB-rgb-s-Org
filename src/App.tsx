@@ -3,14 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Home, ClipboardList, FileText, Landmark, TrendingUp, TrendingDown, Briefcase, Users,
   Settings, LogOut, Calendar, MapPin, User, Phone, Shield, Search, Plus,
-  Edit2, Trash2, Download, AlertTriangle, Sparkles, Clock, RefreshCw, Key, Printer
+  Edit2, Trash2, Download, AlertTriangle, Sparkles, Clock, RefreshCw, Key, Printer, Building
 } from "lucide-react";
 
-import { User as AuthUser, Installment, Quote, Receipt, Payment, Expense, Project, Worker, DbSession } from "./types";
+import { User as AuthUser, Installment, Quote, Receipt, Payment, Expense, Project, Worker, DbSession, Company, Extract } from "./types";
 import {
   sb, logSession, getContractTiming, awExtractRegion, awCleanNotes,
   awBuildNotesWithRegion, awBuildNotesWithRegionAndTreasury, awBuildNotesWithRegionAndTreasuryAndCapital, awExtractTreasury, awExtractCapital, generateNextNo,
@@ -87,12 +87,17 @@ export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [sessions, setSessions] = useState<DbSession[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [extracts, setExtracts] = useState<Extract[]>([]);
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>("all");
 
   // Editing state markers
   const [editQuoteId, setEditQuoteId] = useState<string | null>(null);
   const [editReceiptId, setEditReceiptId] = useState<string | null>(null);
   const [editPaymentId, setEditPaymentId] = useState<string | null>(null);
   const [editExpenseId, setEditExpenseId] = useState<string | null>(null);
+  const [editCompanyId, setEditCompanyId] = useState<string | null>(null);
+  const [editExtractId, setEditExtractId] = useState<string | null>(null);
   const [editProjectId, setEditProjectId] = useState<string | null>(null);
   const [editWorkerId, setEditWorkerId] = useState<string | null>(null);
   const [editUserId, setEditUserId] = useState<string | null>(null);
@@ -111,6 +116,8 @@ export default function App() {
   const [restoreError, setRestoreError] = useState<string | null>(null);
 
   // Forms Hooks
+  const [formCompanyId, setFormCompanyId] = useState("");
+
   // 1. Quotes Forms
   const [qClient, setQClient] = useState("");
   const [qPhone, setQPhone] = useState("");
@@ -178,6 +185,23 @@ export default function App() {
   const [wStatus, setWStatus] = useState<"على رأس العمل" | "إجازة" | "موقوف">("على رأس العمل");
   const [wNotes, setWNotes] = useState("");
 
+  // 7. Companies Forms
+  const [cName, setCName] = useState("");
+  const [cRegister, setCRegister] = useState("");
+  const [cTaxNo, setCTaxNo] = useState("");
+  const [cCapital, setCCapital] = useState<number | "">("");
+  const [cPhone, setCPhone] = useState("");
+  const [cAddress, setCAddress] = useState("");
+
+  // 8. Extracts Forms
+  const [exCompanyId, setExCompanyId] = useState("");
+  const [exTitle, setExTitle] = useState("");
+  const [exAmount, setExAmount] = useState<number | "">("");
+  const [exPaid, setExPaid] = useState<number | "">("");
+  const [exDate, setExDate] = useState(new Date().toISOString().slice(0, 10));
+  const [exStatus, setExStatus] = useState<"نشط" | "مدفوع" | "متأخر">("نشط");
+  const [exNotes, setExNotes] = useState("");
+
   // 10. HR States
   const [selectedWorkerForHr, setSelectedWorkerForHr] = useState<Worker | null>(null);
   
@@ -212,6 +236,8 @@ export default function App() {
   const [uWorkerId, setUWorkerId] = useState("");
   const [uRole, setURole] = useState<"admin" | "employee">("employee");
   const [uRegion, setURegion] = useState("");
+  const [selectedCompanyIdForPerms, setSelectedCompanyIdForPerms] = useState<string>("global");
+  const [uCompanyPerms, setUCompanyPerms] = useState<Record<string, Record<string, boolean>>>({});
   const [uPerms, setUPerms] = useState<Record<string, boolean>>({
     installmentsView: true,
     installmentsAdd: false,
@@ -224,6 +250,7 @@ export default function App() {
     treasury: false,
     projects: false,
     workers: false,
+    companies: false,
     users: false,
     sessions: false,
     print: false,
@@ -281,7 +308,7 @@ export default function App() {
   const loadEverything = async () => {
     if (!currentUser) return;
     try {
-      const [u, inst, q, rec, pay, exp, pr, w, s] = await Promise.all([
+      const [u, inst, q, rec, pay, exp, pr, w, s, comp, ext] = await Promise.all([
         sb.from("users").select("*").order("created_at", { ascending: false }),
         sb.from("installments").select("*").order("created_at", { ascending: false }),
         sb.from("quotes").select("*").order("created_at", { ascending: false }),
@@ -291,6 +318,8 @@ export default function App() {
         sb.from("projects").select("*").order("created_at", { ascending: false }),
         sb.from("workers").select("*").order("created_at", { ascending: false }),
         sb.from("sessions").select("*").order("created_at", { ascending: false }),
+        sb.from("companies").select("*").order("created_at", { ascending: false }),
+        sb.from("extracts").select("*").order("created_at", { ascending: false }),
       ]);
 
       const uList = u.data || [];
@@ -303,6 +332,8 @@ export default function App() {
       setProjects(pr.data || []);
       setWorkers(w.data || []);
       setSessions(s.data || []);
+      setCompanies(comp.data || []);
+      setExtracts(ext.data || []);
 
       // Autoresolve/refresh current user details to update links/permissions dynamically
       const freshUser = uList.find((x) => x.id === currentUser?.id);
@@ -499,39 +530,139 @@ export default function App() {
   }, [currentUser]);
 
   // Auth User allowed scope helpers
-  const userRegionFilter = currentUser?.perms?.region || "";
-  const can = (perm: string) => {
-    return currentUser?.role === "admin" || !!currentUser?.perms?.[perm as keyof typeof currentUser.perms];
+  const getAuthorizedCompanies = () => {
+    if (!currentUser) return [];
+    if (currentUser.role === "admin") return companies;
+    
+    const hasCompanyPerms = currentUser.company_perms && Object.keys(currentUser.company_perms).length > 0;
+    if (!hasCompanyPerms) return companies;
+    
+    return companies.filter((c) => {
+      const p = currentUser.company_perms?.[c.id];
+      if (!p) return false;
+      return Object.values(p).some((val) => val === true);
+    });
   };
+
+  const isCompanyAuthorized = (compId: string | undefined | null) => {
+    if (!currentUser) return false;
+    if (currentUser.role === "admin") return true;
+    
+    const hasCompanyPerms = currentUser.company_perms && Object.keys(currentUser.company_perms).length > 0;
+    if (!hasCompanyPerms) return true;
+    
+    if (!compId) return false;
+    const p = currentUser.company_perms?.[compId];
+    if (!p) return false;
+    return Object.values(p).some((val) => val === true);
+  };
+
+  const getActivePerms = () => {
+    if (!currentUser) return null;
+    if (selectedCompanyId && selectedCompanyId !== "all" && currentUser.company_perms?.[selectedCompanyId]) {
+      return currentUser.company_perms[selectedCompanyId];
+    }
+    return currentUser.perms;
+  };
+
+  const userRegionFilter = getActivePerms()?.region || "";
+
+  const can = (perm: string) => {
+    if (!currentUser) return false;
+    if (currentUser.role === "admin") return true;
+    
+    const activePerms = getActivePerms();
+    if (activePerms) {
+      return !!activePerms[perm as keyof typeof activePerms];
+    }
+    return false;
+  };
+
+  useEffect(() => {
+    if (currentUser && currentUser.role !== "admin") {
+      const authComps = getAuthorizedCompanies();
+      const hasCompanyPerms = currentUser.company_perms && Object.keys(currentUser.company_perms).length > 0;
+      if (hasCompanyPerms && authComps.length > 0) {
+        if (selectedCompanyId === "all" || !authComps.some((c) => c.id === selectedCompanyId)) {
+          setSelectedCompanyId(authComps[0].id);
+        }
+      }
+    }
+  }, [currentUser, companies]);
 
   const getVisibleReceipts = () => {
     return receipts.filter((item) => {
+      if (!isCompanyAuthorized(item.company_id)) return false;
       if (currentUser && currentUser.role !== "admin" && userRegionFilter) {
-        // receipts matching users allowed branch in installment target or manually appended region tags
         const rRegion = awExtractRegion(item.notes || "");
-        return rRegion === userRegionFilter;
+        if (rRegion !== userRegionFilter) return false;
       }
-      return true;
+      return selectedCompanyId === "all" || item.company_id === selectedCompanyId;
     });
   };
 
   const getVisiblePayments = () => {
     return payments.filter((item) => {
+      if (!isCompanyAuthorized(item.company_id)) return false;
       if (currentUser && currentUser.role !== "admin" && userRegionFilter) {
         const itemRegion = awExtractRegion(item.notes || "");
-        return itemRegion === userRegionFilter;
+        if (itemRegion !== userRegionFilter) return false;
       }
-      return true;
+      return selectedCompanyId === "all" || item.company_id === selectedCompanyId;
     });
   };
 
   const getVisibleExpenses = () => {
     return expenses.filter((item) => {
+      if (!isCompanyAuthorized(item.company_id)) return false;
       if (currentUser && currentUser.role !== "admin" && userRegionFilter) {
         const itemRegion = awExtractRegion(item.notes || "");
-        return itemRegion === userRegionFilter;
+        if (itemRegion !== userRegionFilter) return false;
       }
-      return true;
+      return selectedCompanyId === "all" || item.company_id === selectedCompanyId;
+    });
+  };
+
+  const getVisibleInstallments = () => {
+    return installments.filter((item) => {
+      if (!isCompanyAuthorized(item.company_id)) return false;
+      if (currentUser && currentUser.role !== "admin" && userRegionFilter) {
+        const itemRegion = awExtractRegion(item.notes || "");
+        if (itemRegion && itemRegion !== userRegionFilter) return false;
+      }
+      return selectedCompanyId === "all" || item.company_id === selectedCompanyId;
+    });
+  };
+
+  const getVisibleQuotes = () => {
+    return quotes.filter((item) => {
+      if (!isCompanyAuthorized(item.company_id)) return false;
+      if (currentUser && currentUser.role !== "admin" && userRegionFilter) {
+        const itemRegion = awExtractRegion(item.notes || "");
+        if (itemRegion && itemRegion !== userRegionFilter) return false;
+      }
+      return selectedCompanyId === "all" || item.company_id === selectedCompanyId;
+    });
+  };
+
+  const getVisibleProjects = () => {
+    return projects.filter((item) => {
+      if (!isCompanyAuthorized(item.company_id)) return false;
+      return selectedCompanyId === "all" || item.company_id === selectedCompanyId;
+    });
+  };
+
+  const getVisibleWorkers = () => {
+    return workers.filter((item) => {
+      if (!isCompanyAuthorized(item.company_id)) return false;
+      return selectedCompanyId === "all" || item.company_id === selectedCompanyId;
+    });
+  };
+
+  const getVisibleExtracts = () => {
+    return extracts.filter((item) => {
+      if (!isCompanyAuthorized(item.company_id)) return false;
+      return selectedCompanyId === "all" || item.company_id === selectedCompanyId;
     });
   };
 
@@ -562,10 +693,90 @@ export default function App() {
       .eq("id", installmentId);
   };
 
+  // Self-healing function for mismatched receipts
+  const autoRepairMismatchedReceipts = async (loadedReceipts: Receipt[], loadedInstallments: Installment[]) => {
+    const mismatched = loadedReceipts.filter(r => {
+      if (!r.installment_id || !r.from_name) return false;
+      const linked = loadedInstallments.find(i => i.id === r.installment_id);
+      if (!linked || !linked.client) return false;
+      
+      const normFromName = String(r.from_name).trim().replace(/\s+/g, ' ').toLowerCase();
+      const normClientName = String(linked.client).trim().replace(/\s+/g, ' ').toLowerCase();
+      
+      if (normFromName === normClientName) return false;
+      
+      // Check if payee name shares any substantial common words with the client name
+      const wordsA = normFromName.split(' ').filter(w => w.length > 2);
+      const wordsB = normClientName.split(' ').filter(w => w.length > 2);
+      const sharesCommon = wordsA.some(w => wordsB.includes(w));
+      
+      return !sharesCommon; // True if completely different names
+    });
+
+    if (mismatched.length === 0) return;
+
+    let repairedCount = 0;
+    const installmentsToRecalc = new Set<string>();
+
+    for (const r of mismatched) {
+      // Find the correct installment belonging to the from_name
+      const correctInstallment = loadedInstallments.find(i => {
+        if (!i.client) return false;
+        const normFromName = String(r.from_name).trim().replace(/\s+/g, ' ').toLowerCase();
+        const normClientName = String(i.client).trim().replace(/\s+/g, ' ').toLowerCase();
+        
+        return normClientName === normFromName || normClientName.includes(normFromName) || normFromName.includes(normClientName);
+      });
+
+      if (correctInstallment) {
+        const beforeAmt = Number(correctInstallment.remaining || 0);
+        const afterAmt = Math.max(0, beforeAmt - Number(r.amount || 0));
+        
+        const updatedRow = {
+          installment_id: correctInstallment.id,
+          contract_no: correctInstallment.no,
+          identity: correctInstallment.identity || "",
+          phone: correctInstallment.phone || "",
+          nationality: correctInstallment.nationality || "",
+          remaining_before: beforeAmt,
+          remaining_after: afterAmt
+        };
+
+        try {
+          await sb.from("receipts").update(updatedRow).eq("id", r.id);
+          if (r.installment_id) {
+            installmentsToRecalc.add(r.installment_id);
+          }
+          installmentsToRecalc.add(correctInstallment.id);
+          repairedCount++;
+        } catch (err) {
+          console.error("[Auto Repair Error]", err);
+        }
+      }
+    }
+
+    if (repairedCount > 0) {
+      for (const instId of Array.from(installmentsToRecalc)) {
+        await recalcLinkedContractFromReceipts(instId);
+      }
+      await loadEverything();
+      showToast(`🟢 تم تلقائياً نقل ${repairedCount} سند قبض مفقود لملفات العملاء الصحيحة وإعادة توازن رصيد العقود!`, "success");
+    }
+  };
+
+  const hasRunRepair = useRef(false);
+  useEffect(() => {
+    if (installments.length > 0 && receipts.length > 0 && !hasRunRepair.current) {
+      hasRunRepair.current = true;
+      autoRepairMismatchedReceipts(receipts, installments);
+    }
+  }, [installments, receipts]);
+
+
   // Interactive CRUD operations
   // Save Installments
   const onSaveInstallment = async (row: any, editId: string | null): Promise<boolean> => {
-    const userRegion = currentUser?.perms?.region || "";
+    const userRegion = userRegionFilter;
     const activeRegion = currentUser && currentUser.role !== "admin" && userRegion ? userRegion : row.region_input;
     const activeTreasury = row.treasury_input || "خزنة التحصيل";
     const activeCapital = Number(row.capital_input || 0);
@@ -860,6 +1071,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       date: new Date().toISOString().slice(0, 10),
       status: qStatus,
       notes: qNotes,
+      company_id: formCompanyId || (selectedCompanyId !== "all" ? selectedCompanyId : undefined),
     };
 
     setIsLoading(true);
@@ -900,8 +1112,9 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       linked = installments.find(
         (x) =>
           x.no === rContractQuery ||
-          x.client.includes(rContractQuery) ||
-          x.identity === rContractQuery
+          x.client === rContractQuery ||
+          x.identity === rContractQuery ||
+          `${x.no} | ${x.client} | ${x.identity}` === rContractQuery
       ) || null;
     }
 
@@ -912,8 +1125,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
     const rRegion = linked ? (awExtractRegion(linked.notes || "") || userRegionFilter) : userRegionFilter;
     const notesAppended = awBuildNotesWithRegionAndTreasuryAndExternalNo(rNotes, rRegion, rTreasury, rExternalNo);
 
-    const row = {
-      no: generateNextNo("AW-REC", receipts, "no"),
+    const row: any = {
       from_name: rFrom,
       amount: amt,
       method: rMethod,
@@ -927,7 +1139,12 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       nationality: linked ? linked.nationality : "",
       remaining_before: beforeAmt,
       remaining_after: afterAmt,
+      company_id: formCompanyId || (selectedCompanyId !== "all" ? selectedCompanyId : undefined),
     };
+
+    if (!editReceiptId) {
+      row.no = generateNextNo("AW-REC", receipts, "no");
+    }
 
     setIsLoading(true);
     try {
@@ -1000,6 +1217,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       date: payDate,
       project: payProject.trim(),
       notes: awBuildNotesWithRegionAndTreasury(payNotes, userRegionFilter, payTreasury),
+      company_id: formCompanyId || (selectedCompanyId !== "all" ? selectedCompanyId : undefined),
     };
 
     setIsLoading(true);
@@ -1044,6 +1262,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       project: eProject.trim(),
       supplier: eSupplier.trim(),
       notes: awBuildNotesWithRegionAndTreasury(eNotes, userRegionFilter, eTreasury),
+      company_id: formCompanyId || (selectedCompanyId !== "all" ? selectedCompanyId : undefined),
     };
 
     setIsLoading(true);
@@ -1090,6 +1309,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       progress: Number(pProgress || 0),
       status: pStatus,
       notes: pNotes,
+      company_id: formCompanyId || (selectedCompanyId !== "all" ? selectedCompanyId : undefined),
     };
 
     setIsLoading(true);
@@ -1140,6 +1360,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       balance: Math.max(0, tot - Number(wAdvance || 0)),
       status: wStatus,
       notes: wNotes,
+      company_id: formCompanyId || (selectedCompanyId !== "all" ? selectedCompanyId : undefined),
     };
 
     setIsLoading(true);
@@ -1168,6 +1389,137 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       showToast("تم تحديث سلف مستحقات العمال.");
     } catch {
       showToast("خلل في مستند مجمع السلف عمال", "error");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Companies & Extracts CRUD Logic
+  const saveCompanyLogic = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!cName) return;
+
+    const row = {
+      name: cName.trim(),
+      commercial_register: cRegister.trim(),
+      tax_no: cTaxNo.trim(),
+      capital: Number(cCapital || 0),
+      phone: cPhone.trim(),
+      address: cAddress.trim(),
+    };
+
+    setIsLoading(true);
+    try {
+      const q = editCompanyId
+        ? sb.from("companies").update(row).eq("id", editCompanyId)
+        : sb.from("companies").insert(row);
+
+      const { error } = await q;
+      if (error) {
+        showToast(error.message, "error");
+        return;
+      }
+
+      await logSession(currentUser!, editCompanyId ? `تعديل ملف الشركة: ${cName}` : `إنشاء شركة فرعية جديدة: ${cName}`);
+      setEditCompanyId(null);
+      setCName("");
+      setCRegister("");
+      setCTaxNo("");
+      setCCapital("");
+      setCPhone("");
+      setCAddress("");
+      await loadEverything();
+      showToast("تم حفظ بطاقة الشركة بنجاح!");
+    } catch {
+      showToast("حدث خطأ أثناء الاتصال بالخادم لحفظ الشركة", "error");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const onDeleteCompany = async (id: string, name: string) => {
+    if (!window.confirm(`هل أنت متأكد من حذف الشركة "${name}" بالكامل؟ سيتم فك ارتباط أي مستندات تابعة.`)) return;
+
+    setIsLoading(true);
+    try {
+      const { error } = await sb.from("companies").delete().eq("id", id);
+      if (error) {
+        showToast(error.message, "error");
+        return;
+      }
+
+      await logSession(currentUser!, `حذف ملف الشركة: ${name}`);
+      await loadEverything();
+      showToast("تم إزالة الشركة بنجاح.");
+    } catch {
+      showToast("تعذر استكمال بروتوكول الحذف", "error");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const saveExtractLogic = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!exCompanyId || !exTitle) {
+      showToast("يرجى اختيار الشركة وكتابة اسم/رقم المستخلص مسبقًا", "error");
+      return;
+    }
+
+    const row = {
+      company_id: exCompanyId,
+      title: exTitle.trim(),
+      amount: Number(exAmount || 0),
+      paid_amount: Number(exPaid || 0),
+      date: exDate,
+      status: exStatus,
+      notes: exNotes.trim()
+    };
+
+    setIsLoading(true);
+    try {
+      const q = editExtractId
+        ? sb.from("extracts").update(row).eq("id", editExtractId)
+        : sb.from("extracts").insert(row);
+
+      const { error } = await q;
+      if (error) {
+        showToast(error.message, "error");
+        return;
+      }
+
+      await logSession(currentUser!, editExtractId ? `تعديل مستخلص رقم: ${exTitle}` : `تحرير مستخلص مالي جديد: ${exTitle}`);
+      setEditExtractId(null);
+      setExCompanyId("");
+      setExTitle("");
+      setExAmount("");
+      setExPaid("");
+      setExStatus("نشط");
+      setExNotes("");
+      await loadEverything();
+      showToast("تم حفظ وتوثيق المستخلص في المنظومة!");
+    } catch {
+      showToast("حدث خطأ أثناء مزامنة قيد المستخلص المالي", "error");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const onDeleteExtract = async (id: string, title: string) => {
+    if (!window.confirm(`هل أنت متأكد من حذف المستخلص "${title}"؟`)) return;
+
+    setIsLoading(true);
+    try {
+      const { error } = await sb.from("extracts").delete().eq("id", id);
+      if (error) {
+        showToast(error.message, "error");
+        return;
+      }
+
+      await logSession(currentUser!, `حذف مستخلص رقم: ${title}`);
+      await loadEverything();
+      showToast("تم إزالة المستخلص المالي.");
+    } catch {
+      showToast("فشل إتمام عملية حذف المستخلص", "error");
     } finally {
       setIsLoading(false);
     }
@@ -1336,7 +1688,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
         project: selectedWorkerForHr.project || "عام",
         notes: awBuildNotesWithRegionAndTreasury(
           `قيد سلفة مستحقة للموظف. ${advNotes}`.trim(),
-          selectedWorkerForHr.project ? "" : (currentUser?.perms?.region || ""),
+          selectedWorkerForHr.project ? "" : userRegionFilter,
           advTreasury
         ),
       };
@@ -1435,7 +1787,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
         project: targetWorker.project || "عام",
         notes: awBuildNotesWithRegionAndTreasury(
           `طلب سلفة موظف (خدمة ذاتية/ربط مباشر). ${advNotes}`.trim(),
-          targetWorker.project ? "" : (currentUser?.perms?.region || ""),
+          targetWorker.project ? "" : userRegionFilter,
           advTreasury
         ),
       };
@@ -1642,6 +1994,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
         region: uRegion,
         worker_id: uWorkerId.trim() || null,
       },
+      company_perms: uCompanyPerms,
     };
 
     setIsLoading(true);
@@ -1664,6 +2017,8 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       setUWorkerId("");
       setURegion("");
       setURole("employee");
+      setSelectedCompanyIdForPerms("global");
+      setUCompanyPerms({});
       setUPerms({
         installmentsView: true,
         installmentsAdd: false,
@@ -1676,6 +2031,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
         treasury: false,
         projects: false,
         workers: false,
+        companies: false,
         users: false,
         sessions: false,
         print: false,
@@ -1757,6 +2113,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
     { key: "expenses", label: "المصروفات", icon: TrendingDown, visible: true },
     { key: "treasury", label: "الخزنة الفرعية", icon: Shield, visible: true },
     { key: "projects", label: "المشاريع الجارية", icon: Briefcase, visible: true },
+    { key: "companies", label: "الشركات والمستخلصات", icon: Building, visible: can("companies") },
     { key: "workers", label: "العمال والسلفيات", icon: Users, visible: true },
     { key: "users", label: "الموظفين والصلاحية", icon: Settings, visible: true },
     { key: "sessions", label: "سجل حركات النظام", icon: Clock, visible: true },
@@ -1891,7 +2248,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
   let companyCapitalInContracts = 0;
   let collectionCapitalInContracts = 0;
 
-  installments.forEach((x) => {
+  getVisibleInstallments().forEach((x) => {
     const source = awExtractCapitalSource(x.notes || "");
     const compAmount = awExtractCapitalCompany(x.notes || "");
     const collAmount = awExtractCapitalCollection(x.notes || "");
@@ -1987,17 +2344,44 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
         
         {/* Responsive Navbar heading with glowing sparkles */}
         <header className="bg-slate-950/40 backdrop-blur-2xl border-b border-amber-500/10 p-5 shrink-0 flex flex-col lg:flex-row gap-5 justify-between items-center z-10 text-right relative overflow-hidden before:absolute before:bottom-0 before:left-0 before:right-0 before:h-[1px] before:bg-gradient-to-r before:from-transparent before:via-amber-500/20 before:to-transparent">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-amber-500 to-yellow-500 rounded-xl flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.2)]">
-              <Sparkles className="w-5 h-5 text-slate-950 animate-pulse" />
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 w-full lg:w-auto">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-gradient-to-br from-amber-500 to-yellow-500 rounded-xl flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.2)] shrink-0">
+                <Sparkles className="w-5 h-5 text-slate-950 animate-pulse" />
+              </div>
+              <div>
+                <h1 className="text-base md:text-lg font-black tracking-tight text-white flex items-center gap-2 font-sans">
+                  <span>شركة</span>
+                  <span className="text-transparent bg-clip-text bg-gradient-to-l from-amber-400 via-yellow-200 to-amber-500 drop-shadow-[0_2px_10px_rgba(245,158,11,0.15)]">
+                    {selectedCompanyId === "all" || companies.length === 0
+                      ? "عرب وورلد"
+                      : companies.find((c) => c.id === selectedCompanyId)?.name || "عرب وورلد"
+                    }
+                  </span>
+                  <span className="text-xs font-bold text-slate-300">للمقاولات العامة والتقسيط</span>
+                </h1>
+                <p className="text-[9px] text-slate-400 font-medium tracking-wide mt-0.5">البوابة الإدارية والمنظومة الحسابية المتكاملة الموثقة</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-base md:text-lg font-black tracking-tight text-white flex items-center gap-2 font-sans">
-                <span>شركة</span>
-                <span className="text-transparent bg-clip-text bg-gradient-to-l from-amber-400 via-yellow-200 to-amber-500 drop-shadow-[0_2px_10px_rgba(245,158,11,0.15)]">عرب وورلد</span>
-                <span className="text-xs font-bold text-slate-300">للمقاولات العامة والتقسيط</span>
-              </h1>
-              <p className="text-[9px] text-slate-400 font-medium tracking-wide mt-0.5">البوابة الإدارية والمنظومة الحسابية المتكاملة الموثقة</p>
+
+            {/* Global Company Dropdown Switcher */}
+            <div className="relative shrink-0 w-full sm:w-auto">
+              <select
+                value={selectedCompanyId}
+                onChange={(e) => setSelectedCompanyId(e.target.value)}
+                className="w-full sm:w-60 pl-8 pr-10 py-2.5 bg-slate-950/80 border border-amber-500/20 text-xs font-bold text-amber-100 rounded-xl focus:outline-none focus:border-amber-500 cursor-pointer appearance-none shadow-inner shadow-black/40 text-right font-sans"
+              >
+                {(currentUser?.role === "admin" || getAuthorizedCompanies().length > 1) && (
+                  <option value="all" className="bg-slate-950 text-slate-100">
+                    {currentUser?.role === "admin" ? "✦ جميع الشركات (عرض شامل)" : "✦ جميع الشركات المصرحة بها (عرض مجمع)"}
+                  </option>
+                )}
+                {getAuthorizedCompanies().map((c) => (
+                  <option key={c.id} value={c.id} className="bg-slate-950 text-slate-100">🏢 {c.name}</option>
+                ))}
+              </select>
+              <div className="absolute right-3 top-1/2 -translate-y-1/2 text-amber-500 pointer-events-none text-xs">🏢</div>
+              <div className="absolute left-2.5 top-1/2 -translate-y-1/2 text-amber-500/60 pointer-events-none text-[8px]">▼</div>
             </div>
           </div>
           
@@ -2044,7 +2428,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
           {/* Section Renderings checks */}
           {activeSection === "dashboard" && (
             <Dashboard
-              installments={installments}
+              installments={getVisibleInstallments()}
               receipts={getVisibleReceipts()}
               payments={getVisiblePayments()}
               expenses={getVisibleExpenses()}
@@ -2055,8 +2439,8 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
           {activeSection === "installments" && (
             <Installments
               currentUser={currentUser}
-              installments={installments}
-              projects={projects}
+              installments={getVisibleInstallments()}
+              projects={getVisibleProjects()}
               onSaveInstallment={onSaveInstallment}
               onDeleteInstallment={onDeleteInstallment}
               onPrintContract={onPrintContract}
@@ -2066,7 +2450,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
 
           {activeSection === "treasury" && (
             <Treasury
-              installments={installments}
+              installments={getVisibleInstallments()}
               receipts={getVisibleReceipts()}
               payments={getVisiblePayments()}
               expenses={getVisibleExpenses()}
@@ -2081,18 +2465,26 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                   <h3 className="text-base font-black text-white flex items-center gap-2"><span>📋</span> تحرير وثيقة عروض الأسعار</h3>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <input required placeholder="اسم العميل" value={qClient} onChange={(e) => setQClient(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-blue-500" />
-                  <input placeholder="رقم الجوال" value={qPhone} onChange={(e) => setQPhone(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none" />
-                  <input placeholder="المشروع التابع" value={qProject} onChange={(e) => setQProject(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none" />
-                  <input type="number" required placeholder="قيمة العرض" value={qAmount} onChange={(e) => setQAmount(e.target.value ? Number(e.target.value) : "")} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none" />
-                  <input type="number" placeholder="الضريبة المقررة %" value={qVat} onChange={(e) => setQVat(e.target.value ? Number(e.target.value) : "")} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none" />
-                  <select value={qStatus} onChange={(e: any) => setQStatus(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none">
+                  <input required placeholder="اسم العميل" value={qClient} onChange={(e) => setQClient(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-blue-500 font-sans" />
+                  <input placeholder="رقم الجوال" value={qPhone} onChange={(e) => setQPhone(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none font-sans" />
+                  <input placeholder="المشروع التابع" value={qProject} onChange={(e) => setQProject(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none font-sans" />
+                  <input type="number" required placeholder="قيمة العرض" value={qAmount} onChange={(e) => setQAmount(e.target.value ? Number(e.target.value) : "")} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none font-mono" />
+                  <input type="number" placeholder="الضريبة المقررة %" value={qVat} onChange={(e) => setQVat(e.target.value ? Number(e.target.value) : "")} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none font-mono" />
+                  
+                  <select value={formCompanyId} onChange={(e) => setFormCompanyId(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none font-sans">
+                    <option value="">🏢 تبعية شركة الشعار (تلقائي)</option>
+                    {companies.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+
+                  <select value={qStatus} onChange={(e: any) => setQStatus(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none font-sans">
                     <option value="جديد">جديد</option>
                     <option value="مرسل">مرسل</option>
                     <option value="مقبول">مقبول</option>
                     <option value="مرفوض">مرفوض</option>
                   </select>
-                  <textarea placeholder="شروط وملاحظات إضافية" value={qNotes} onChange={(e) => setQNotes(e.target.value)} className="w-full px-3 py-2 h-[41px] bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white sm:col-span-2 focus:outline-none" />
+                  <textarea placeholder="شروط وملاحظات إضافية" value={qNotes} onChange={(e) => setQNotes(e.target.value)} className="w-full px-3 py-2 h-[41px] bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white sm:col-span-1 focus:outline-none font-sans" />
                 </div>
                 <div className="flex gap-2 justify-end">
                   {editQuoteId && (
@@ -2116,7 +2508,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                     </tr>
                   </thead>
                   <tbody>
-                    {quotes.map((q, idx) => (
+                    {getVisibleQuotes().map((q, idx) => (
                       <tr key={idx} className="border-b border-slate-850 hover:bg-slate-800/10 transition-colors">
                         <td className="py-3 px-3 font-mono font-bold text-slate-300">{q.no}</td>
                         <td className="py-3 px-3 font-black text-white">{q.client}</td>
@@ -2540,7 +2932,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                     </tr>
                   </thead>
                   <tbody>
-                    {projects.map((p, idx) => (
+                    {getVisibleProjects().map((p, idx) => (
                       <tr key={idx} className="border-b border-slate-850 hover:bg-slate-800/10 transition-colors">
                         <td className="py-3 px-3">
                           <span className="block font-black text-white">{p.name}</span>
@@ -2624,7 +3016,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                     </tr>
                   </thead>
                   <tbody>
-                    {workers.map((w, idx) => (
+                    {getVisibleWorkers().map((w, idx) => (
                       <tr key={idx} className="border-b border-slate-850 hover:bg-slate-800/10 transition-colors">
                         <td className="py-3 px-3">
                           <span className="block font-black text-white">{w.name}</span>
@@ -2984,6 +3376,447 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Companies and Extracts Section */}
+          {activeSection === "companies" && (currentUser?.role === "admin" || can("companies")) && (
+            <div className="space-y-8">
+              
+              {/* Companies Tab Layout Header */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                
+                {/* 1. Add/Edit Company Form Card */}
+                <div className="lg:col-span-1 bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
+                  <div className="border-b border-slate-800 pb-3">
+                    <h3 className="text-base font-black text-white flex items-center gap-2 font-sans">
+                      <span>🏢</span>
+                      <span>{editCompanyId ? "تعديل بطاقة الشركة" : "إضافة شركة جديدة"}</span>
+                    </h3>
+                    <p className="text-[10px] text-slate-400 mt-1">تسجيل وتحديث كيانات الشركة التابعة وقيم رأسمالها.</p>
+                  </div>
+
+                  <form onSubmit={saveCompanyLogic} className="space-y-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-slate-400 font-bold">اسم الشركة بالكامل *</label>
+                      <input
+                        required
+                        type="text"
+                        placeholder="مثال: شركة عرب وورد للمباني"
+                        value={cName}
+                        onChange={(e) => setCName(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 font-sans"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-slate-400 font-bold">رقم السجل التجاري</label>
+                      <input
+                        type="text"
+                        placeholder="مثال: 1010XXXXXX"
+                        value={cRegister}
+                        onChange={(e) => setCRegister(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 font-mono"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-slate-400 font-bold">الرقم الضريبي الموحد</label>
+                      <input
+                        type="text"
+                        placeholder="مثال: 3000XXXXXX00003"
+                        value={cTaxNo}
+                        onChange={(e) => setCTaxNo(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 font-mono"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-slate-400 font-bold">رأس مال الشركة التأسيسي (ريال)</label>
+                      <input
+                        type="number"
+                        placeholder="العاصمة التأسيسية بالعملة المحلية"
+                        value={cCapital}
+                        onChange={(e) => setCCapital(e.target.value ? Number(e.target.value) : "")}
+                        className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 font-mono"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-slate-400 font-bold">هاتف التواصل</label>
+                      <input
+                        type="text"
+                        placeholder="مثال: 05XXXXXXXX"
+                        value={cPhone}
+                        onChange={(e) => setCPhone(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 font-mono"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-slate-400 font-bold">العنوان ومقر الشركة</label>
+                      <textarea
+                        placeholder="المدينة والحي والشارع ومقر الإدارة..."
+                        value={cAddress}
+                        onChange={(e) => setCAddress(e.target.value)}
+                        className="w-full px-3 py-2 h-16 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 font-sans"
+                      />
+                    </div>
+
+                    <div className="flex gap-2 justify-end pt-2">
+                      {editCompanyId && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditCompanyId(null);
+                            setCName("");
+                            setCRegister("");
+                            setCTaxNo("");
+                            setCCapital("");
+                            setCPhone("");
+                            setCAddress("");
+                          }}
+                          className="px-4 py-2 bg-slate-800 hover:bg-slate-755 text-slate-300 rounded-xl text-xs font-black transition-colors"
+                        >
+                          إلغاء
+                        </button>
+                      )}
+                      <button
+                        type="submit"
+                        className="flex-1 py-2 bg-gradient-to-l from-amber-500 to-yellow-500 hover:from-amber-400 text-slate-950 rounded-xl text-xs font-black shadow-lg shadow-amber-500/15"
+                      >
+                        {editCompanyId ? "حفظ التعديلات 💾" : "اعتماد وتسجيل الشركة ✨"}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+
+                {/* 2. Registered Companies Grid List */}
+                <div className="lg:col-span-2 space-y-6">
+                  <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl">
+                    <div className="flex justify-between items-center border-b border-slate-800 pb-3 mb-4">
+                      <div>
+                        <h3 className="text-base font-black text-white flex items-center gap-2 font-sans">
+                          <span>🏢</span>
+                          <span>الشركات التابعة المسجلة ({companies.length})</span>
+                        </h3>
+                        <p className="text-[10px] text-slate-400 mt-1">الكيانات والمؤسسات الحالية تحت المنظومة الموحدة.</p>
+                      </div>
+                    </div>
+
+                    {companies.length === 0 ? (
+                      <div className="text-center py-12 bg-slate-950/20 border border-dashed border-slate-805 rounded-2xl">
+                        <span className="text-3xl block">🏛️</span>
+                        <h4 className="text-xs font-black text-slate-400 mt-3">لا توجد شركات مدرجة حتى الآن</h4>
+                        <p className="text-[10px] text-slate-500 mt-1 max-w-sm mx-auto">سجل أول شركة من النموذج لاستعراض عمالها ومشاريعها وسندات أمرها.</p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {companies.map((comp) => {
+                          const compWorkers = workers.filter((w) => w.company_id === comp.id);
+                          const compProjects = projects.filter((p) => p.company_id === comp.id);
+                          const compInstallments = installments.filter((i) => i.company_id === comp.id);
+                          const compTotalCapital = compInstallments.reduce((sum, i) => sum + Number(i.amount || 0), 0);
+
+                          return (
+                            <div key={comp.id} className="bg-slate-950/40 p-4 rounded-2xl border border-slate-800 hover:border-amber-500/20 transition-all flex flex-col justify-between relative overflow-hidden before:absolute before:inset-x-0 before:top-0 before:h-[2px] before:bg-gradient-to-r before:from-amber-500/20 before:via-transparent before:to-transparent">
+                              <div className="space-y-3">
+                                <div className="flex justify-between items-start">
+                                  <div>
+                                    <h4 className="text-xs font-extrabold text-white font-sans">{comp.name}</h4>
+                                    {comp.commercial_register && (
+                                      <span className="text-[9px] text-slate-400 block mt-0.5 font-mono">سجل: {comp.commercial_register}</span>
+                                    )}
+                                  </div>
+                                  <div className="flex gap-1.5 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditCompanyId(comp.id);
+                                        setCName(comp.name || "");
+                                        setCRegister(comp.commercial_register || "");
+                                        setCTaxNo(comp.tax_no || "");
+                                        setCCapital(comp.capital || "");
+                                        setCPhone(comp.phone || "");
+                                        setCAddress(comp.address || "");
+                                      }}
+                                      className="p-1 px-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 rounded-lg text-[10px] font-bold transition-all"
+                                    >
+                                      تعديل
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => onDeleteCompany(comp.id, comp.name)}
+                                      className="p-1 px-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg text-[10px] font-bold transition-all"
+                                    >
+                                      حذف
+                                    </button>
+                                  </div>
+                                </div>
+
+                                <div className="grid grid-cols-3 gap-2 py-2 border-y border-slate-800/40">
+                                  <div className="text-center bg-slate-900/40 p-1.5 rounded-lg border border-slate-800/20">
+                                    <span className="block text-[8px] text-slate-500 font-bold">العمال والمهندسين</span>
+                                    <span className="block text-xs font-mono font-black text-amber-400 mt-0.5">{compWorkers.length}</span>
+                                  </div>
+                                  <div className="text-center bg-slate-900/40 p-1.5 rounded-lg border border-slate-800/20">
+                                    <span className="block text-[8px] text-slate-500 font-bold">المشاريع المدشنة</span>
+                                    <span className="block text-xs font-mono font-black text-blue-400 mt-0.5">{compProjects.length}</span>
+                                  </div>
+                                  <div className="text-center bg-slate-900/40 p-1.5 rounded-lg border border-slate-800/20">
+                                    <span className="block text-[8px] text-slate-500 font-bold">رأس مال العقود</span>
+                                    <span className="block text-[10px] font-mono font-black text-emerald-400 mt-0.5 truncate">{compTotalCapital.toLocaleString()}</span>
+                                  </div>
+                                </div>
+
+                                <div className="text-[10px] text-slate-400 space-y-1 font-sans">
+                                  {comp.tax_no && (
+                                    <p className="flex justify-between"><span className="text-slate-500">رقم ضريبي:</span> <span className="font-mono text-slate-300">{comp.tax_no}</span></p>
+                                  )}
+                                  {comp.phone && (
+                                    <p className="flex justify-between"><span className="text-slate-500">الهاتف:</span> <span className="font-mono text-slate-300">{comp.phone}</span></p>
+                                  )}
+                                  {comp.address && (
+                                    <p className="flex justify-between text-[9px] mt-1"><span className="text-slate-505 shrink-0">العنوان:</span> <span className="text-slate-300 leading-normal text-left truncate max-w-xs">{comp.address}</span></p>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. Company's Government/Private billing Extracts Section */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 pt-2">
+                
+                {/* Add/Edit Extract Form Card */}
+                <div className="lg:col-span-1 bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
+                  <div className="border-b border-slate-800 pb-3">
+                    <h3 className="text-base font-black text-white flex items-center gap-2 font-sans">
+                      <span>📄</span>
+                      <span>{editExtractId ? "تعديل مستند المستخلص" : "إنشاء مستخلص مالي جديد"}</span>
+                    </h3>
+                    <p className="text-[10px] text-slate-400 mt-1">تسجيل مستخلص مالي معتمد لمشاريع وعمالات الشركات.</p>
+                  </div>
+
+                  {companies.length === 0 ? (
+                    <div className="text-center py-6 bg-slate-950/20 border border-slate-800 rounded-xl">
+                      <p className="text-[10px] text-slate-500 font-sans">يجب إضافة شركة واحدة على الأقل قبل تسجيل مستخلصات مالية.</p>
+                    </div>
+                  ) : (
+                    <form onSubmit={saveExtractLogic} className="space-y-4">
+                      
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-slate-400 font-bold font-sans">الشركة التابعة المالكة *</label>
+                        <select
+                          required
+                          value={exCompanyId}
+                          onChange={(e) => setExCompanyId(e.target.value)}
+                          className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 font-sans"
+                        >
+                          <option value="">-- اختر الشركة --</option>
+                          {companies.map((comp) => (
+                            <option key={comp.id} value={comp.id}>🏢 {comp.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-slate-400 font-bold">رقم / عنوان المستخلص *</label>
+                        <input
+                          required
+                          type="text"
+                          placeholder="مثال: المستخلص النهائي لمشروع وزارة الرياضة"
+                          value={exTitle}
+                          onChange={(e) => setExTitle(e.target.value)}
+                          className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 font-sans"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-slate-400 font-bold">القيمة الإجمالية للمستخلص (ريال) *</label>
+                        <input
+                          required
+                          type="number"
+                          placeholder="القيمة المقررة"
+                          value={exAmount}
+                          onChange={(e) => setExAmount(e.target.value ? Number(e.target.value) : "")}
+                          className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 font-mono"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-slate-400 font-bold">المبلغ المسدد / المحصل حتى الآن (ريال)</label>
+                        <input
+                          type="number"
+                          placeholder="مثال: 0 أو كامل القيمة"
+                          value={exPaid}
+                          onChange={(e) => setExPaid(e.target.value ? Number(e.target.value) : "")}
+                          className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 font-mono"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-slate-400 font-bold">تاريخ إصدار المستند</label>
+                        <input
+                          type="date"
+                          value={exDate}
+                          onChange={(e) => setExDate(e.target.value)}
+                          className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 font-mono"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-slate-400 font-bold">حالة المراجعة المالية والبلدية</label>
+                        <select
+                          value={exStatus}
+                          onChange={(e: any) => setExStatus(e.target.value)}
+                          className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 font-sans"
+                        >
+                          <option value="نشط">تحت المراجعة والاعتماد (نشط)</option>
+                          <option value="مدفوع">مكتمل الصرف والدفع (مدفوع)</option>
+                          <option value="متأخر">معلق متعثر الصرف (متأخر)</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-slate-400 font-bold">البيان وشرائح الملاحظة</label>
+                        <textarea
+                          placeholder="بنود الصرف، الدفعات، المهندس المشرف، إلخ..."
+                          value={exNotes}
+                          onChange={(e) => setExNotes(e.target.value)}
+                          className="w-full px-3 py-2 h-16 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 font-sans"
+                        />
+                      </div>
+
+                      <div className="flex gap-2 justify-end pt-2">
+                        {editExtractId && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditExtractId(null);
+                              setExCompanyId("");
+                              setExTitle("");
+                              setExAmount("");
+                              setExPaid("");
+                              setExStatus("نشط");
+                              setExNotes("");
+                            }}
+                            className="px-4 py-2 bg-slate-800 hover:bg-slate-750 text-slate-300 rounded-xl text-xs font-black transition-colors font-sans"
+                          >
+                            إلغاء
+                          </button>
+                        )}
+                        <button
+                          type="submit"
+                          className="flex-1 py-2 bg-gradient-to-l from-amber-500 to-yellow-500 hover:from-amber-400 text-slate-950 rounded-xl text-xs font-black shadow-lg shadow-amber-500/15"
+                        >
+                          {editExtractId ? "حفظ التحديث ماليًا 💾" : "حفظ وقيد المستخلص 📄"}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+
+                {/* Extracts Data List Table */}
+                <div className="lg:col-span-2 space-y-6">
+                  <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl overflow-x-auto">
+                    <div className="flex justify-between items-center border-b border-slate-800 pb-3 mb-4">
+                      <div>
+                        <h3 className="text-base font-black text-white flex items-center gap-2 font-sans">
+                          <span>📋</span>
+                          <span>المستخلصات المالية للشركات التابعة ({extracts.length})</span>
+                        </h3>
+                        <p className="text-[10px] text-slate-400 mt-1">تتبع كشوف المستخلصات المقررة ومستويات التحصيل.</p>
+                      </div>
+                    </div>
+
+                    {extracts.length === 0 ? (
+                      <div className="text-center py-12 bg-slate-950/20 border border-slate-800 rounded-2xl">
+                        <span className="text-3xl block">📄</span>
+                        <h4 className="text-xs font-black text-slate-400 mt-3">لا توجد كشوف مستخلصات مقيدة</h4>
+                        <p className="text-[10px] text-slate-500 mt-1 max-w-sm mx-auto">سجل مستخلصًا لدعم الرقابة المالية.</p>
+                      </div>
+                    ) : (
+                      <table className="w-full text-right text-xs">
+                        <thead>
+                          <tr className="bg-slate-950 border-b border-slate-800 text-slate-300">
+                            <th className="py-2.5 px-3 font-bold">الشركة التابعة</th>
+                            <th className="py-2.5 px-3 font-bold">رقم/عنوان المستخلص</th>
+                            <th className="py-2.5 px-3 font-bold">تاريخ الإصدار</th>
+                            <th className="py-2.5 px-3 font-bold">القيمة التقديرية</th>
+                            <th className="py-2.5 px-3 font-bold">التحصيل الفعلي</th>
+                            <th className="py-2.5 px-3 font-bold">المعلق / المتبقي</th>
+                            <th className="py-2.5 px-3 font-bold">حالة الصرف</th>
+                            <th className="py-2.5 px-3 font-bold text-center">إجراء</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {getVisibleExtracts().map((ex) => {
+                            const parentCompName = companies.find((c) => c.id === ex.company_id)?.name || "شركة غير محددة";
+                            const amt = Number(ex.amount || 0);
+                            const paid = Number(ex.paid_amount || 0);
+                            const rem = Math.max(0, amt - paid);
+
+                            let badge = "bg-slate-800 text-slate-300";
+                            if (ex.status === "مدفوع") badge = "bg-emerald-500/10 text-emerald-400";
+                            if (ex.status === "متأخر") badge = "bg-rose-500/10 text-rose-400 font-bold animate-pulse";
+
+                            return (
+                              <tr key={ex.id} className="border-b border-slate-850 hover:bg-slate-800/10 transition-colors">
+                                <td className="py-3 px-3 font-black text-white font-sans">{parentCompName}</td>
+                                <td className="py-3 px-3 font-bold text-slate-200">
+                                  <span>{ex.title}</span>
+                                  {ex.notes && (
+                                    <span className="block text-[9px] text-slate-500 max-w-xs truncate font-sans mt-0.5">{ex.notes}</span>
+                                  )}
+                                </td>
+                                <td className="py-3 px-3 font-mono text-slate-400">{ex.date}</td>
+                                <td className="py-3 px-3 font-mono font-bold text-white">{amt.toLocaleString()} ريال</td>
+                                <td className="py-3 px-3 font-mono font-black text-emerald-400">{paid.toLocaleString()} ريال</td>
+                                <td className="py-3 px-3 font-mono font-bold text-amber-500">{rem.toLocaleString()} ريال</td>
+                                <td className="py-3 px-3">
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-black ${badge}`}>{ex.status}</span>
+                                </td>
+                                <td className="py-3 px-3 text-center space-x-1 whitespace-nowrap">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditExtractId(ex.id);
+                                      setExCompanyId(ex.company_id || "");
+                                      setExTitle(ex.title || "");
+                                      setExAmount(ex.amount || "");
+                                      setExPaid(ex.paid_amount || "");
+                                      setExDate(ex.date || "");
+                                      setExStatus(ex.status || "نشط");
+                                      setExNotes(ex.notes || "");
+                                    }}
+                                    className="p-1 px-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 rounded text-[10px] font-black transition-all"
+                                  >
+                                    📝
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => onDeleteExtract(ex.id, ex.title)}
+                                    className="p-1 px-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded text-[10px] font-black transition-all"
+                                  >
+                                    🗑️
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                </div>
+              </div>
+
             </div>
           )}
 
@@ -3415,42 +4248,122 @@ CREATE TABLE IF NOT EXISTS sessions (
                 </div>
 
                 {/* Submitting check lists for individual permissions inside erp */}
-                <div className="space-y-2">
-                  <span className="block text-xs font-extrabold text-amber-400">تشغيل صلاحيات الموظف (Check Permissions Context)</span>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 bg-slate-950/40 p-4 border border-slate-850 rounded-2xl">
-                    {Object.keys(uPerms).map((k) => (
-                      <label key={k} className="flex items-center gap-2 px-3 py-2 bg-slate-900/60 rounded-xl border border-slate-850 hover:border-slate-800 hover:text-slate-200 transition-all cursor-pointer text-xs font-bold select-none text-slate-400">
-                        <input
-                          type="checkbox"
-                          checked={uPerms[k]}
-                          onChange={(e) => setUPerms((prev) => ({ ...prev, [k]: e.target.checked }))}
-                          className="accent-amber-500 w-4 h-4 cursor-pointer"
-                        />
-                        <span>
-                          {k === "installmentsView" && "👁️ التقسيط والعقود"}
-                          {k === "installmentsAdd" && "➕ إضافة عقد يومي"}
-                          {k === "installmentsEdit" && "📝 تعديل عقود فرعية"}
-                          {k === "installmentsDelete" && "❌ حذف العقود الملتزمة"}
-                          {k === "quotes" && "📋 عروض الأسعار"}
-                          {k === "receipts" && "💰 سندات القبض"}
-                          {k === "payments" && "💸 سندات الصرف"}
-                          {k === "expenses" && "🧾 المصروفات الدفترية"}
-                          {k === "treasury" && "🏦 استعراض الخزائن الموحدة"}
-                          {k === "projects" && "🏗️ تتبع المشاريع والمهندسين"}
-                          {k === "workers" && "👷 العمال ورواتب السلف"}
-                          {k === "users" && "👥 تهيئة وإضافة الموظفين"}
-                          {k === "sessions" && "🕰️ استكشاف سجلات التدقيق"}
-                          {k === "print" && "🖨️ تفويض طباعة عهود الاتفاق"}
-                          {k.startsWith("dash") && `المؤشر: ${k.replace("dash", "")}`}
-                        </span>
+                <div className="space-y-3">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pb-2 border-b border-slate-850">
+                    <span className="block text-xs font-extrabold text-amber-400">🚨 صلاحيات الموظف التفصيلية حسب كل شركة</span>
+                    <div className="flex items-center gap-2 w-full sm:w-auto">
+                      <span className="text-[10px] text-slate-400 font-bold whitespace-nowrap font-sans">عرض/تعديل صلاحيات:</span>
+                      <select
+                        value={selectedCompanyIdForPerms}
+                        onChange={(e) => setSelectedCompanyIdForPerms(e.target.value)}
+                        className="px-3 py-1 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-amber-400 focus:outline-none focus:border-amber-500 cursor-pointer font-sans"
+                      >
+                        <option value="global">⚙️ الصلاحيات العامة (الافتراضية لجميع الشركات)</option>
+                        {companies.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            🏢 {c.name} {uCompanyPerms[c.id] ? "⭐️ (مخصصة)" : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {selectedCompanyIdForPerms !== "global" && (
+                    <div className="flex items-center gap-2 mb-3 bg-amber-500/10 border border-amber-500/20 px-3 py-2 rounded-xl transition-all">
+                      <input
+                        type="checkbox"
+                        id="has-custom-perms-toggle"
+                        checked={!!uCompanyPerms[selectedCompanyIdForPerms]}
+                        onChange={(e) => {
+                          const compId = selectedCompanyIdForPerms;
+                          if (e.target.checked) {
+                            setUCompanyPerms((prev) => ({
+                              ...prev,
+                              [compId]: { ...uPerms }
+                            }));
+                          } else {
+                            setUCompanyPerms((prev) => {
+                              const copy = { ...prev };
+                              delete copy[compId];
+                              return copy;
+                            });
+                          }
+                        }}
+                        className="w-4 h-4 cursor-pointer accent-amber-500"
+                      />
+                      <label htmlFor="has-custom-perms-toggle" className="text-xs font-black text-amber-300 cursor-pointer select-none font-sans">
+                        تفعيل صلاحيات مخصصة ومنفصلة لهذه الشركة فقط (بخلاف الصلاحيات العامة للموظف)
                       </label>
-                    ))}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 bg-slate-950/40 p-4 border border-slate-850 rounded-2xl">
+                    {Object.keys(uPerms).map((k) => {
+                      const isCustomActive = selectedCompanyIdForPerms === "global" || !!uCompanyPerms[selectedCompanyIdForPerms];
+                      const val = selectedCompanyIdForPerms === "global" 
+                        ? !!uPerms[k] 
+                        : (uCompanyPerms[selectedCompanyIdForPerms] ? !!uCompanyPerms[selectedCompanyIdForPerms][k] : !!uPerms[k]);
+                      
+                      return (
+                        <label 
+                          key={k} 
+                          className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all cursor-pointer text-xs font-bold select-none ${
+                            !isCustomActive 
+                              ? "bg-slate-900/30 border-slate-900/50 text-slate-600 cursor-not-allowed opacity-50 font-sans" 
+                              : "bg-slate-900/60 border-slate-850 hover:border-slate-800 hover:text-slate-200 text-slate-400 font-sans"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={val}
+                            disabled={selectedCompanyIdForPerms !== "global" && !uCompanyPerms[selectedCompanyIdForPerms]}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              if (selectedCompanyIdForPerms === "global") {
+                                setUPerms((prev) => ({ ...prev, [k]: checked }));
+                              } else {
+                                const compId = selectedCompanyIdForPerms;
+                                setUCompanyPerms((prev) => {
+                                  const currentCompPerms = prev[compId] || { ...uPerms };
+                                  return {
+                                    ...prev,
+                                    [compId]: {
+                                      ...currentCompPerms,
+                                      [k]: checked
+                                    }
+                                  };
+                                });
+                              }
+                            }}
+                            className="accent-amber-500 w-4 h-4 cursor-pointer disabled:cursor-not-allowed"
+                          />
+                          <span>
+                            {k === "installmentsView" && "👁️ التقسيط والعقود"}
+                            {k === "installmentsAdd" && "➕ إضافة عقد يومي"}
+                            {k === "installmentsEdit" && "📝 تعديل عقود فرعية"}
+                            {k === "installmentsDelete" && "❌ حذف العقود الملتزمة"}
+                            {k === "quotes" && "📋 عروض الأسعار"}
+                            {k === "receipts" && "💰 سندات القبض"}
+                            {k === "payments" && "💸 سندات الصرف"}
+                            {k === "expenses" && "🧾 المصروفات الدفترية"}
+                            {k === "treasury" && "🏦 استعراض الخزائن الموحدة"}
+                            {k === "projects" && "🏗️ تتبع المشاريع والمهندسين"}
+                            {k === "workers" && "👷 العمال ورواتب السلف"}
+                            {k === "companies" && "🏢 دليل الشركات والمستخلصات"}
+                            {k === "users" && "👥 تهيئة وإضافة الموظفين"}
+                            {k === "sessions" && "🕰️ استكشاف سجلات التدقيق"}
+                            {k === "print" && "🖨️ تفويض طباعة عهود الاتفاق"}
+                            {k.startsWith("dash") && `المؤشر: ${k.replace("dash", "")}`}
+                          </span>
+                        </label>
+                      );
+                    })}
                   </div>
                 </div>
 
                 <div className="flex gap-2 justify-end">
                   {editUserId && (
-                    <button type="button" onClick={() => { setEditUserId(null); setUName(""); setUCode(""); setUPass(""); setUWorkerId(""); setURegion(""); setURole("employee"); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
+                    <button type="button" onClick={() => { setEditUserId(null); setUName(""); setUCode(""); setUPass(""); setUWorkerId(""); setURegion(""); setURole("employee"); setUCompanyPerms({}); setSelectedCompanyIdForPerms("global"); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
                   )}
                   <button type="submit" className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-black">حفظ وإرسال الصلاحية للموظف</button>
                 </div>
@@ -3491,6 +4404,18 @@ CREATE TABLE IF NOT EXISTS sessions (
                           <td className="py-3 px-3 font-bold text-indigo-400">{permissionsObj.region || "كامل فروع المملكة"}</td>
                           <td className="py-3 px-3 text-slate-400 max-w-sm truncate" title={names.join(" - ")}>
                             {names.length > 0 ? names.join(" • ") : "صلاحيات محدودة كافية للعرض فقط"}
+                            {u.company_perms && Object.keys(u.company_perms).length > 0 && (
+                              <div className="mt-1.5 flex flex-wrap gap-1.5 justify-start">
+                                {Object.keys(u.company_perms).map((cId) => {
+                                  const compName = companies.find((c) => c.id === cId)?.name || "شركة فرعية";
+                                  return (
+                                    <span key={cId} className="inline-block text-[9px] font-bold text-amber-300 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded-md font-sans">
+                                      🏢 {compName}: صلاحيات مخصصة
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </td>
                           <td className="py-3 px-3 text-center space-x-1">
                             <button
@@ -3502,6 +4427,8 @@ CREATE TABLE IF NOT EXISTS sessions (
                                 setUWorkerId(effectiveWorkerId || "");
                                 setURole(u.role || "employee");
                                 setURegion(permissionsObj.region || "");
+                                setSelectedCompanyIdForPerms("global");
+                                setUCompanyPerms(u.company_perms || {});
                                 setUPerms({
                                   ...permissionsObj,
                                   region: permissionsObj.region || "",

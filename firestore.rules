@@ -109,6 +109,23 @@ service cloud.firestore {
         && data.action is string && data.action.size() <= 1000;
     }
 
+    function isValidCompany(data) {
+      return data.keys().hasAll(['id', 'name'])
+        && data.id is string && data.id.size() <= 128
+        && data.name is string && data.name.size() <= 200;
+    }
+
+    function isValidExtract(data) {
+      return data.keys().hasAll(['id', 'company_id', 'title', 'amount', 'paid_amount', 'date', 'status'])
+        && data.id is string && data.id.size() <= 128
+        && data.company_id is string && data.company_id.size() <= 128
+        && data.title is string && data.title.size() <= 200
+        && data.amount is number && data.amount >= 0
+        && data.paid_amount is number && data.paid_amount >= 0
+        && data.date is string && data.date.size() <= 100
+        && data.status is string && (data.status == 'نشط' || data.status == 'مدفوع' || data.status == 'متأخر');
+    }
+
     // --- Collections Configurations ---
 
     match /users/{userId} {
@@ -164,6 +181,18 @@ service cloud.firestore {
       allow create: if isSignedIn() && isValidDbSession(incoming()) && isValidId(sessionId);
       allow update: if false; // Audit logs are immutable
       allow delete: if isSignedIn() && isValidId(sessionId);
+    }
+
+    match /companies/{companyId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidCompany(incoming()) && isValidId(companyId);
+      allow delete: if isSignedIn() && isValidId(companyId);
+    }
+
+    match /extracts/{extractId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidExtract(incoming()) && isValidId(extractId);
+      allow delete: if isSignedIn() && isValidId(extractId);
     }
   }
 }

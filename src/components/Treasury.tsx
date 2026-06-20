@@ -310,8 +310,62 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
 
   const filteredTxs = getFilteredTransactions();
 
+  const totalBalance = safeStats.reduce((sum, s) => sum + s.balance, 0);
+  const totalInbound = safeStats.reduce((sum, s) => sum + s.inbound, 0);
+  const totalOutbound = safeStats.reduce((sum, s) => sum + s.outbound, 0);
+  const totalCapitalOut = safeStats.reduce((sum, s) => sum + s.capitalOut, 0);
+
   return (
     <div className="space-y-8" dir="rtl">
+
+      {/* Dynamic Main Consolidated Liquidity Widget */}
+      <div className="relative overflow-hidden rounded-3xl p-6 bg-slate-900/80 backdrop-blur-xl border border-emerald-500/40 shadow-2xl transition-all duration-300">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl -mr-20 -mt-20 pointer-events-none" />
+        <div className="absolute bottom-0 left-0 w-48 h-48 bg-blue-500/5 rounded-full blur-2xl -ml-10 -mb-10 pointer-events-none" />
+        
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 relative z-10">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2.5">
+              <span className="p-2.5 bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 rounded-2xl flex items-center justify-center">
+                <Wallet className="w-5 h-5 animate-pulse" />
+              </span>
+              <div>
+                <h4 className="text-sm font-black text-slate-200">الرصيد المشترك الإجمالي لكافة الخزائن</h4>
+                <p className="text-[10px] text-slate-400">إجمالي النقدية المتوفرة والمحتسبة بالدفتر في جميع الصناديق</p>
+              </div>
+            </div>
+            
+            <div className="pt-2">
+              <h2 className="text-4xl font-extrabold text-white font-mono tracking-tight flex items-baseline gap-1.5">
+                {totalBalance.toLocaleString()} <span className="text-sm font-normal font-sans text-slate-400">ريال سعودي</span>
+              </h2>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-4 w-full lg:w-auto">
+            <div className="flex-1 min-w-[140px] bg-slate-950/60 rounded-2xl p-4 border border-emerald-500/15 text-right shadow-inner">
+              <span className="block text-slate-500 text-[10px] font-black mb-1">وارد الخزائن المشترك</span>
+              <b className="text-emerald-400 font-extrabold text-sm font-mono flex items-center justify-start gap-1">
+                <span>+</span>{totalInbound.toLocaleString()} <span className="text-[9px] font-sans font-normal text-slate-450">ريال</span>
+              </b>
+            </div>
+            <div className="flex-1 min-w-[140px] bg-slate-950/60 rounded-2xl p-4 border border-rose-500/15 text-right shadow-inner">
+              <span className="block text-slate-500 text-[10px] font-black mb-1">صادر الخزائن المشترك</span>
+              <b className="text-rose-400 font-extrabold text-sm font-mono flex items-center justify-start gap-1">
+                <span>-</span>{totalOutbound.toLocaleString()} <span className="text-[9px] font-sans font-normal text-slate-450">ريال</span>
+              </b>
+            </div>
+            {totalCapitalOut > 0 && (
+              <div className="flex-1 min-w-[140px] bg-slate-950/60 rounded-2xl p-4 border border-purple-500/15 text-right shadow-inner">
+                <span className="block text-slate-500 text-[10px] font-black mb-1">منها رأس مال ممول</span>
+                <b className="text-purple-400 font-extrabold text-sm font-mono flex items-center justify-start gap-1">
+                  <span>-</span>{totalCapitalOut.toLocaleString()} <span className="text-[9px] font-sans font-normal text-slate-450">ريال</span>
+                </b>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
       
       {/* Dynamic Main Premium Glass Card Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
