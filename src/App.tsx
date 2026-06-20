@@ -862,6 +862,7 @@ export default function App() {
     const payload = {
       ...row,
       notes: finalNotes,
+      company_id: row.company_id || (selectedCompanyId !== "all" ? selectedCompanyId : undefined),
     };
     delete payload.region_input;
     delete payload.treasury_input;
@@ -2512,6 +2513,8 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
               onDeleteInstallment={onDeleteInstallment}
               onPrintContract={onPrintContract}
               receipts={getVisibleReceipts()}
+              companies={getAuthorizedCompanies()}
+              selectedCompanyId={selectedCompanyId}
             />
           )}
 

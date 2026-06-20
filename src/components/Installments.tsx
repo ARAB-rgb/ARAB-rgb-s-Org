@@ -8,7 +8,7 @@ import {
   Plus, Search, User, Phone, MapPin, ClipboardList, Shield,
   Printer, Trash2, Edit2, FileText, CheckCircle, AlertTriangle, Eye, X, Globe
 } from "lucide-react";
-import { Installment, Project, User as AuthUser } from "../types";
+import { Installment, Project, User as AuthUser, Company } from "../types";
 import { getContractTiming, awExtractRegion, awCleanNotes, generateNextNo, awExtractTreasury, awExtractCapital, awExtractCapitalSource, awExtractCapitalCompany, awExtractCapitalCollection } from "../db";
 
 interface InstallmentsProps {
@@ -19,6 +19,8 @@ interface InstallmentsProps {
   onDeleteInstallment: (id: string) => void;
   onPrintContract: (id: string) => void;
   receipts: any[];
+  companies?: Company[];
+  selectedCompanyId?: string;
 }
 
 const getStoredTreasuries = (): string[] => {
@@ -49,6 +51,8 @@ export const Installments: React.FC<InstallmentsProps> = ({
   onDeleteInstallment,
   onPrintContract,
   receipts,
+  companies,
+  selectedCompanyId,
 }) => {
   const [editId, setEditId] = useState<string | null>(null);
 
@@ -77,8 +81,16 @@ export const Installments: React.FC<InstallmentsProps> = ({
   const [capitalSource, setCapitalSource] = useState<"شركة" | "تحصيل" | "كلاهما">("شركة");
   const [capitalCompany, setCapitalCompany] = useState<number | "">("");
   const [capitalCollection, setCapitalCollection] = useState<number | "">("");
+  const [installmentCompanyId, setInstallmentCompanyId] = useState("");
   const [dynamicTreasuries, setDynamicTreasuries] = useState<string[]>(getStoredTreasuries);
   const [isCapitalManuallyEdited, setIsCapitalManuallyEdited] = useState(false);
+
+  // Sync selected company when not in edit mode
+  useEffect(() => {
+    if (!editId) {
+      setInstallmentCompanyId(selectedCompanyId !== "all" ? (selectedCompanyId || "") : "");
+    }
+  }, [selectedCompanyId, editId]);
 
   // Capital reactive sync / default computation
   useEffect(() => {
@@ -222,6 +234,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
     setCapitalSource("شركة");
     setCapitalCompany("");
     setCapitalCollection("");
+    setInstallmentCompanyId(selectedCompanyId !== "all" ? (selectedCompanyId || "") : "");
     setIsCapitalManuallyEdited(false);
   };
 
@@ -248,6 +261,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
     setCapitalSource(awExtractCapitalSource(x.notes || ""));
     setCapitalCompany(awExtractCapitalCompany(x.notes || "") || "");
     setCapitalCollection(awExtractCapitalCollection(x.notes || "") || "");
+    setInstallmentCompanyId(x.company_id || "");
     setIsCapitalManuallyEdited(true);
   };
 
@@ -281,7 +295,8 @@ export const Installments: React.FC<InstallmentsProps> = ({
       capital_input: capitalSource === "كلاهما" ? (Number(capitalCompany || 0) + Number(capitalCollection || 0)) : Number(capital || 0),
       capital_source_input: capitalSource,
       capital_company_input: capitalSource === "كلاهما" ? Number(capitalCompany || 0) : (capitalSource === "شركة" ? Number(capital || 0) : 0),
-      capital_collection_input: capitalSource === "كلاهما" ? Number(capitalCollection || 0) : (capitalSource === "تحصيل" ? Number(capital || 0) : 0)
+      capital_collection_input: capitalSource === "كلاهما" ? Number(capitalCollection || 0) : (capitalSource === "تحصيل" ? Number(capital || 0) : 0),
+      company_id: installmentCompanyId || (selectedCompanyId !== "all" ? selectedCompanyId : undefined)
     };
 
     const success = await onSaveInstallment(row, editId);
@@ -339,6 +354,21 @@ export const Installments: React.FC<InstallmentsProps> = ({
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="space-y-1">
+              <label className="text-[10px] font-black text-slate-400">ملف الشركة / المحفظة</label>
+              <select
+                required
+                value={installmentCompanyId}
+                onChange={(e) => setInstallmentCompanyId(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-950/40 border border-slate-850 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-blue-500 transition-colors disabled:opacity-75 disabled:cursor-not-allowed font-sans text-right"
+              >
+                <option value="" className="bg-slate-950 text-slate-100">اختر ملف الشركة</option>
+                {companies && companies.map((c) => (
+                  <option key={c.id} value={c.id} className="bg-slate-950 text-slate-100">🏢 {c.name}</option>
+                ))}
+              </select>
+            </div>
+
             <div className="space-y-1">
               <label className="text-[10px] font-black text-slate-400">اسم العميل</label>
               <div className="relative">
@@ -890,6 +920,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
                         <div className="flex flex-col gap-0.5 mt-0.5">
                           <span className="block text-[10px] text-amber-500/80 font-sans font-bold">{itemRegion || "القرية الرئيسية"}</span>
                           <span className="block text-[9px] text-blue-400 font-sans font-black">🏢 {awExtractTreasury(item.notes || "") || "خزنة التحصيل"}</span>
+                          <span className="block text-[9px] text-amber-200 font-sans font-bold">📂 {companies?.find(c => c.id === item.company_id)?.name || "عام / غير محدد"}</span>
                         </div>
                       </td>
                       <td className="py-3.5 px-4 font-mono text-slate-400">{item.start_date}</td>
