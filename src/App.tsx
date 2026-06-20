@@ -26,7 +26,7 @@ import { Installments } from "./components/Installments";
 import { Treasury } from "./components/Treasury";
 
 const getStoredTreasuries = (): string[] => {
-  const defaults = ["خزنة الشركة", "خزنة التحصيل", "خزنة التحويل", "نقاط البيع"];
+  const defaults = ["خزنة الشركة", "خزنة التحصيل", "خزنة التحويل", "نقاط البيع", "خزنة المقاولات"];
   const saved = localStorage.getItem("aw_treasuries");
   if (saved) {
     try {
@@ -295,13 +295,17 @@ export default function App() {
     }
   };
 
-  const handleLogout = async () => {
-    if (currentUser) {
-      await logSession(currentUser, "تسجيل خروج آمن");
-    }
+  const handleLogout = () => {
+    const userToLog = currentUser;
     setCurrentUser(null);
     localStorage.removeItem("aw_current_user");
     showToast("تم تسجيل الخروج بنجاح", "info");
+
+    if (userToLog) {
+      logSession(userToLog, "تسجيل خروج آمن").catch((err) => {
+        console.warn("Failed to log logout session to database:", err);
+      });
+    }
   };
 
   // Queries sync
@@ -584,6 +588,55 @@ export default function App() {
       return !!activePerms[perm as keyof typeof activePerms];
     }
     return false;
+  };
+
+  const getActivePermsForCompany = (user: AuthUser | null, compId: string | undefined) => {
+    if (!user) return null;
+    if (compId && compId !== "all" && user.company_perms?.[compId]) {
+      const compPerm = user.company_perms[compId];
+      if (compPerm.use_global) {
+        return user.perms;
+      }
+      return compPerm;
+    }
+    return user.perms;
+  };
+
+  const getAuthorizedTreasuries = (user: AuthUser | null, compId: string | undefined): string[] => {
+    const allSafes = getStoredTreasuries();
+    if (!user) return [];
+    if (user.role === "admin") return allSafes;
+
+    const isSafeAllowedInPerm = (permsObj: any, safeName: string) => {
+      const hasAnySafeToggle = Object.keys(permsObj).some(k => k.startsWith("safe_") && permsObj[k] === true);
+      if (!hasAnySafeToggle) {
+        return true;
+      }
+      return !!permsObj[`safe_${safeName}`];
+    };
+
+    if (compId && compId !== "all") {
+      const activePerms = getActivePermsForCompany(user, compId);
+      if (!activePerms) return [];
+      return allSafes.filter(tName => isSafeAllowedInPerm(activePerms, tName));
+    } else {
+      const authComps = getAuthorizedCompanies();
+      const unionSafesSet = new Set<string>();
+      authComps.forEach(c => {
+        const activePerms = getActivePermsForCompany(user, c.id);
+        if (activePerms) {
+          allSafes.forEach(tName => {
+            if (isSafeAllowedInPerm(activePerms, tName)) {
+              unionSafesSet.add(tName);
+            }
+          });
+        }
+      });
+      if (unionSafesSet.size === 0 && authComps.length > 0) {
+        return allSafes;
+      }
+      return Array.from(unionSafesSet);
+    }
   };
 
   useEffect(() => {
@@ -2338,6 +2391,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
           </div>
 
           <button
+            type="button"
             onClick={handleLogout}
             className="w-full py-3 bg-white/5 hover:bg-rose-950/20 text-slate-300 hover:text-rose-400 border border-white/5 hover:border-rose-500/25 text-xs font-black rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 glass-btn"
           >
@@ -2462,6 +2516,8 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
               receipts={getVisibleReceipts()}
               payments={getVisiblePayments()}
               expenses={getVisibleExpenses()}
+              authorizedTreasuries={getAuthorizedTreasuries(currentUser, selectedCompanyId)}
+              isAdmin={currentUser?.role === "admin"}
             />
           )}
 
@@ -2594,7 +2650,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                       onChange={(e) => setRTreasury(e.target.value)}
                       className="w-full px-3.5 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 transition-colors cursor-pointer bg-slate-950"
                     >
-                      {getStoredTreasuries().map((tName) => (
+                      {getAuthorizedTreasuries(currentUser, selectedCompanyId).map((tName) => (
                         <option key={tName} value={tName} className="bg-slate-950 text-white">💰 {tName}</option>
                       ))}
                     </select>
@@ -2745,7 +2801,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                       onChange={(e) => setPayTreasury(e.target.value)}
                       className="w-full px-3 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 transition-colors cursor-pointer bg-slate-950"
                     >
-                      {getStoredTreasuries().map((tName) => (
+                      {getAuthorizedTreasuries(currentUser, selectedCompanyId).map((tName) => (
                         <option key={tName} value={tName} className="bg-slate-950 text-white">💰 {tName}</option>
                       ))}
                     </select>
@@ -2841,7 +2897,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                     onChange={(e) => setETreasury(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none cursor-pointer bg-slate-950"
                   >
-                    {getStoredTreasuries().map((tName) => (
+                    {getAuthorizedTreasuries(currentUser, selectedCompanyId).map((tName) => (
                       <option key={tName} value={tName} className="bg-slate-950 text-white">💰 {tName}</option>
                     ))}
                   </select>
@@ -3246,7 +3302,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                               onChange={(e) => setAdvTreasury(e.target.value)} 
                               className="w-full px-2.5 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs font-bold text-white focus:outline-none cursor-pointer text-slate-950 bg-white"
                             >
-                              {getStoredTreasuries().map((tName) => (
+                              {getAuthorizedTreasuries(currentUser, selectedCompanyId).map((tName) => (
                                 <option key={tName} value={tName} className="text-slate-950">💰 {tName}</option>
                               ))}
                             </select>
@@ -4377,19 +4433,102 @@ CREATE TABLE IF NOT EXISTS sessions (
                   )}
 
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 bg-slate-950/40 p-4 border border-slate-850 rounded-2xl">
-                    {Object.keys(uPerms).map((k) => {
+                    {Object.keys(uPerms)
+                      .filter((k) => !k.startsWith("safe_"))
+                      .map((k) => {
+                        const hasCompObj = !!uCompanyPerms[selectedCompanyIdForPerms];
+                        const isCustomActive = selectedCompanyIdForPerms === "global" || (hasCompObj && !uCompanyPerms[selectedCompanyIdForPerms].use_global);
+                        
+                        const val = selectedCompanyIdForPerms === "global" 
+                          ? !!uPerms[k] 
+                          : (hasCompObj 
+                              ? (uCompanyPerms[selectedCompanyIdForPerms].use_global ? !!uPerms[k] : !!uCompanyPerms[selectedCompanyIdForPerms][k])
+                              : !!uPerms[k]);
+                        
+                        return (
+                          <label 
+                            key={k} 
+                            className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all cursor-pointer text-xs font-bold select-none ${
+                              !isCustomActive 
+                                ? "bg-slate-900/30 border-slate-900/50 text-slate-600 cursor-not-allowed opacity-50 font-sans" 
+                                : "bg-slate-900/60 border-slate-850 hover:border-slate-800 hover:text-slate-200 text-slate-400 font-sans"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={val}
+                              disabled={selectedCompanyIdForPerms !== "global" && (!hasCompObj || !!uCompanyPerms[selectedCompanyIdForPerms].use_global)}
+                              onChange={(e) => {
+                                const checked = e.target.checked;
+                                if (selectedCompanyIdForPerms === "global") {
+                                  setUPerms((prev) => ({ ...prev, [k]: checked }));
+                                } else {
+                                  const compId = selectedCompanyIdForPerms;
+                                  setUCompanyPerms((prev) => {
+                                    const currentCompPerms = prev[compId] || { ...uPerms };
+                                    return {
+                                      ...prev,
+                                      [compId]: {
+                                        ...currentCompPerms,
+                                        [k]: checked
+                                      }
+                                    };
+                                  });
+                                }
+                              }}
+                              className="accent-amber-500 w-4 h-4 cursor-pointer disabled:cursor-not-allowed"
+                            />
+                            <span>
+                              {k === "installmentsView" && "👁️ التقسيط والعقود"}
+                              {k === "installmentsAdd" && "➕ إضافة عقد يومي"}
+                              {k === "installmentsEdit" && "📝 تعديل عقود فرعية"}
+                              {k === "installmentsDelete" && "❌ حذف العقود الملتزمة"}
+                              {k === "quotes" && "📋 عروض الأسعار"}
+                              {k === "receipts" && "💰 سندات القبض"}
+                              {k === "payments" && "💸 سندات الصرف"}
+                              {k === "expenses" && "🧾 المصروفات الدفترية"}
+                              {k === "treasury" && "🏦 استعراض الخزائن الموحدة"}
+                              {k === "projects" && "🏗️ تتبع المشاريع والمهندسين"}
+                              {k === "workers" && "👷 العمال ورواتب السلف"}
+                              {k === "companies" && "🏢 دليل الشركات والمستخلصات"}
+                              {k === "users" && "👥 تهيئة وإضافة الموظفين"}
+                              {k === "sessions" && "🕰️ استكشاف سجلات التدقيق"}
+                              {k === "print" && "🖨️ تفويض طباعة عهود الاتفاق"}
+                              {k === "dashTopCards" && "📊 مؤشر: الملخص العام والأرقام السريعة"}
+                              {k === "dashCollection" && "📈 مؤشر: نبض التحصيل ونسبة السداد"}
+                              {k === "dashPulse" && "📉 مؤشر: بيان التدفق الفعلي الأسبوعي"}
+                              {k === "dashLateClients" && "⚠️ مؤشر: كشف المتأخرين والمتعثرين"}
+                              {k === "dashLastReceipts" && "💸 مؤشر: شريط آخر السندات والقيود"}
+                              {k === "dashUpcomingPaid" && "📅 مؤشر: استعراض الدفعات القادمة"}
+                              {k.startsWith("dash") && !["dashTopCards", "dashCollection", "dashPulse", "dashLateClients", "dashLastReceipts", "dashUpcomingPaid"].includes(k) && `المؤشر: ${k.replace("dash", "")}`}
+                            </span>
+                          </label>
+                        );
+                      })}
+                  </div>
+                </div>
+
+                {/* Safes Checkbox Grid */}
+                <div className="space-y-2 bg-slate-950/20 p-4 border border-slate-900 rounded-2xl">
+                  <span className="block text-xs font-extrabold text-indigo-400">💰 تحديد الخزائن والصناديق المالية المصرحة لهذا الموظف</span>
+                  <p className="text-[10px] text-slate-400 font-bold font-sans">
+                    (تنبيه: إذا لم تقم بتحديد أي خزنة، فسيتم منح الموظف صلاحية رؤية كافة الخزائن بشكل افتراضي لتسهيل العمل دون قيود)
+                  </p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 mt-2">
+                    {getStoredTreasuries().map((tName) => {
+                      const permKey = `safe_${tName}`;
                       const hasCompObj = !!uCompanyPerms[selectedCompanyIdForPerms];
                       const isCustomActive = selectedCompanyIdForPerms === "global" || (hasCompObj && !uCompanyPerms[selectedCompanyIdForPerms].use_global);
                       
-                      const val = selectedCompanyIdForPerms === "global" 
-                        ? !!uPerms[k] 
+                      const val = selectedCompanyIdForPerms === "global"
+                        ? !!uPerms[permKey]
                         : (hasCompObj 
-                            ? (uCompanyPerms[selectedCompanyIdForPerms].use_global ? !!uPerms[k] : !!uCompanyPerms[selectedCompanyIdForPerms][k])
-                            : !!uPerms[k]);
-                      
+                            ? (uCompanyPerms[selectedCompanyIdForPerms].use_global ? !!uPerms[permKey] : !!uCompanyPerms[selectedCompanyIdForPerms][permKey])
+                            : !!uPerms[permKey]);
+
                       return (
                         <label 
-                          key={k} 
+                          key={tName} 
                           className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all cursor-pointer text-xs font-bold select-none ${
                             !isCustomActive 
                               ? "bg-slate-900/30 border-slate-900/50 text-slate-600 cursor-not-allowed opacity-50 font-sans" 
@@ -4403,7 +4542,7 @@ CREATE TABLE IF NOT EXISTS sessions (
                             onChange={(e) => {
                               const checked = e.target.checked;
                               if (selectedCompanyIdForPerms === "global") {
-                                setUPerms((prev) => ({ ...prev, [k]: checked }));
+                                setUPerms((prev) => ({ ...prev, [permKey]: checked }));
                               } else {
                                 const compId = selectedCompanyIdForPerms;
                                 setUCompanyPerms((prev) => {
@@ -4412,32 +4551,15 @@ CREATE TABLE IF NOT EXISTS sessions (
                                     ...prev,
                                     [compId]: {
                                       ...currentCompPerms,
-                                      [k]: checked
+                                      [permKey]: checked
                                     }
                                   };
                                 });
                               }
                             }}
-                            className="accent-amber-500 w-4 h-4 cursor-pointer disabled:cursor-not-allowed"
+                            className="accent-indigo-500 w-4 h-4 cursor-pointer disabled:cursor-not-allowed"
                           />
-                          <span>
-                            {k === "installmentsView" && "👁️ التقسيط والعقود"}
-                            {k === "installmentsAdd" && "➕ إضافة عقد يومي"}
-                            {k === "installmentsEdit" && "📝 تعديل عقود فرعية"}
-                            {k === "installmentsDelete" && "❌ حذف العقود الملتزمة"}
-                            {k === "quotes" && "📋 عروض الأسعار"}
-                            {k === "receipts" && "💰 سندات القبض"}
-                            {k === "payments" && "💸 سندات الصرف"}
-                            {k === "expenses" && "🧾 المصروفات الدفترية"}
-                            {k === "treasury" && "🏦 استعراض الخزائن الموحدة"}
-                            {k === "projects" && "🏗️ تتبع المشاريع والمهندسين"}
-                            {k === "workers" && "👷 العمال ورواتب السلف"}
-                            {k === "companies" && "🏢 دليل الشركات والمستخلصات"}
-                            {k === "users" && "👥 تهيئة وإضافة الموظفين"}
-                            {k === "sessions" && "🕰️ استكشاف سجلات التدقيق"}
-                            {k === "print" && "🖨️ تفويض طباعة عهود الاتفاق"}
-                            {k.startsWith("dash") && `المؤشر: ${k.replace("dash", "")}`}
-                          </span>
+                          <span>🏦 {tName}</span>
                         </label>
                       );
                     })}
@@ -4763,7 +4885,7 @@ CREATE TABLE IF NOT EXISTS sessions (
                                 onChange={(e) => setAdvTreasury(e.target.value)} 
                                 className="w-full px-2.5 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs font-bold text-white focus:outline-none cursor-pointer text-slate-950 bg-white"
                               >
-                                {getStoredTreasuries().map((tName) => (
+                                {getAuthorizedTreasuries(currentUser, selectedCompanyId).map((tName) => (
                                   <option key={tName} value={tName} className="text-slate-950">💰 {tName}</option>
                                 ))}
                               </select>

@@ -13,10 +13,12 @@ interface TreasuryProps {
   payments: Payment[];
   expenses: Expense[];
   installments: Installment[];
+  authorizedTreasuries?: string[];
+  isAdmin?: boolean;
 }
 
 const getStoredTreasuries = (): string[] => {
-  const defaults = ["خزنة الشركة", "خزنة التحصيل", "خزنة التحويل", "نقاط البيع"];
+  const defaults = ["خزنة الشركة", "خزنة التحصيل", "خزنة التحويل", "نقاط البيع", "خزنة المقاولات"];
   const saved = localStorage.getItem("aw_treasuries");
   if (saved) {
     try {
@@ -32,13 +34,21 @@ const getStoredTreasuries = (): string[] => {
       }
     } catch {}
   }
-  // Contracting Treasury is removed by default here, but the user can add it dynamically
   return defaults;
 };
 
-export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses, installments }) => {
-  const [treasuries, setTreasuries] = useState<string[]>(getStoredTreasuries);
+export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses, installments, authorizedTreasuries, isAdmin = false }) => {
+  const [treasuries, setTreasuries] = useState<string[]>(() => {
+    const list = getStoredTreasuries();
+    if (authorizedTreasuries) {
+      return list.filter(t => authorizedTreasuries.includes(t));
+    }
+    return list;
+  });
   const [activeTab, setActiveTab] = useState<string>(() => {
+    if (authorizedTreasuries && authorizedTreasuries.length > 0) {
+      return authorizedTreasuries[0];
+    }
     const list = getStoredTreasuries();
     return list[0] || "خزنة الشركة";
   });
@@ -50,16 +60,19 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
     // Reload if storage changes in other windows
     const handleStorageChange = () => {
       const freshList = getStoredTreasuries();
-      setTreasuries(freshList);
-      if (!freshList.includes(activeTab)) {
-        setActiveTab(freshList[0] || "خزنة الشركة");
+      const filtered = authorizedTreasuries
+        ? freshList.filter(t => authorizedTreasuries.includes(t))
+        : freshList;
+      setTreasuries(filtered);
+      if (!filtered.includes(activeTab)) {
+        setActiveTab(filtered[0] || "خزنة الشركة");
       }
     };
     window.addEventListener("storage", handleStorageChange);
     return () => {
       window.removeEventListener("storage", handleStorageChange);
     };
-  }, [activeTab]);
+  }, [activeTab, authorizedTreasuries]);
 
   // Handle adding a treasury
   const handleAddTreasury = (e: React.FormEvent) => {
@@ -540,79 +553,81 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
       </div>
 
       {/* Dynamic Treasury Management section */}
-      <div className="bg-slate-900/60 rounded-3xl border border-slate-800 p-6 shadow-xl space-y-5">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-850 pb-4">
-          <div>
-            <h4 className="text-md font-black text-white flex items-center gap-2">
-              🛠️ لوحة إدارة وهيكلة خزائن المنظومة النشطة
-            </h4>
-            <p className="text-xs text-slate-400 mt-1">
-              يمكنك إضافة خزائن وصناديق مالية فرعية جديدة أو حذف الخزائن غير المستخدمة لجعل سياقات المحاسبة ديناميكية بالكامل.
-            </p>
-          </div>
-        </div>
-
-        {inlineError && (
-          <div className="p-3.5 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-xl text-xs font-bold leading-relaxed flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-            {inlineError}
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Form to add */}
-          <form onSubmit={handleAddTreasury} className="bg-slate-950/40 border border-slate-850 p-4 rounded-2xl flex flex-col justify-between space-y-4">
-            <div className="space-y-2">
-              <label className="text-xs font-black text-slate-300">تسجيل خزنة مالية جديدة</label>
-              <input
-                type="text"
-                placeholder="مثال: خزنة الرياض، خزنة النقد الاحتياطي..."
-                value={newTreasuryName}
-                onChange={(e) => {
-                  setNewTreasuryName(e.target.value);
-                  setInlineError(null);
-                }}
-                className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-xs font-bold text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-              />
+      {isAdmin && (
+        <div className="bg-slate-900/60 rounded-3xl border border-slate-800 p-6 shadow-xl space-y-5">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-850 pb-4">
+            <div>
+              <h4 className="text-md font-black text-white flex items-center gap-2">
+                🛠️ لوحة إدارة وهيكلة خزائن المنظومة النشطة
+              </h4>
+              <p className="text-xs text-slate-400 mt-1">
+                يمكنك إضافة خزائن وصناديق مالية فرعية جديدة أو حذف الخزائن غير المستخدمة لجعل سياقات المحاسبة ديناميكية بالكامل.
+              </p>
             </div>
-            <button
-              type="submit"
-              className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-black transition-all shadow-md flex items-center justify-center gap-1.5"
-            >
-              <Plus className="w-4 h-4" /> إضافة الخزنة المقترحة للقائمة
-            </button>
-          </form>
+          </div>
 
-          {/* List and delete */}
-          <div className="bg-slate-950/40 border border-slate-850 p-4 rounded-2xl space-y-4">
-            <span className="block text-xs font-black text-slate-300">الخزائن المعرفة بالبرنامج حالياً</span>
-            <div className="space-y-2 max-h-40 overflow-y-auto">
-              {treasuries.map((name) => {
-                const txCount = getCompiledTransactionsForSafe(name).length;
-                return (
-                  <div key={name} className="flex justify-between items-center bg-slate-900/50 p-2.5 rounded-xl border border-slate-850">
-                    <div className="flex items-center gap-2">
-                      <Coins className="w-4 h-4 text-emerald-400" />
-                      <div>
-                        <span className="text-xs font-black text-white">{name}</span>
-                        <span className="block text-[9px] text-slate-500">تحتوي على عدد {txCount} قيد بالدفتر</span>
+          {inlineError && (
+            <div className="p-3.5 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-xl text-xs font-bold leading-relaxed flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+              {inlineError}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Form to add */}
+            <form onSubmit={handleAddTreasury} className="bg-slate-950/40 border border-slate-850 p-4 rounded-2xl flex flex-col justify-between space-y-4">
+              <div className="space-y-2">
+                <label className="text-xs font-black text-slate-300">تسجيل خزنة مالية جديدة</label>
+                <input
+                  type="text"
+                  placeholder="مثال: خزنة الرياض، خزنة النقد الاحتياطي..."
+                  value={newTreasuryName}
+                  onChange={(e) => {
+                    setNewTreasuryName(e.target.value);
+                    setInlineError(null);
+                  }}
+                  className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-xs font-bold text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <button
+                type="submit"
+                className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-black transition-all shadow-md flex items-center justify-center gap-1.5"
+              >
+                <Plus className="w-4 h-4" /> إضافة الخزنة المقترحة للقائمة
+              </button>
+            </form>
+
+            {/* List and delete */}
+            <div className="bg-slate-950/40 border border-slate-850 p-4 rounded-2xl space-y-4">
+              <span className="block text-xs font-black text-slate-300">الخزائن المعرفة بالبرنامج حالياً</span>
+              <div className="space-y-2 max-h-40 overflow-y-auto">
+                {treasuries.map((name) => {
+                  const txCount = getCompiledTransactionsForSafe(name).length;
+                  return (
+                    <div key={name} className="flex justify-between items-center bg-slate-900/50 p-2.5 rounded-xl border border-slate-850">
+                      <div className="flex items-center gap-2">
+                        <Coins className="w-4 h-4 text-emerald-400" />
+                        <div>
+                          <span className="text-xs font-black text-white">{name}</span>
+                          <span className="block text-[9px] text-slate-500">تحتوي على عدد {txCount} قيد بالدفتر</span>
+                        </div>
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteTreasury(name)}
+                        className="p-1 px-2 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 rounded-lg text-rose-400 hover:text-rose-300 text-[10px] font-semibold transition-all flex items-center gap-1"
+                        title="حذف وإلغاء هذه الخزنة من القائمة"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" /> إلغاء
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteTreasury(name)}
-                      className="p-1 px-2 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 rounded-lg text-rose-400 hover:text-rose-300 text-[10px] font-semibold transition-all flex items-center gap-1"
-                      title="حذف وإلغاء هذه الخزنة من القائمة"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" /> إلغاء
-                    </button>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
     </div>
   );
