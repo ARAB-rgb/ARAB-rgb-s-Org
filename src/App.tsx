@@ -340,6 +340,11 @@ export default function App() {
       setExtracts(ext.data || []);
 
       // Autoresolve/refresh current user details to update links/permissions dynamically
+      const savedUserStr = localStorage.getItem("aw_current_user");
+      if (!savedUserStr) {
+        // User logged out mid-flight or session was cleared, do not restore state
+        return;
+      }
       const freshUser = uList.find((x) => x.id === currentUser?.id);
       if (freshUser) {
         setCurrentUser(freshUser);
