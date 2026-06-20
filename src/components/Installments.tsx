@@ -1208,7 +1208,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
 
             {/* Modal Actions */}
             <div className="sticky bottom-0 bg-slate-900 border-t border-slate-800 p-4 shrink-0 flex justify-end gap-3 z-10">
-              {currentUser?.perms?.installmentsDelete && (
+              {(currentUser?.role === "admin" || currentUser?.perms?.installmentsDelete) && (
                 <button
                   type="button"
                   onClick={() => {
