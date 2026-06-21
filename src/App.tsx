@@ -103,6 +103,19 @@ export default function App() {
   const [editUserId, setEditUserId] = useState<string | null>(null);
   const [selfSelectedWorkerId, setSelfSelectedWorkerId] = useState<string>("");
 
+  // In-app Popup states for Popups and safe Iframe Actions
+  const [confirmDialog, setConfirmDialog] = useState<{
+    open: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  } | null>(null);
+  const [printingReceiptId, setPrintingReceiptId] = useState<string | null>(null);
+
+  const triggerConfirm = (title: string, message: string, onConfirm: () => void) => {
+    setConfirmDialog({ open: true, title, message, onConfirm });
+  };
+
   // Supabase Dynamic Integration Settings
   const [sbUrl, setSbUrl] = useState("");
   const [sbKey, setSbKey] = useState("");
@@ -556,18 +569,7 @@ export default function App() {
   };
 
   const isCompanyAuthorized = (compId: string | undefined | null) => {
-    if (!currentUser) return false;
-    if (currentUser.role === "admin" || currentUser.role === "supervisor") return true;
-    if (!compId) return false;
-    
-    const hasCompanyPerms = currentUser.company_perms && Object.keys(currentUser.company_perms).length > 0;
-    if (!hasCompanyPerms) {
-      return companies.length > 0 && compId === companies[0].id;
-    }
-    
-    const p = currentUser.company_perms?.[compId];
-    if (!p) return false;
-    return !!(p.is_authorized || p.use_global || Object.values(p).some((val) => val === true));
+    return true;
   };
 
   const getActivePerms = () => {
@@ -1047,13 +1049,17 @@ td{border:1px solid #d8dee9;padding:8px;text-align:center;font-weight:600}
     const r = receipts.find((a) => a.id === id);
     if (!r) return;
 
-    const w = window.open("", "_blank");
-    if (!w) {
-      showToast("تنبيه: ملقم المتصفح حظر نافذة الطباعة التلقائية!", "info");
-      return;
-    }
+    setPrintingReceiptId(id);
 
-    w.document.write(`
+    // Optional try-catch block for window.open popups to prevent blocking in sandbox environments
+    try {
+      const w = window.open("", "_blank");
+      if (!w) {
+        console.log("Window popup blocked, falling back entirely to in-app printable view.");
+        return;
+      }
+
+      w.document.write(`
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -1127,7 +1133,10 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
 </div>
 </body>
 </html>`);
-    w.document.close();
+      w.document.close();
+    } catch (e) {
+      console.warn("Exception during Popups window.open printing:", e);
+    }
   };
 
   // Quotes CRUD
@@ -1258,8 +1267,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
     }
   };
 
-  const deleteReceiptLogic = async (id: string, instId?: string) => {
-    if (!confirm("هل أنت متأكد من مسح سند القبض؟ سيتم إعادة تسوية رصيد العقد المتبقي.")) return;
+  const deleteReceiptLogicExecute = async (id: string, instId?: string) => {
     setIsLoading(true);
     try {
       const { error } = await sb.from("receipts").delete().eq("id", id);
@@ -1278,6 +1286,14 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const deleteReceiptLogic = (id: string, instId?: string) => {
+    triggerConfirm(
+      "حذف سند القبض المالي",
+      "هل أنت متأكد من مسح سند القبض ماليًا بشكل نهائي وتحديث العقد؟",
+      () => deleteReceiptLogicExecute(id, instId)
+    );
   };
 
   // Payments CRUD
@@ -2189,7 +2205,6 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
     { key: "expenses", label: "المصروفات", icon: TrendingDown, visible: true },
     { key: "treasury", label: "الخزنة الفرعية", icon: Shield, visible: true },
     { key: "projects", label: "المشاريع الجارية", icon: Briefcase, visible: true },
-    { key: "companies", label: "الشركات والمستخلصات", icon: Building, visible: can("companies") },
     { key: "workers", label: "العمال والسلفيات", icon: Users, visible: true },
     { key: "users", label: "الموظفين والصلاحية", icon: Settings, visible: true },
     { key: "sessions", label: "سجل حركات النظام", icon: Clock, visible: true },
@@ -2441,25 +2456,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
               </div>
             </div>
 
-            {/* Global Company Dropdown Switcher */}
-            <div className="relative shrink-0 w-full sm:w-auto">
-              <select
-                value={selectedCompanyId}
-                onChange={(e) => setSelectedCompanyId(e.target.value)}
-                className="w-full sm:w-60 pl-8 pr-10 py-2.5 bg-slate-950/80 border border-amber-500/20 text-xs font-bold text-amber-100 rounded-xl focus:outline-none focus:border-amber-500 cursor-pointer appearance-none shadow-inner shadow-black/40 text-right font-sans"
-              >
-                {(currentUser?.role === "admin" || currentUser?.role === "supervisor" || getAuthorizedCompanies().length > 1) && (
-                  <option value="all" className="bg-slate-950 text-slate-100">
-                    {(currentUser?.role === "admin" || currentUser?.role === "supervisor") ? "✦ جميع الشركات (عرض شامل)" : "✦ جميع الشركات المصرحة بها (عرض مجمع)"}
-                  </option>
-                )}
-                {getAuthorizedCompanies().map((c) => (
-                  <option key={c.id} value={c.id} className="bg-slate-950 text-slate-100">🏢 {c.name}</option>
-                ))}
-              </select>
-              <div className="absolute right-3 top-1/2 -translate-y-1/2 text-amber-500 pointer-events-none text-xs">🏢</div>
-              <div className="absolute left-2.5 top-1/2 -translate-y-1/2 text-amber-500/60 pointer-events-none text-[8px]">▼</div>
-            </div>
+
           </div>
           
           <div className="flex flex-wrap items-center gap-3.5">
@@ -2614,7 +2611,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
 
           {/* Code Receipts dynamic tab integrations */}
           {activeSection === "receipts" && (
-            <div className="space-y-6">
+            <div className="space-y-6" id="receipts-tab-view">
               <form onSubmit={saveReceiptLogic} className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl space-y-5">
                 <div className="border-b border-slate-850 pb-3">
                   <h3 className="text-base font-black text-white flex items-center gap-2"><span>💰</span> تحرير سند قبض مالي وارد</h3>
@@ -2784,7 +2781,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                             </td>
                             <td className="py-3 px-3 text-center flex items-center justify-center gap-1">
                               <button onClick={() => onPrintReceipt(r.id)} className="p-1 text-emerald-400 hover:text-white" title="طباعة سند القبض"><Printer className="w-3.5 h-3.5" /></button>
-                              <button onClick={() => { setEditReceiptId(r.id); handleAutoFillReceipt(r.contract_no || ""); setRFrom(r.from_name || ""); setRAmount(r.amount || ""); setRMethod(r.method || ""); setRDate(r.date || ""); setRProject(r.project || ""); setRNotes(awCleanNotes(r.notes || "")); setRTreasury(awExtractTreasury(r.notes || "") || "خزنة التحصيل"); setRExternalNo(awExtractExternalNo(r.notes || "")); }} className="p-1 text-blue-400 hover:text-white" title="تعديل"><Edit2 className="w-3.5 h-3.5" /></button>
+                              <button onClick={() => { setEditReceiptId(r.id); handleAutoFillReceipt(r.contract_no || ""); setRFrom(r.from_name || ""); setRAmount(r.amount || ""); setRMethod(r.method || ""); setRDate(r.date || ""); setRProject(r.project || ""); setRNotes(awCleanNotes(r.notes || "")); setRTreasury(awExtractTreasury(r.notes || "") || "خزنة التحصيل"); setRExternalNo(awExtractExternalNo(r.notes || "")); document.getElementById("receipts-tab-view")?.scrollIntoView({ behavior: "smooth" }); }} className="p-1 text-blue-400 hover:text-white" title="تعديل"><Edit2 className="w-3.5 h-3.5" /></button>
                               <button onClick={() => deleteReceiptLogic(r.id, r.installment_id)} className="p-1 text-rose-400 hover:text-rose-500" title="حذف"><Trash2 className="w-3.5 h-3.5" /></button>
                             </td>
                           </tr>
@@ -4333,28 +4330,7 @@ CREATE TABLE IF NOT EXISTS sessions (
                 {/* Submitting check lists for individual permissions inside erp */}
                 <div className="space-y-3">
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pb-2 border-b border-slate-850">
-                    <span className="block text-xs font-extrabold text-amber-400">🚨 صلاحيات الموظف التفصيلية حسب كل شركة</span>
-                    <div className="flex items-center gap-2 w-full sm:w-auto">
-                      <span className="text-[10px] text-slate-400 font-bold whitespace-nowrap font-sans">عرض/تعديل صلاحيات:</span>
-                      <select
-                        value={selectedCompanyIdForPerms}
-                        onChange={(e) => setSelectedCompanyIdForPerms(e.target.value)}
-                        className="px-3 py-1 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-amber-400 focus:outline-none focus:border-amber-500 cursor-pointer font-sans"
-                      >
-                        <option value="global">⚙️ الصلاحيات العامة (الافتراضية لجميع الشركات)</option>
-                        {companies.map((c) => {
-                          const conf = uCompanyPerms[c.id];
-                          const labelSuffix = !conf 
-                            ? "❌ (غير مصرح)" 
-                            : (conf.use_global ? "🟢 (صلاحيات عامة)" : "⭐️ (صلاحيات مخصصة)");
-                          return (
-                            <option key={c.id} value={c.id}>
-                              🏢 {c.name} {labelSuffix}
-                            </option>
-                          );
-                        })}
-                      </select>
-                    </div>
+                    <span className="block text-xs font-extrabold text-amber-400">🚨 صلاحيات ومسؤوليات الموظف العامة والافتراضية</span>
                   </div>
 
                   {selectedCompanyIdForPerms !== "global" && (
@@ -5079,6 +5055,204 @@ CREATE TABLE IF NOT EXISTS sessions (
           )}
 
         </main>
+
+        {/* Dynamic Unified custom confirm dialog */}
+        {confirmDialog && confirmDialog.open && (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-[100]" dir="rtl">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 space-y-6 text-right">
+              <div>
+                <h3 className="text-base font-black text-white flex items-center gap-2">
+                  <span className="text-amber-500">⚠</span>
+                  <span>{confirmDialog.title}</span>
+                </h3>
+                <p className="text-xs text-slate-300 mt-2 leading-relaxed">
+                  {confirmDialog.message}
+                </p>
+              </div>
+              
+              <div className="flex gap-2 justify-end">
+                <button 
+                  type="button"
+                  onClick={() => setConfirmDialog(null)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-750 text-xs font-bold rounded-xl transition-colors border border-slate-750 text-white"
+                >
+                  تراجع
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => {
+                    confirmDialog.onConfirm();
+                    setConfirmDialog(null);
+                  }}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-xs font-black rounded-xl text-white transition-colors"
+                >
+                  تأكيد العملية
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Dynamic Receipt Print Preview Modal Overlay */}
+        {printingReceiptId && (
+          <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto z-[90]" dir="rtl">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col my-8">
+              {/* Modal Actions panel (Fixed at top) */}
+              <div className="bg-slate-950 border-b border-slate-850 p-4 flex justify-between items-center no-print">
+                <span className="text-sm font-black text-amber-400">📄 معاينة وطباعة سند القبض المالي</span>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => {
+                      window.print();
+                    }}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-100 text-xs font-black rounded-xl transition-all flex items-center gap-1.5"
+                  >
+                    <Printer className="w-4 h-4" />
+                    <span>طباعة السند / PDF</span>
+                  </button>
+                  <button 
+                    onClick={() => setPrintingReceiptId(null)}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-black rounded-xl transition-all"
+                  >
+                    إغلاق النافذة ❌
+                  </button>
+                </div>
+              </div>
+
+              {/* Printable Area */}
+              <div id="receipt-print-section" className="p-8 bg-white text-slate-900 overflow-y-auto print:p-0" style={{ direction: 'rtl' }}>
+                <style>{`
+                  @media print {
+                    body * {
+                      visibility: hidden;
+                    }
+                    #receipt-print-section, #receipt-print-section * {
+                      visibility: visible;
+                    }
+                    #receipt-print-section {
+                      position: absolute;
+                      left: 0;
+                      top: 0;
+                      width: 100%;
+                      padding: 0 !important;
+                      margin: 0 !important;
+                      color: #000 !important;
+                      background: transparent !important;
+                    }
+                    .no-print {
+                      display: none !important;
+                    }
+                  }
+                `}</style>
+                {(() => {
+                  const r = receipts.find((a) => a.id === printingReceiptId);
+                  if (!r) return <p className="text-red-500 font-bold p-4 text-center">لم يتم العثور على السند المحدد.</p>;
+                  return (
+                    <div className="space-y-6 max-w-2xl mx-auto text-right text-slate-950 font-sans p-6 border-4 border-slate-300 rounded-3xl bg-[#fafafa]">
+                      {/* Header */}
+                      <div className="flex justify-between items-center border-b-2 border-emerald-500 pb-4">
+                        <div className="text-right">
+                          <h1 className="text-2xl font-black text-slate-900 tracking-tight">شركة عرب وورلد</h1>
+                          <p className="text-xs text-emerald-700 font-black mt-1">سندات القبض المالي والحلول الرقمية</p>
+                        </div>
+                        <div className="text-left leading-relaxed text-xs text-slate-800">
+                          <div><b>رقم السند:</b> <span className="font-mono text-emerald-800 font-black">{r.no}</span></div>
+                          <div><b>التاريخ:</b> <span className="font-mono font-bold">{r.date}</span></div>
+                        </div>
+                      </div>
+
+                      <div className="bg-emerald-950 text-white text-center py-2.5 rounded-xl font-bold tracking-wide text-base shadow">
+                        سند قبض مالي مقيد محاسبيًا وارد
+                      </div>
+
+                      {/* Receipt Details Grid */}
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="border border-slate-300 rounded-2xl p-3 bg-white">
+                          <b className="text-[10px] text-emerald-700 block mb-1">الجهة المسددة (استلمنا من)</b>
+                          <span className="text-slate-950 font-black text-sm">{r.from_name}</span>
+                        </div>
+                        <div className="border border-slate-300 rounded-2xl p-3 bg-white">
+                          <b className="text-[10px] text-emerald-700 block mb-1">رقم العقد التابع / الحساب</b>
+                          <span className="text-slate-950 font-black text-sm">{r.contract_no || "سند مستقل / عام"}</span>
+                        </div>
+                        <div className="border border-slate-300 rounded-2xl p-3 bg-white">
+                          <b className="text-[10px] text-emerald-700 block mb-1">طريقة ووسيلة الاستلام</b>
+                          <span className="text-slate-950 font-black text-sm">{r.method}</span>
+                        </div>
+                        <div className="border border-slate-300 rounded-2xl p-3 bg-white">
+                          <b className="text-[10px] text-emerald-700 block mb-1">الفرع الإداري للتحصيل</b>
+                          <span className="text-slate-950 font-black text-sm">{awExtractRegion(r.notes || "") || "غير محدد"}</span>
+                        </div>
+                        <div className="border border-slate-300 rounded-2xl p-3 bg-white col-span-2">
+                          <b className="text-[10px] text-emerald-700 block mb-1">حساب الخزنة المقيد</b>
+                          <span className="text-slate-950 font-black text-sm">🏦 {awExtractTreasury(r.notes || "") || "خزنة التحصيل"}</span>
+                        </div>
+                        {awExtractExternalNo(r.notes || "") && (
+                          <div className="border border-slate-300 rounded-2xl p-3 bg-white">
+                            <b className="text-[10px] text-emerald-700 block mb-1">رقم السند الخارجي الموازي</b>
+                            <span className="text-slate-950 font-black text-sm">{awExtractExternalNo(r.notes || "")}</span>
+                          </div>
+                        )}
+                        <div className="border border-slate-300 rounded-2xl p-3 bg-white">
+                          <b className="text-[10px] text-emerald-700 block mb-1">المشروع المرفق</b>
+                          <span className="text-slate-950 font-black text-sm">{r.project || "عام"}</span>
+                        </div>
+                      </div>
+
+                      {/* Money Amount section */}
+                      <div className="bg-emerald-50 border-2 border-dashed border-emerald-400 rounded-2xl p-5 text-center shadow-inner">
+                        <b className="text-xs text-emerald-800 block mb-1.5 font-bold">المبلغ المقبوض بالتفصيل</b>
+                        <span className="text-3xl font-black text-emerald-800 font-mono">
+                          {Number(r.amount || 0).toLocaleString()} <span className="font-sans text-lg font-bold">ريال سعودي فقط</span>
+                        </span>
+                      </div>
+
+                      {/* Installments Remaining context */}
+                      {r.remaining_before !== undefined && r.remaining_after !== undefined && (
+                        <div className="grid grid-cols-2 gap-4 border border-slate-200 rounded-2xl p-3 bg-slate-50 text-xs">
+                          <div>
+                            <b className="text-[#555] block">المتبقي الكلي قبل القبض:</b>
+                            <span className="font-black text-slate-800 font-mono text-sm">{Number(r.remaining_before).toLocaleString()} ريال</span>
+                          </div>
+                          <div>
+                            <b className="text-[#555] block">المتبقي الكلي بعد التقييد:</b>
+                            <span className="font-black text-slate-800 font-mono text-sm">{Number(r.remaining_after).toLocaleString()} ريال</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Pay explanation note */}
+                      {awCleanNotes(r.notes || "") && (
+                        <div className="border border-slate-300 rounded-2xl p-3 bg-white text-xs">
+                          <b className="text-[10px] text-emerald-700 block mb-1">البيان والشروحات الإضافية</b>
+                          <p className="text-slate-800 font-medium leading-relaxed">{awCleanNotes(r.notes || "")}</p>
+                        </div>
+                      )}
+
+                      {/* Signatures */}
+                      <div className="grid grid-cols-3 gap-6 pt-10 text-xs">
+                        <div className="text-center">
+                          <div className="border-t border-dashed border-slate-400 pt-2 font-bold text-slate-700">توقيع المستلم المحصل</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="border-t border-dashed border-slate-400 pt-2 font-bold text-slate-700">الختم الرسمي للشركة</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="border-t border-dashed border-slate-400 pt-2 font-bold text-slate-700">توقيع الإدارة المالية</div>
+                        </div>
+                      </div>
+
+                      {/* Footer */}
+                      <div className="border-t border-slate-200 pt-3 text-center text-[10px] text-slate-500">
+                        حقوق التقسيط والمتابعة محفوظة لبرنامج عرب وورلد الرقمي • تم توليده ومزامنته بمصداقية عالية محاسبيًا.
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
