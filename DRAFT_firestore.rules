@@ -30,19 +30,19 @@ service cloud.firestore {
         && data.id is string && data.id.size() <= 128
         && data.name is string && data.name.size() <= 200
         && data.code is string && data.code.size() <= 50
-        && data.role is string && (data.role == 'admin' || data.role == 'employee');
+        && data.role is string && (data.role == 'admin' || data.role == 'employee' || data.role == 'supervisor');
     }
 
     function isValidInstallment(data) {
-      return data.keys().hasAll(['id', 'client', 'identity', 'phone', 'no', 'amount', 'paid', 'remaining'])
+      return data.keys().hasAll(['id', 'client', 'no', 'amount', 'paid', 'remaining'])
         && data.id is string && data.id.size() <= 128
         && data.client is string && data.client.size() <= 200
-        && data.identity is string && data.identity.size() <= 50
-        && data.phone is string && data.phone.size() <= 50
         && data.no is string && data.no.size() <= 50
         && data.amount is number && data.amount >= 0
         && data.paid is number && data.paid >= 0
-        && data.remaining is number && data.remaining >= 0;
+        && data.remaining is number && data.remaining >= 0
+        && (!('identity' in data) || (data.identity is string && data.identity.size() <= 128))
+        && (!('phone' in data) || (data.phone is string && data.phone.size() <= 128));
     }
 
     function isValidQuote(data) {
@@ -58,7 +58,7 @@ service cloud.firestore {
         && data.id is string && data.id.size() <= 128
         && data.no is string && data.no.size() <= 50
         && data.from_name is string && data.from_name.size() <= 200
-        && data.amount is number && data.amount > 0
+        && data.amount is number && data.amount >= 0
         && data.method is string && data.method.size() <= 100
         && data.date is string && data.date.size() <= 50;
     }

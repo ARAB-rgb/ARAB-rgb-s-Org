@@ -166,6 +166,24 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(JSON.stringify(errInfo));
 }
 
+export function cleanPayload(obj: any): any {
+  if (obj === null || obj === undefined) return null;
+  if (Array.isArray(obj)) {
+    return obj.map(cleanPayload);
+  }
+  if (typeof obj === 'object') {
+    const cleaned: any = {};
+    for (const key of Object.keys(obj)) {
+      const val = obj[key];
+      if (val !== undefined) {
+        cleaned[key] = cleanPayload(val);
+      }
+    }
+    return cleaned;
+  }
+  return obj;
+}
+
 // Fluent Hybrid Chain for Real Supabase API with Firestore Fallback
 class SupabaseEmulationChain {
   private table: string;
@@ -186,19 +204,19 @@ class SupabaseEmulationChain {
 
   insert(payload: any) {
     this.action = 'insert';
-    this.payload = payload;
+    this.payload = cleanPayload(payload);
     return this;
   }
 
   update(payload: any) {
     this.action = 'update';
-    this.payload = payload;
+    this.payload = cleanPayload(payload);
     return this;
   }
 
   upsert(payload: any, options?: any) {
     this.action = 'upsert';
-    this.payload = payload;
+    this.payload = cleanPayload(payload);
     return this;
   }
 

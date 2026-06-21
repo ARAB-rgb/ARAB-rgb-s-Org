@@ -234,7 +234,7 @@ export default function App() {
   const [uCode, setUCode] = useState("");
   const [uPass, setUPass] = useState("");
   const [uWorkerId, setUWorkerId] = useState("");
-  const [uRole, setURole] = useState<"admin" | "employee">("employee");
+  const [uRole, setURole] = useState<"admin" | "employee" | "supervisor">("employee");
   const [uRegion, setURegion] = useState("");
   const [selectedCompanyIdForPerms, setSelectedCompanyIdForPerms] = useState<string>("global");
   const [uCompanyPerms, setUCompanyPerms] = useState<Record<string, Record<string, boolean>>>({});
@@ -541,7 +541,7 @@ export default function App() {
   // Auth User allowed scope helpers
   const getAuthorizedCompanies = () => {
     if (!currentUser) return [];
-    if (currentUser.role === "admin") return companies;
+    if (currentUser.role === "admin" || currentUser.role === "supervisor") return companies;
     
     const hasCompanyPerms = currentUser.company_perms && Object.keys(currentUser.company_perms).length > 0;
     if (!hasCompanyPerms) {
@@ -557,7 +557,7 @@ export default function App() {
 
   const isCompanyAuthorized = (compId: string | undefined | null) => {
     if (!currentUser) return false;
-    if (currentUser.role === "admin") return true;
+    if (currentUser.role === "admin" || currentUser.role === "supervisor") return true;
     if (!compId) return false;
     
     const hasCompanyPerms = currentUser.company_perms && Object.keys(currentUser.company_perms).length > 0;
@@ -590,7 +590,7 @@ export default function App() {
 
   const can = (perm: string) => {
     if (!currentUser) return false;
-    if (currentUser.role === "admin") return true;
+    if (currentUser.role === "admin" || currentUser.role === "supervisor") return true;
     
     const activePerms = getActivePerms();
     if (activePerms) {
@@ -618,7 +618,7 @@ export default function App() {
   const getAuthorizedTreasuries = (user: AuthUser | null, compId: string | undefined): string[] => {
     const allSafes = getStoredTreasuries();
     if (!user) return [];
-    if (user.role === "admin") return allSafes;
+    if (user.role === "admin" || user.role === "supervisor") return allSafes;
 
     const isSafeAllowedInPerm = (permsObj: any, safeName: string) => {
       const hasAnySafeToggle = Object.keys(permsObj).some(k => k.startsWith("safe_") && permsObj[k] === true);
@@ -1214,7 +1214,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       nationality: linked ? linked.nationality : "",
       remaining_before: beforeAmt,
       remaining_after: afterAmt,
-      company_id: formCompanyId || (selectedCompanyId !== "all" ? selectedCompanyId : undefined),
+      company_id: formCompanyId || (selectedCompanyId !== "all" ? selectedCompanyId : null) || null,
     };
 
     if (!editReceiptId) {
@@ -1250,8 +1250,9 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       setRExternalNo("");
       await loadEverything();
       showToast("تم حفظ السند وتحديث العقد التابع بنجاح!");
-    } catch {
-      showToast("فشل في مزامنة الرصيد المزدوج للعقود", "error");
+    } catch (err: any) {
+      console.error(err);
+      showToast("فشل في مزامنة الرصيد المزدوج للعقود: " + (err?.message || err), "error");
     } finally {
       setIsLoading(false);
     }
@@ -2399,7 +2400,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
             <span className="block text-[9px] font-bold text-slate-400 mb-1">الموظف المسؤول</span>
             <b className="block text-xs font-black text-amber-300">{currentUser.name}</b>
             <span className="block text-[10px] font-bold text-slate-400 mt-1">
-              {currentUser.role === "admin" ? "أدمن الإدارة" : "موظف الفرع"}
+              {currentUser.role === "admin" ? "أدمن الإدارة" : (currentUser.role === "supervisor" ? "مشرف عام / رئيسي" : "موظف الفرع")}
               {userRegionFilter && ` • ${userRegionFilter}`}
             </span>
           </div>
@@ -2447,9 +2448,9 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                 onChange={(e) => setSelectedCompanyId(e.target.value)}
                 className="w-full sm:w-60 pl-8 pr-10 py-2.5 bg-slate-950/80 border border-amber-500/20 text-xs font-bold text-amber-100 rounded-xl focus:outline-none focus:border-amber-500 cursor-pointer appearance-none shadow-inner shadow-black/40 text-right font-sans"
               >
-                {(currentUser?.role === "admin" || getAuthorizedCompanies().length > 1) && (
+                {(currentUser?.role === "admin" || currentUser?.role === "supervisor" || getAuthorizedCompanies().length > 1) && (
                   <option value="all" className="bg-slate-950 text-slate-100">
-                    {currentUser?.role === "admin" ? "✦ جميع الشركات (عرض شامل)" : "✦ جميع الشركات المصرحة بها (عرض مجمع)"}
+                    {(currentUser?.role === "admin" || currentUser?.role === "supervisor") ? "✦ جميع الشركات (عرض شامل)" : "✦ جميع الشركات المصرحة بها (عرض مجمع)"}
                   </option>
                 )}
                 {getAuthorizedCompanies().map((c) => (
@@ -3276,7 +3277,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                               <option value="" className="text-slate-950">❌ غير مربوط بحساب مستخدم (اضغط لربط حساب مالي)</option>
                               {users.map((u) => (
                                 <option key={u.id} value={u.id} className="text-slate-950">
-                                  👤 {u.name} (كود: {u.code} • {u.role === "admin" ? "مدير" : "موظف"})
+                                  👤 {u.name} (كود: {u.code} • {u.role === "admin" ? "مدير" : (u.role === "supervisor" ? "مشرف" : "موظف")})
                                 </option>
                               ))}
                             </select>
@@ -4305,6 +4306,7 @@ CREATE TABLE IF NOT EXISTS sessions (
                           className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none text-slate-950 bg-white"
                         >
                           <option value="employee" className="text-slate-950">👨‍💼 موظف فرع محدود</option>
+                          <option value="supervisor" className="text-slate-950">🕵️‍♂️ مشرف مكتب عام / رئيسي</option>
                           <option value="admin" className="text-slate-950">👑 أدمن مكتب عام</option>
                         </select>
                       </div>
@@ -4621,7 +4623,7 @@ CREATE TABLE IF NOT EXISTS sessions (
                             </div>
                           </td>
                           <td className="py-3 px-3">
-                            <span className="px-2.5 py-0.5 rounded text-[10px] bg-slate-800 text-amber-400 font-bold border border-slate-700">{u.role === "admin" ? "أدمن مكتب عام" : "موظف فرع"}</span>
+                            <span className="px-2.5 py-0.5 rounded text-[10px] bg-slate-800 text-amber-400 font-bold border border-slate-700">{u.role === "admin" ? "أدمن مكتب عام" : (u.role === "supervisor" ? "مشرف مكتب عام / رئيسي" : "موظف فرع")}</span>
                           </td>
                           <td className="py-3 px-3 font-bold text-indigo-400">{permissionsObj.region || "كامل فروع المملكة"}</td>
                           <td className="py-3 px-3 text-slate-400 max-w-sm truncate" title={names.join(" - ")}>

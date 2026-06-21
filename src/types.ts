@@ -36,7 +36,7 @@ export interface User {
   name: string;
   code: string;
   password?: string;
-  role: "admin" | "employee";
+  role: "admin" | "employee" | "supervisor";
   perms: UserPerms;
   company_perms?: Record<string, UserPerms>;
   worker_id?: string;
