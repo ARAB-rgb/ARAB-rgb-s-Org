@@ -28,6 +28,7 @@ export interface UserPerms {
   dashUpcomingPaid: boolean;
   is_authorized?: boolean;
   use_global?: boolean;
+  worker_id?: string | null;
 }
 
 export interface User {

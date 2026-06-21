@@ -577,7 +577,11 @@ export default function App() {
       if (compPerm.use_global) {
         return currentUser.perms;
       }
-      return compPerm;
+      return {
+        ...compPerm,
+        region: currentUser.perms?.region,
+        worker_id: currentUser.perms?.worker_id
+      };
     }
     return currentUser.perms;
   };
@@ -602,7 +606,11 @@ export default function App() {
       if (compPerm.use_global) {
         return user.perms;
       }
-      return compPerm;
+      return {
+        ...compPerm,
+        region: user.perms?.region,
+        worker_id: user.perms?.worker_id
+      };
     }
     return user.perms;
   };
@@ -2507,6 +2515,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
           {activeSection === "installments" && (
             <Installments
               currentUser={currentUser}
+              activePerms={getActivePerms()}
               installments={getVisibleInstallments()}
               projects={getVisibleProjects()}
               onSaveInstallment={onSaveInstallment}

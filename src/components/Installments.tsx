@@ -13,6 +13,7 @@ import { getContractTiming, awExtractRegion, awCleanNotes, generateNextNo, awExt
 
 interface InstallmentsProps {
   currentUser: AuthUser | null;
+  activePerms?: any;
   installments: Installment[];
   projects: Project[];
   onSaveInstallment: (row: any, editId: string | null) => Promise<boolean>;
@@ -45,6 +46,7 @@ const getStoredTreasuries = (): string[] => {
 
 export const Installments: React.FC<InstallmentsProps> = ({
   currentUser,
+  activePerms,
   installments,
   projects,
   onSaveInstallment,
@@ -54,6 +56,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
   companies,
   selectedCompanyId,
 }) => {
+  const finalPerms = activePerms || currentUser?.perms || {};
   const [editId, setEditId] = useState<string | null>(null);
 
   // Form Fields
@@ -210,8 +213,8 @@ export const Installments: React.FC<InstallmentsProps> = ({
     setIdentity("");
     setNationality("");
     // Keep or enforce authorized region restriction
-    if (currentUser && currentUser.role !== "admin" && currentUser.perms?.region) {
-      setRegion(currentUser.perms.region);
+    if (currentUser && currentUser.role !== "admin" && finalPerms?.region) {
+      setRegion(finalPerms.region);
     } else {
       setRegion("");
     }
@@ -243,7 +246,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
     setClient(x.client || "");
     setIdentity(x.identity || "");
     setNationality(x.nationality || "");
-    setRegion(awExtractRegion(x.notes || "") || (currentUser?.perms?.region || ""));
+    setRegion(awExtractRegion(x.notes || "") || (finalPerms?.region || ""));
     setPhone(x.phone || "");
     setContractNo(x.no || "");
     setAmount(x.amount || "");
@@ -306,7 +309,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
   };
 
   // Safe checks for user permission context
-  const allowedRegion = currentUser?.perms?.region || "";
+  const allowedRegion = finalPerms?.region || "";
   const filteredInstallments = installments.filter((item) => {
     const itemRegion = awExtractRegion(item.notes || "");
     if (currentUser && currentUser.role !== "admin" && allowedRegion) {
@@ -344,7 +347,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
   return (
     <div className="space-y-6" dir="rtl">
       {/* Contract Addition Form Panel */}
-      {((!editId && currentUser?.perms?.installmentsAdd) || (editId && currentUser?.perms?.installmentsEdit) || currentUser?.role === "admin") && (
+      {((!editId && finalPerms?.installmentsAdd) || (editId && finalPerms?.installmentsEdit) || currentUser?.role === "admin") && (
         <form onSubmit={handleSubmit} className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl space-y-6">
           <div className="border-b border-slate-850 pb-4">
             <h3 className="text-base font-black text-white flex items-center gap-2">
@@ -959,7 +962,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
                           >
                             فتح الملف
                           </button>
-                          {(currentUser?.role === "admin" || currentUser?.perms?.installmentsDelete) && (
+                          {(currentUser?.role === "admin" || finalPerms?.installmentsDelete) && (
                             <button
                               onClick={() => {
                                 if (confirm(`هل أنت متأكد من حذف العقد الخاص بـ (${item.client}) ورقم العقد (${item.no}) بشكل نهائي؟ لا يمكن التراجع عن هذا الإجراء!`)) {
@@ -1208,7 +1211,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
 
             {/* Modal Actions */}
             <div className="sticky bottom-0 bg-slate-900 border-t border-slate-800 p-4 shrink-0 flex justify-end gap-3 z-10">
-              {(currentUser?.role === "admin" || currentUser?.perms?.installmentsDelete) && (
+              {(currentUser?.role === "admin" || finalPerms?.installmentsDelete) && (
                 <button
                   type="button"
                   onClick={() => {
@@ -1224,7 +1227,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
                 </button>
               )}
               
-              {((currentUser?.perms?.installmentsEdit) || currentUser?.role === "admin") && (
+              {((finalPerms?.installmentsEdit) || currentUser?.role === "admin") && (
                 <button
                   type="button"
                   onClick={() => {
