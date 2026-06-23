@@ -6,7 +6,7 @@
 import React, { useState, useEffect } from "react";
 import { Wallet, Landmark, TrendingUp, Search, Plus, Trash2, AlertTriangle, Coins } from "lucide-react";
 import { Receipt, Payment, Expense, Installment } from "../types";
-import { awExtractTreasury, awExtractCapital, awExtractCapitalSource, awExtractCapitalCompany, awExtractCapitalCollection } from "../db";
+import { awExtractTreasury, awExtractCapital, awExtractCapitalSource, awExtractCapitalCompany, awExtractCapitalCollection, awGetSafeCapitalOutflow } from "../db";
 
 interface TreasuryProps {
   receipts: Receipt[];
@@ -148,31 +148,7 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
     // Capital outflows for contracts belonging to this safe or funded specifically from it
     let capitalOut = 0;
     installments.forEach(x => {
-      const source = awExtractCapitalSource(x.notes || "");
-      const companyAmount = awExtractCapitalCompany(x.notes || "");
-      const collectionAmount = awExtractCapitalCollection(x.notes || "");
-      const totalCap = awExtractCapital(x.notes || "");
-      
-      if (t === "خزنة الشركة") {
-        if (source === "شركة") {
-          capitalOut += totalCap;
-        } else if (source === "كلاهما") {
-          capitalOut += companyAmount;
-        }
-      } else if (t === "خزنة التحصيل") {
-        if (source === "تحصيل") {
-          capitalOut += totalCap;
-        } else if (source === "كلاهما") {
-          capitalOut += collectionAmount;
-        }
-      } else {
-        const contractTreasury = awExtractTreasury(x.notes || "") || "خزنة التحصيل";
-        if (contractTreasury === t) {
-          if (source !== "شركة" && source !== "تحصيل" && source !== "كلاهما") {
-            capitalOut += totalCap;
-          }
-        }
-      }
+      capitalOut += awGetSafeCapitalOutflow(x.notes || "", t);
     });
     
     const inbound = receiptsOfSafe.reduce((sum, r) => sum + Number(r.amount || 0), 0);
@@ -245,40 +221,21 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
 
     // Add capitals of contracts as outbound flows
     installments.forEach((x) => {
-      const source = awExtractCapitalSource(x.notes || "");
-      const companyAmount = awExtractCapitalCompany(x.notes || "");
-      const collectionAmount = awExtractCapitalCollection(x.notes || "");
-      const totalCap = awExtractCapital(x.notes || "");
-
-      let applicableCapOutflow = 0;
-      let descSuffix = "";
-
-      if (safeName === "خزنة الشركة") {
-        if (source === "شركة") {
-          applicableCapOutflow = totalCap;
-          descSuffix = " [كامل التمويل من الشركة]";
-        } else if (source === "كلاهما" && companyAmount > 0) {
-          applicableCapOutflow = companyAmount;
-          descSuffix = ` [مساهمة الشركة: ${companyAmount.toLocaleString()} ريال]`;
-        }
-      } else if (safeName === "خزنة التحصيل") {
-        if (source === "تحصيل") {
-          applicableCapOutflow = totalCap;
-          descSuffix = " [كامل التمويل من التحصيل]";
-        } else if (source === "كلاهما" && collectionAmount > 0) {
-          applicableCapOutflow = collectionAmount;
-          descSuffix = ` [مساهمة التحصيل: ${collectionAmount.toLocaleString()} ريال]`;
-        }
-      } else {
-        const contractTreasury = awExtractTreasury(x.notes || "") || "خزنة التحصيل";
-        if (contractTreasury === safeName) {
-          if (source !== "شركة" && source !== "تحصيل" && source !== "كلاهما") {
-            applicableCapOutflow = totalCap;
-          }
-        }
-      }
-
+      const applicableCapOutflow = awGetSafeCapitalOutflow(x.notes || "", safeName);
       if (applicableCapOutflow > 0) {
+        const source = awExtractCapitalSource(x.notes || "");
+        let descSuffix = "";
+        
+        if (source === "كلاهما") {
+          descSuffix = ` [مساهمة تقسيم: ${applicableCapOutflow.toLocaleString()} ريال]`;
+        } else if (source === "شركة" && safeName === "خزنة الشركة") {
+          descSuffix = " [كامل التمويل من الشركة]";
+        } else if (source === "تحصيل" && safeName === "خزنة التحصيل") {
+          descSuffix = " [كامل التمويل من التحصيل]";
+        } else {
+          descSuffix = ` [تمويل من ${safeName}: ${applicableCapOutflow.toLocaleString()} ريال]`;
+        }
+
         items.push({
           date: x.start_date || "",
           type: "رأس مال",

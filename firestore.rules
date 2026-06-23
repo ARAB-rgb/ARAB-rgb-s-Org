@@ -130,7 +130,7 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if isSignedIn();
-      allow create, update: if isSignedIn() && isValidUser(incoming()) && isValidId(userId);
+      allow create, update: if isSignedIn() && isValidId(userId);
       allow delete: if isSignedIn() && isValidId(userId);
     }
 

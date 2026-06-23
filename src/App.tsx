@@ -859,6 +859,7 @@ export default function App() {
     const capitalSource = row.capital_source_input || "";
     const capitalCompany = Number(row.capital_company_input || 0);
     const capitalCollection = Number(row.capital_collection_input || 0);
+    const capitalSplits = row.capital_splits_input;
     const finalNotes = awBuildNotesWithRegionAndTreasuryAndCapital(
       row.notes, 
       activeRegion, 
@@ -866,7 +867,8 @@ export default function App() {
       activeCapital,
       capitalSource,
       capitalCompany,
-      capitalCollection
+      capitalCollection,
+      capitalSplits
     );
 
     const payload = {
@@ -880,6 +882,7 @@ export default function App() {
     delete payload.capital_source_input;
     delete payload.capital_company_input;
     delete payload.capital_collection_input;
+    delete payload.capital_splits_input;
 
     setIsLoading(true);
     try {
@@ -2507,6 +2510,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
               payments={getVisiblePayments()}
               expenses={getVisibleExpenses()}
               onNavigateToContracts={() => setActiveSection("installments")}
+              sbStatus={sbStatus}
             />
           )}
 

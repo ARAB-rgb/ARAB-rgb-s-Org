@@ -9,7 +9,7 @@ import {
   Printer, Trash2, Edit2, FileText, CheckCircle, AlertTriangle, Eye, X, Globe
 } from "lucide-react";
 import { Installment, Project, User as AuthUser, Company } from "../types";
-import { getContractTiming, awExtractRegion, awCleanNotes, generateNextNo, awExtractTreasury, awExtractCapital, awExtractCapitalSource, awExtractCapitalCompany, awExtractCapitalCollection } from "../db";
+import { getContractTiming, awExtractRegion, awCleanNotes, generateNextNo, awExtractTreasury, awExtractCapital, awExtractCapitalSource, awExtractCapitalCompany, awExtractCapitalCollection, awExtractCapitalSplit } from "../db";
 
 interface InstallmentsProps {
   currentUser: AuthUser | null;
@@ -81,9 +81,10 @@ export const Installments: React.FC<InstallmentsProps> = ({
   const [notes, setNotes] = useState("");
   const [treasury, setTreasury] = useState("خزنة التحصيل");
   const [capital, setCapital] = useState<number | "">("");
-  const [capitalSource, setCapitalSource] = useState<"شركة" | "تحصيل" | "كلاهما">("شركة");
+  const [capitalSource, setCapitalSource] = useState<string>("خزنة الشركة");
   const [capitalCompany, setCapitalCompany] = useState<number | "">("");
   const [capitalCollection, setCapitalCollection] = useState<number | "">("");
+  const [capitalSplits, setCapitalSplits] = useState<Record<string, number | "">>({});
   const [installmentCompanyId, setInstallmentCompanyId] = useState("");
   const [dynamicTreasuries, setDynamicTreasuries] = useState<string[]>(getStoredTreasuries);
   const [isCapitalManuallyEdited, setIsCapitalManuallyEdited] = useState(false);
@@ -95,6 +96,12 @@ export const Installments: React.FC<InstallmentsProps> = ({
     }
   }, [selectedCompanyId, editId]);
 
+  // Keep capitalCompany and capitalCollection synced with capitalSplits for backward compatibility & legacy code
+  useEffect(() => {
+    setCapitalCompany(capitalSplits["خزنة الشركة"] || "");
+    setCapitalCollection(capitalSplits["خزنة التحصيل"] || "");
+  }, [capitalSplits]);
+
   // Capital reactive sync / default computation
   useEffect(() => {
     if (editId || isCapitalManuallyEdited) return;
@@ -103,39 +110,48 @@ export const Installments: React.FC<InstallmentsProps> = ({
     const calculatedCapital = Math.max(0, Number(amount || 0) - Number(paid || 0));
     if (calculatedCapital > 0) {
       if (capitalSource === "كلاهما") {
-        setCapitalCompany(calculatedCapital * 0.5);
-        setCapitalCollection(calculatedCapital * 0.5);
+        const count = dynamicTreasuries.length || 2;
+        const perSafe = Math.round(calculatedCapital / count);
+        const newSplits: Record<string, number | ""> = {};
+        dynamicTreasuries.forEach(tName => {
+          newSplits[tName] = perSafe;
+        });
+        setCapitalSplits(newSplits);
         setCapital("");
       } else {
         setCapital(calculatedCapital);
-        setCapitalCompany("");
-        setCapitalCollection("");
+        setCapitalSplits({});
       }
     } else {
       setCapital("");
-      setCapitalCompany("");
-      setCapitalCollection("");
+      setCapitalSplits({});
     }
-  }, [amount, paid, capitalSource, editId, isCapitalManuallyEdited]);
+  }, [amount, paid, capitalSource, editId, isCapitalManuallyEdited, dynamicTreasuries]);
 
-  const handleCapitalSourceChange = (newSource: "شركة" | "تحصيل" | "كلاهما") => {
+  const handleCapitalSourceChange = (newSource: string) => {
     setCapitalSource(newSource);
     
     // Convert / transfer existing values seamlessly
     if (newSource === "كلاهما") {
       const currentTotal = Number(capital || 0);
       if (currentTotal > 0) {
-        setCapitalCompany(currentTotal * 0.5);
-        setCapitalCollection(currentTotal * 0.5);
+        const count = dynamicTreasuries.length || 2;
+        const perSafe = Math.round(currentTotal / count);
+        const newSplits: Record<string, number | ""> = {};
+        dynamicTreasuries.forEach(tName => {
+          newSplits[tName] = perSafe;
+        });
+        setCapitalSplits(newSplits);
+      } else {
+        setCapitalSplits({});
       }
       setCapital("");
     } else {
-      const computedTotal = Number(capitalCompany || 0) + Number(capitalCollection || 0);
-      if (computedTotal > 0) {
-        setCapital(computedTotal);
+      const totalSplits = Object.values(capitalSplits).reduce<number>((sum, val) => sum + Number(val || 0), 0);
+      if (totalSplits > 0) {
+        setCapital(totalSplits);
       }
-      setCapitalCompany("");
-      setCapitalCollection("");
+      setCapitalSplits({});
     }
   };
 
@@ -234,9 +250,10 @@ export const Installments: React.FC<InstallmentsProps> = ({
     setNotes("");
     setTreasury(getStoredTreasuries()[0] || "خزنة التحصيل");
     setCapital("");
-    setCapitalSource("شركة");
+    setCapitalSource("خزنة الشركة");
     setCapitalCompany("");
     setCapitalCollection("");
+    setCapitalSplits({});
     setInstallmentCompanyId(selectedCompanyId !== "all" ? (selectedCompanyId || "") : "");
     setIsCapitalManuallyEdited(false);
   };
@@ -261,9 +278,20 @@ export const Installments: React.FC<InstallmentsProps> = ({
     setNotes(awCleanNotes(x.notes || ""));
     setTreasury(awExtractTreasury(x.notes || "") || getStoredTreasuries()[0] || "خزنة التحصيل");
     setCapital(awExtractCapital(x.notes || "") || "");
-    setCapitalSource(awExtractCapitalSource(x.notes || ""));
+    const rawSrc = awExtractCapitalSource(x.notes || "");
+    const mappedSrc = rawSrc === "شركة" ? "خزنة الشركة" : (rawSrc === "تحصيل" ? "خزنة التحصيل" : rawSrc);
+    setCapitalSource(mappedSrc);
     setCapitalCompany(awExtractCapitalCompany(x.notes || "") || "");
     setCapitalCollection(awExtractCapitalCollection(x.notes || "") || "");
+    
+    // Load splitting amounts dynamically
+    const loadedSplits: Record<string, number | ""> = {};
+    dynamicTreasuries.forEach(tName => {
+      const val = awExtractCapitalSplit(x.notes || "", tName);
+      loadedSplits[tName] = val || "";
+    });
+    setCapitalSplits(loadedSplits);
+
     setInstallmentCompanyId(x.company_id || "");
     setIsCapitalManuallyEdited(true);
   };
@@ -295,10 +323,11 @@ export const Installments: React.FC<InstallmentsProps> = ({
       notes: notes.trim(), // notes builder handling appended inside App.tsx
       region_input: region, // to be passed down
       treasury_input: treasury, // to be passed down
-      capital_input: capitalSource === "كلاهما" ? (Number(capitalCompany || 0) + Number(capitalCollection || 0)) : Number(capital || 0),
+      capital_input: capitalSource === "كلاهما" ? Object.values(capitalSplits).reduce<number>((sum, val) => sum + Number(val || 0), 0) : Number(capital || 0),
       capital_source_input: capitalSource,
-      capital_company_input: capitalSource === "كلاهما" ? Number(capitalCompany || 0) : (capitalSource === "شركة" ? Number(capital || 0) : 0),
-      capital_collection_input: capitalSource === "كلاهما" ? Number(capitalCollection || 0) : (capitalSource === "تحصيل" ? Number(capital || 0) : 0),
+      capital_company_input: capitalSource === "كلاهما" ? Number(capitalSplits["خزنة الشركة"] || 0) : (capitalSource === "خزنة الشركة" ? Number(capital || 0) : 0),
+      capital_collection_input: capitalSource === "كلاهما" ? Number(capitalSplits["خزنة التحصيل"] || 0) : (capitalSource === "خزنة التحصيل" ? Number(capital || 0) : 0),
+      capital_splits_input: capitalSplits,
       company_id: installmentCompanyId || (selectedCompanyId !== "all" ? selectedCompanyId : undefined)
     };
 
@@ -603,11 +632,12 @@ export const Installments: React.FC<InstallmentsProps> = ({
               <label className="text-[10px] font-black text-amber-400">جهة تمويل رأس مال العقد</label>
               <select
                 value={capitalSource}
-                onChange={(e) => handleCapitalSourceChange(e.target.value as any)}
+                onChange={(e) => handleCapitalSourceChange(e.target.value)}
                 className="w-full px-3.5 py-2.5 bg-slate-950/40 border border-slate-850 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-blue-500 transition-colors bg-slate-950 cursor-pointer"
               >
-                <option value="شركة" className="bg-slate-950 text-white">💰 خزنة الشركة</option>
-                <option value="تحصيل" className="bg-slate-950 text-white">💰 خزنة التحصيل</option>
+                {dynamicTreasuries.map((tName) => (
+                  <option key={tName} value={tName} className="bg-slate-950 text-white">💰 {tName}</option>
+                ))}
                 <option value="كلاهما" className="bg-slate-950 text-white">🤝 الاثنين معاً (تقسيم التمويل)</option>
               </select>
             </div>
@@ -686,36 +716,37 @@ export const Installments: React.FC<InstallmentsProps> = ({
               </div>
             ) : (
               <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4 bg-amber-500/5 p-4 rounded-2xl border border-amber-500/20">
-                <div className="space-y-1">
-                  <span className="flex justify-between items-center">
-                    <label className="text-[10px] font-black text-amber-400">كم دفع الشركة من رأس المال؟</label>
-                    <span className="text-[9px] text-slate-400 font-mono">
-                      {Number(amount || 0) > 0 ? `${((Number(capitalCompany || 0) / (Number(amount || 0) - Number(paid || 0) || 1)) * 100).toFixed(0)}٪` : ""}
-                    </span>
-                  </span>
-                  <input
-                    type="number"
-                    placeholder="تمويل من خزنة الشركة"
-                    value={capitalCompany}
-                    onChange={(e) => handleCapitalCompanyChange(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-slate-950/40 border border-slate-850 rounded-xl text-xs font-bold text-amber-200 focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <span className="flex justify-between items-center">
-                    <label className="text-[10px] font-black text-amber-400">كم دفع التحصيل من رأس المال؟</label>
-                    <span className="text-[9px] text-slate-400 font-mono">
-                      {Number(amount || 0) > 0 ? `${((Number(capitalCollection || 0) / (Number(amount || 0) - Number(paid || 0) || 1)) * 100).toFixed(0)}٪` : ""}
-                    </span>
-                  </span>
-                  <input
-                    type="number"
-                    placeholder="تمويل من خزنة التحصيل"
-                    value={capitalCollection}
-                    onChange={(e) => handleCapitalCollectionChange(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-slate-950/40 border border-slate-850 rounded-xl text-xs font-bold text-amber-200 focus:outline-none focus:border-blue-500"
-                  />
-                </div>
+                {dynamicTreasuries.map((tName) => {
+                  const val = capitalSplits[tName] !== undefined ? capitalSplits[tName] : "";
+                  const totalRem = Math.max(0, Number(amount || 0) - Number(paid || 0)) || 1;
+                  const ratio = Number(amount || 0) > 0 ? ((Number(val || 0) / totalRem) * 100).toFixed(0) : "";
+                  return (
+                    <div key={tName} className="space-y-1">
+                      <span className="flex justify-between items-center">
+                        <label className="text-[10px] font-black text-amber-400">كم دفع {tName} من رأس المال؟</label>
+                        {ratio !== "" && (
+                          <span className="text-[9px] text-amber-500 font-mono font-bold">
+                            {ratio}٪
+                          </span>
+                        )}
+                      </span>
+                      <input
+                        type="number"
+                        placeholder={`تمويل من ${tName}`}
+                        value={val}
+                        onChange={(e) => {
+                          const updatedVal = e.target.value === "" ? "" : Number(e.target.value);
+                          setCapitalSplits((prev) => ({
+                            ...prev,
+                            [tName]: updatedVal,
+                          }));
+                          setIsCapitalManuallyEdited(true);
+                        }}
+                        className="w-full px-3.5 py-2.5 bg-slate-950/40 border border-slate-850 rounded-xl text-xs font-bold text-amber-200 focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                  );
+                })}
                 
                 {/* Live division ratio buttons */}
                 <div className="sm:col-span-2 flex flex-col sm:flex-row gap-3 items-start sm:items-center border-t border-amber-500/10 pt-3 justify-between">
@@ -725,8 +756,17 @@ export const Installments: React.FC<InstallmentsProps> = ({
                       onClick={() => {
                         const total = Math.max(0, Number(amount || 0) - Number(paid || 0)) || Number(amount || 0);
                         if (total > 0) {
-                          setCapitalCompany(Math.round(total * 0.5));
-                          setCapitalCollection(total - Math.round(total * 0.5));
+                          const newSplits: Record<string, number | ""> = {};
+                          dynamicTreasuries.forEach(tName => {
+                            if (tName === "خزنة الشركة") {
+                              newSplits[tName] = Math.round(total * 0.5);
+                            } else if (tName === "خزنة التحصيل") {
+                              newSplits[tName] = total - Math.round(total * 0.5);
+                            } else {
+                              newSplits[tName] = 0;
+                            }
+                          });
+                          setCapitalSplits(newSplits);
                           setIsCapitalManuallyEdited(true);
                         }
                       }}
@@ -739,8 +779,17 @@ export const Installments: React.FC<InstallmentsProps> = ({
                       onClick={() => {
                         const total = Math.max(0, Number(amount || 0) - Number(paid || 0)) || Number(amount || 0);
                         if (total > 0) {
-                          setCapitalCompany(Math.round(total * 0.7));
-                          setCapitalCollection(total - Math.round(total * 0.7));
+                          const newSplits: Record<string, number | ""> = {};
+                          dynamicTreasuries.forEach(tName => {
+                            if (tName === "خزنة الشركة") {
+                              newSplits[tName] = Math.round(total * 0.7);
+                            } else if (tName === "خزنة التحصيل") {
+                              newSplits[tName] = total - Math.round(total * 0.7);
+                            } else {
+                              newSplits[tName] = 0;
+                            }
+                          });
+                          setCapitalSplits(newSplits);
                           setIsCapitalManuallyEdited(true);
                         }
                       }}
@@ -753,8 +802,17 @@ export const Installments: React.FC<InstallmentsProps> = ({
                       onClick={() => {
                         const total = Math.max(0, Number(amount || 0) - Number(paid || 0)) || Number(amount || 0);
                         if (total > 0) {
-                          setCapitalCompany(Math.round(total * 0.8));
-                          setCapitalCollection(total - Math.round(total * 0.8));
+                          const newSplits: Record<string, number | ""> = {};
+                          dynamicTreasuries.forEach(tName => {
+                            if (tName === "خزنة الشركة") {
+                              newSplits[tName] = Math.round(total * 0.8);
+                            } else if (tName === "خزنة التحصيل") {
+                              newSplits[tName] = total - Math.round(total * 0.8);
+                            } else {
+                              newSplits[tName] = 0;
+                            }
+                          });
+                          setCapitalSplits(newSplits);
                           setIsCapitalManuallyEdited(true);
                         }
                       }}
@@ -776,7 +834,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
                   </div>
 
                   <span className="text-[11px] font-black text-amber-300">
-                    💡 إجمالي رأس مال العقد المشترك: {((Number(capitalCompany || 0) + Number(capitalCollection || 0))).toLocaleString()} ريال
+                    💡 إجمالي رأس مال العقد المشترك: {Object.values(capitalSplits).reduce<number>((sum, val) => sum + Number(val || 0), 0).toLocaleString()} ريال
                   </span>
                 </div>
               </div>

@@ -40,6 +40,7 @@ interface DashboardProps {
   payments: any[];
   expenses: any[];
   onNavigateToContracts: () => void;
+  sbStatus?: "checking" | "connected" | "fallback";
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -47,7 +48,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   receipts,
   payments,
   expenses,
-  onNavigateToContracts
+  onNavigateToContracts,
+  sbStatus = "connected"
 }) => {
   // Global totals
   const totalContractsCount = installments.length;
@@ -159,6 +161,28 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   return (
     <div className="space-y-6" dir="rtl">
+      {/* Fallback Notice Banner */}
+      {sbStatus === "fallback" && (
+        <div className="relative overflow-hidden bg-gradient-to-r from-amber-500/10 via-amber-600/15 to-transparent border border-amber-500/30 p-5 rounded-3xl shadow-lg shadow-amber-500/5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="absolute -left-12 -bottom-12 w-32 h-32 bg-amber-500/5 rounded-full blur-2xl pointer-events-none" />
+          <div className="flex items-start gap-3.5 relative z-10 w-full">
+            <div className="p-3 bg-amber-500/15 border border-amber-500/35 rounded-2xl text-amber-400 shrink-0 mt-0.5">
+              <AlertTriangle className="w-5 h-5 animate-pulse" />
+            </div>
+            <div className="space-y-1 w-full">
+              <h4 className="text-sm font-black text-white flex items-center gap-1.5 leading-none">
+                <span>⚠️ تنبيه مزامنة قاعدة البيانات: البيانات معروضة من الخزنة الاحتياطية (Firestore)</span>
+              </h4>
+              <p className="text-xs text-slate-300 leading-relaxed max-w-5xl mt-1.5">
+                تعذر الاتصال بقنوات المزامنة الذكية لقاعدة بيانات <b>Supabase</b> حالياً (قد يكون مشروع قاعدة البيانات في وضع السكون المؤقت بسبب عدم النشاط، وهو أمر تلقائي وشائع في باقات خوادم التطبيقات المجانية).
+                <br />
+                <span className="text-slate-400 font-medium">لحماية البيانات وضمان عمل الدفاتر بلا توقف، قام النظام تلقائياً بالتحول إلى <b>Firestore السحابية المؤمنة والبديلة</b>. إذا كنت تملك ملف نسخة احتياطية للشركة <span className="text-amber-400 font-mono">(.json)</span> يمكنك استعادتها فوراً وبكبسة زر واحدة من تبويب <b>"الموظفين والصلاحية"</b> لتستأنف عملك الحسابي بكامل البيانات فوراً!</span>
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* KPI Display Metrics Bar */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
         {topStats.map((stat, idx) => (

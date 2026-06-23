@@ -521,12 +521,14 @@ export function awExtractCapital(notes: string): number {
   return 0;
 }
 
-export function awExtractCapitalSource(notes: string): "شركة" | "تحصيل" | "كلاهما" {
+export function awExtractCapitalSource(notes: string): string {
   const text = String(notes || "");
   const m = text.match(/\[رأس_المال_المصدر:\s*([^\]]+)\]/);
   if (m) {
     const val = m[1].trim();
-    if (val === "شركة" || val === "تحصيل" || val === "كلاهما") return val;
+    if (val === "شركة" || val === "خزنة الشركة") return "شركة";
+    if (val === "تحصيل" || val === "خزنة التحصيل") return "تحصيل";
+    return val;
   }
   return "شركة";
 }
@@ -551,6 +553,52 @@ export function awExtractCapitalCollection(notes: string): number {
   return m ? Number(m[1]) : 0;
 }
 
+export function awExtractCapitalSplit(notes: string, treasuryName: string): number {
+  const text = String(notes || "");
+  // Escaping special characters for Regex safety
+  const escapedName = treasuryName.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+  const regex = new RegExp(`\\[رأس_المال_تقسيم_${escapedName}:\\s*(\\d+(\\.\\d+)?)\\]`);
+  const m = text.match(regex);
+  if (m) return Number(m[1]);
+
+  // Backward compatibility
+  if (treasuryName === "خزنة الشركة") {
+    const mLegacy = text.match(/\[رأس_المال_شركة:\s*(\d+(\.\d+)?)\]/);
+    if (mLegacy) return Number(mLegacy[1]);
+  }
+  if (treasuryName === "خزنة التحصيل") {
+    const mLegacy = text.match(/\[رأس_المال_تحصيل:\s*(\d+(\.\d+)?)\]/);
+    if (mLegacy) return Number(mLegacy[1]);
+  }
+  return 0;
+}
+
+export function awGetSafeCapitalOutflow(notes: string, safeName: string): number {
+  const source = awExtractCapitalSource(notes);
+  const totalCap = awExtractCapital(notes);
+  
+  if (source === "كلاهما") {
+    return awExtractCapitalSplit(notes, safeName);
+  }
+  
+  const isCompanySafe = safeName === "خزنة الشركة";
+  const isCollectionSafe = safeName === "خزنة التحصيل";
+  
+  if (isCompanySafe && (source === "شركة" || source === "خزنة الشركة")) {
+    return totalCap;
+  }
+  if (isCollectionSafe && (source === "تحصيل" || source === "خزنة التحصيل")) {
+    return totalCap;
+  }
+  
+  // Custom safe matching
+  if (source === safeName) {
+    return totalCap;
+  }
+  
+  return 0;
+}
+
 export function awCleanNotes(notes: string): string {
   return String(notes || "")
     .replace(/\s*\[الإدارة:\s*[^\]]+\]\s*/g, " ")
@@ -559,6 +607,7 @@ export function awCleanNotes(notes: string): string {
     .replace(/\s*\[رأس_المال_المصدر:\s*[^\]]+\]\s*/g, " ")
     .replace(/\s*\[رأس_المال_شركة:\s*[^\]]+\]\s*/g, " ")
     .replace(/\s*\[رأس_المال_تحصيل:\s*[^\]]+\]\s*/g, " ")
+    .replace(/\s*\[رأس_المال_تقسيم_[^\]]+:\s*[^\]]+\]\s*/g, " ")
     .replace(/\s*\[السند_الخارجي:\s*[^\]]+\]\s*/g, " ")
     .replace(/\s*\[\[?AW_BRANCH:\s*[^\]\s]+\]?\]\s*/gi, " ")
     .trim();
@@ -598,16 +647,31 @@ export function awBuildNotesWithRegionAndTreasuryAndCapital(
   capital: number,
   capitalSource?: string,
   capitalCompany?: number,
-  capitalCollection?: number
+  capitalCollection?: number,
+  capitalSplits?: Record<string, number | "">
 ): string {
   const clean = awCleanNotes(notes);
   let extraArr = [];
   if (region) extraArr.push(`[الإدارة: ${region}]`);
   if (treasury) extraArr.push(`[الخزنة: ${treasury}]`);
   if (capital && capital > 0) extraArr.push(`[رأس_المال: ${capital}]`);
-  if (capitalSource) extraArr.push(`[رأس_المال_المصدر: ${capitalSource}]`);
+  if (capitalSource) {
+    let savedSrc = capitalSource;
+    if (capitalSource === "خزنة الشركة") savedSrc = "شركة";
+    else if (capitalSource === "خزنة التحصيل") savedSrc = "تحصيل";
+    extraArr.push(`[رأس_المال_المصدر: ${savedSrc}]`);
+  }
   if (typeof capitalCompany === "number" && capitalCompany > 0) extraArr.push(`[رأس_المال_شركة: ${capitalCompany}]`);
   if (typeof capitalCollection === "number" && capitalCollection > 0) extraArr.push(`[رأس_المال_تحصيل: ${capitalCollection}]`);
+  
+  if (capitalSplits) {
+    Object.entries(capitalSplits).forEach(([tName, amount]) => {
+      const numVal = Number(amount || 0);
+      if (numVal > 0) {
+        extraArr.push(`[رأس_المال_تقسيم_${tName}: ${numVal}]`);
+      }
+    });
+  }
   
   if (extraArr.length === 0) return clean;
   return extraArr.join(" ") + (clean ? "\n" : "") + clean;
