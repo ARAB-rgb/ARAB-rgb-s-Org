@@ -7,6 +7,9 @@ import React, { useState, useEffect } from "react";
 import { Wallet, Landmark, TrendingUp, Search, Plus, Trash2, AlertTriangle, Coins } from "lucide-react";
 import { Receipt, Payment, Expense, Installment } from "../types";
 import { awExtractTreasury, awExtractCapital, awExtractCapitalSource, awExtractCapitalCompany, awExtractCapitalCollection, awGetSafeCapitalOutflow } from "../db";
+import { safeStorage } from "../safeStorage";
+
+const localStorage = safeStorage;
 
 interface TreasuryProps {
   receipts: Receipt[];

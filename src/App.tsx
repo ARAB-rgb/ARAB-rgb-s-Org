@@ -23,6 +23,9 @@ import {
 import { Toast, ToastItem, ToastType } from "./components/Shared/Toast";
 import { Dashboard } from "./components/Dashboard";
 import { Installments } from "./components/Installments";
+import { safeStorage } from "./safeStorage";
+
+const localStorage = safeStorage;
 import { Treasury } from "./components/Treasury";
 
 const getStoredTreasuries = (): string[] => {
@@ -4828,7 +4831,7 @@ CREATE TABLE IF NOT EXISTS sessions (
                       <div className="lg:col-span-1 space-y-6">
                         {/* Financial Account and Sulafe Balance */}
                         <div className="bg-slate-950/40 border border-slate-800/80 rounded-2xl p-4 space-y-4">
-                          <h4 className="text-xs font-black text-indigo-400 flex items-center gap-1.5 border-b border-slate-850 pb-2">
+                                                    <h4 className="text-xs font-black text-indigo-400 flex items-center gap-1.5 border-b border-slate-850 pb-2">
                             <span>🏛️</span>
                             <span>الرصيد المالي الحالي وتفاصيل السلفيات</span>
                           </h4>
@@ -5055,6 +5058,37 @@ CREATE TABLE IF NOT EXISTS sessions (
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+
+          {/* Fallback Warning Card for Unauthorized Users */}
+          {((activeSection === "users" && !(currentUser?.role === "admin" || can("users"))) ||
+            (activeSection === "sessions" && !(currentUser?.role === "admin" || can("sessions"))) ||
+            (activeSection === "companies" && !(currentUser?.role === "admin" || can("companies")))) && (
+            <div className="flex flex-col items-center justify-center p-12 text-center max-w-lg mx-auto my-12 space-y-6 bg-slate-900/40 backdrop-blur-xl border border-amber-500/20 rounded-[32px] shadow-2xl relative overflow-hidden" dir="rtl">
+              <div className="absolute top-0 right-0 w-16 h-16 border-t-2 border-r-2 border-amber-500/10 rounded-tr-[32px] pointer-events-none" />
+              <div className="absolute bottom-0 left-0 w-16 h-16 border-b-2 border-l-2 border-amber-500/10 rounded-bl-[32px] pointer-events-none" />
+              
+              <div className="w-16 h-16 bg-amber-500/10 border border-amber-500/30 text-amber-500 rounded-2xl flex items-center justify-center shadow-lg">
+                <Shield className="w-8 h-8" />
+              </div>
+              
+              <div className="space-y-2">
+                <h3 className="text-base font-black text-white">🔒 قسم محمي - غير مصرح بالدخول</h3>
+                <p className="text-xs text-slate-300 leading-relaxed max-w-xs mx-auto">
+                  عذراً، حسابك الحالي <b className="text-amber-400">({currentUser?.name})</b> مسجل بصلاحيات محدودة ولا يملك الصلاحيات الإدارية الكافية لعرض هذا القسم.
+                </p>
+              </div>
+
+              <div className="p-4 bg-slate-950/40 rounded-2xl border border-white/5 space-y-2 text-right w-full">
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  الرجاء التواصل مع <b className="text-amber-500">مدير النظام العام</b> للحصول على الصلاحيات المطلوبة لحسابك الحالي، أو قم بتسجيل الدخول كمسؤول مخول لرؤية محتوى هذا القسم وإدارة الموظفين والصلاحيات.
+                </p>
+              </div>
+
+              <p className="text-[9px] text-slate-500 leading-relaxed">
+                بإمكانك الضغط على <b className="text-rose-400">🚪 خروج آمن من النظام</b> في أسفل القائمة الجانبية لتسجيل الخروج والدخول بالحساب المناسب.
+              </p>
             </div>
           )}
 

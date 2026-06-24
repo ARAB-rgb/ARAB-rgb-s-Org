@@ -10,6 +10,9 @@ import {
 } from "lucide-react";
 import { Installment, Project, User as AuthUser, Company } from "../types";
 import { getContractTiming, awExtractRegion, awCleanNotes, generateNextNo, awExtractTreasury, awExtractCapital, awExtractCapitalSource, awExtractCapitalCompany, awExtractCapitalCollection, awExtractCapitalSplit } from "../db";
+import { safeStorage } from "../safeStorage";
+
+const localStorage = safeStorage;
 
 interface InstallmentsProps {
   currentUser: AuthUser | null;

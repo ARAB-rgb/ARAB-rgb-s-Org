@@ -19,6 +19,9 @@ import {
 } from "firebase/firestore";
 import firebaseConfig from "../firebase-applet-config.json";
 import { createClient } from "@supabase/supabase-js";
+import { safeStorage } from "./safeStorage";
+
+const localStorage = safeStorage;
 
 import { User, Installment, Quote, Receipt, Payment, Expense, Project, Worker, DbSession } from "./types";
 
