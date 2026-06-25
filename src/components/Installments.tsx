@@ -179,6 +179,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
   const [fNationality, setFNationality] = useState("");
   const [fProject, setFProject] = useState("");
   const [fRegion, setFRegion] = useState("");
+  const [fSort, setFSort] = useState("date_desc");
 
   // Modal Detail State
   const [selectedFileContract, setSelectedFileContract] = useState<Installment | null>(null);
@@ -351,7 +352,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
   });
 
   const getVisibleList = () => {
-    return filteredInstallments.filter((x) => {
+    const list = filteredInstallments.filter((x) => {
       const t = getContractTiming(x);
       const computedStatus = t.overdueDays > 0 ? "متأخر" : x.status;
       const r = awExtractRegion(x.notes || "");
@@ -365,6 +366,25 @@ export const Installments: React.FC<InstallmentsProps> = ({
         (!fProject || String(x.project).toLowerCase().includes(fProject.toLowerCase().trim())) &&
         (!fRegion || r === fRegion)
       );
+    });
+
+    return list.sort((a, b) => {
+      if (fSort === "date_desc") {
+        return String(b.start_date || "").localeCompare(String(a.start_date || ""));
+      }
+      if (fSort === "date_asc") {
+        return String(a.start_date || "").localeCompare(String(b.start_date || ""));
+      }
+      if (fSort === "client_asc") {
+        return String(a.client || "").localeCompare(String(b.client || ""), "ar");
+      }
+      if (fSort === "amount_desc") {
+        return Number(b.amount || 0) - Number(a.amount || 0);
+      }
+      if (fSort === "amount_asc") {
+        return Number(a.amount || 0) - Number(b.amount || 0);
+      }
+      return 0;
     });
   };
 
@@ -875,7 +895,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
       {/* Filter and Tables Section */}
       <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
         {/* Quick Filter Controls */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 p-4 bg-slate-950/30 rounded-2xl border border-slate-850/80">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-6 gap-3 p-4 bg-slate-950/30 rounded-2xl border border-slate-850/80">
           <input
             type="text"
             placeholder="البحث باسم العميل أو العقد أو الجوال..."
@@ -928,6 +948,17 @@ export const Installments: React.FC<InstallmentsProps> = ({
             <option value="الغربية">الغربية</option>
             <option value="الجنوب">الجنوب</option>
             <option value="الشمال">الشمال</option>
+          </select>
+          <select
+            value={fSort}
+            onChange={(e) => setFSort(e.target.value)}
+            className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none font-sans"
+          >
+            <option value="date_desc">تاريخ العقد (الأحدث أولاً)</option>
+            <option value="date_asc">تاريخ العقد (الأقدم أولاً)</option>
+            <option value="client_asc">اسم العميل (أ - ي)</option>
+            <option value="amount_desc">قيمة العقد (الأعلى ماليًا)</option>
+            <option value="amount_asc">قيمة العقد (الأقل ماليًا)</option>
           </select>
         </div>
 

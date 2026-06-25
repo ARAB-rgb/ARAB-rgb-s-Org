@@ -2719,6 +2719,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                     <input placeholder="بحث في سندات القبض..." value={rSearch} onChange={(e) => setRSearch(e.target.value)} className="px-4 py-2 bg-slate-950/60 border border-slate-800 rounded-xl text-xs font-bold text-white w-full md:w-64" />
                     <select value={rSort} onChange={(e) => setRSort(e.target.value)} className="px-4 py-2 bg-slate-950/60 border border-slate-800 rounded-xl text-xs font-bold text-white">
                       <option value="date_desc">الأحدث أولاً</option>
+                      <option value="date_asc">الأقدم أولاً</option>
                       <option value="name_asc">الاسم (من أ إلى ي)</option>
                       <option value="amount_desc">الأعلى ماليًا</option>
                       <option value="amount_asc">الأقل ماليًا</option>
@@ -2759,7 +2760,8 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                           }
                           if (rSort === "amount_desc") return Number(b.amount || 0) - Number(a.amount || 0);
                           if (rSort === "amount_asc") return Number(a.amount || 0) - Number(b.amount || 0);
-                          return String(b.date).localeCompare(String(a.date));
+                          if (rSort === "date_asc") return String(a.date || "").localeCompare(String(b.date || ""));
+                          return String(b.date || "").localeCompare(String(a.date || ""));
                         })
                         .map((r, idx) => (
                           <tr key={idx} className="border-b border-slate-850 hover:bg-slate-800/10 transition-colors">
