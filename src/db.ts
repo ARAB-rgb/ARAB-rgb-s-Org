@@ -299,12 +299,8 @@ class SupabaseEmulationChain {
         }
         const { data, error } = await q.limit(1).maybeSingle();
         if (error) {
-          if (isQuotaError(error)) {
-            isSupabaseHealthy = false;
-            console.warn("⚠️ Supabase quota exceeded during maybeSingle. Falling back to Firestore.");
-          } else {
-            return { data: null, error: new Error(error.message) };
-          }
+          console.warn("Real Supabase maybeSingle returned error, falling back to Firestore:", error.message);
+          throw error;
         } else {
           return { data, error: null };
         }
@@ -348,13 +344,9 @@ class SupabaseEmulationChain {
       try {
         return await this.executeRealSupabase();
       } catch (err: any) {
-        if (isQuotaError(err)) {
-          isSupabaseHealthy = false;
-          console.warn("⚠️ Supabase restriction or quota exceeded. Seamlesly swapping to Firestore fallback.", err.message || err);
-        } else {
-          console.error("Real Supabase query threw exception:", err);
-          return { data: null, error: err };
-        }
+        console.warn("⚠️ Real Supabase query threw exception, falling back to Firestore:", err);
+        isSupabaseHealthy = false;
+        // Let it fall through to Firestore fallback
       }
     }
 
