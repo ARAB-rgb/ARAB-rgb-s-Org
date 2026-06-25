@@ -158,6 +158,8 @@ export default function App() {
   // Search/Sort filters for receipts
   const [rSearch, setRSearch] = useState("");
   const [rSort, setRSort] = useState("date_desc");
+  const [rFromDate, setRFromDate] = useState("");
+  const [rToDate, setRToDate] = useState("");
 
   // 3. Payments Forms
   const [payTo, setPayTo] = useState("");
@@ -676,7 +678,10 @@ export default function App() {
         const rRegion = awExtractRegion(item.notes || "");
         if (rRegion !== userRegionFilter) return false;
       }
-      return selectedCompanyId === "all" || item.company_id === selectedCompanyId;
+      if (selectedCompanyId !== "all" && item.company_id !== selectedCompanyId) return false;
+      if (rFromDate && item.date && item.date < rFromDate) return false;
+      if (rToDate && item.date && item.date > rToDate) return false;
+      return true;
     });
   };
 
@@ -2754,15 +2759,48 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
               {/* Receipts filter & log views */}
               <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
                 <div className="flex flex-col md:flex-row gap-3 items-center justify-between border-b border-slate-800/60 pb-4">
-                  <div className="flex flex-col md:flex-row gap-2 w-full md:w-auto">
-                    <input placeholder="بحث في سندات القبض..." value={rSearch} onChange={(e) => setRSearch(e.target.value)} className="px-4 py-2 bg-slate-950/60 border border-slate-800 rounded-xl text-xs font-bold text-white w-full md:w-64" />
-                    <select value={rSort} onChange={(e) => setRSort(e.target.value)} className="px-4 py-2 bg-slate-950/60 border border-slate-800 rounded-xl text-xs font-bold text-white">
+                  <div className="flex flex-col xl:flex-row gap-2.5 w-full xl:w-auto items-stretch xl:items-center">
+                    <input placeholder="بحث في سندات القبض..." value={rSearch} onChange={(e) => setRSearch(e.target.value)} className="px-4 py-2 bg-slate-950/60 border border-slate-800 rounded-xl text-xs font-bold text-white w-full md:w-60 focus:outline-none" />
+                    <select value={rSort} onChange={(e) => setRSort(e.target.value)} className="px-4 py-2 bg-slate-950/60 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none">
                       <option value="date_desc">الأحدث أولاً</option>
                       <option value="date_asc">الأقدم أولاً</option>
                       <option value="name_asc">الاسم (من أ إلى ي)</option>
                       <option value="amount_desc">الأعلى ماليًا</option>
                       <option value="amount_asc">الأقل ماليًا</option>
                     </select>
+
+                    <div className="flex flex-wrap items-center gap-2 bg-slate-950/40 p-1.5 rounded-xl border border-slate-850/60">
+                      <div className="flex items-center gap-1 px-1">
+                        <span className="text-[10px] font-black text-slate-400">من:</span>
+                        <input
+                          type="date"
+                          value={rFromDate}
+                          onChange={(e) => setRFromDate(e.target.value)}
+                          className="bg-slate-950/60 border border-slate-800 rounded-lg px-2 py-1 text-xs text-white font-mono focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1 px-1">
+                        <span className="text-[10px] font-black text-slate-400">إلى:</span>
+                        <input
+                          type="date"
+                          value={rToDate}
+                          onChange={(e) => setRToDate(e.target.value)}
+                          className="bg-slate-950/60 border border-slate-800 rounded-lg px-2 py-1 text-xs text-white font-mono focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                      {(rFromDate || rToDate) && (
+                        <button
+                          onClick={() => {
+                            setRFromDate("");
+                            setRToDate("");
+                          }}
+                          className="text-[10px] font-bold text-red-400 hover:text-red-300 px-2 py-1 rounded bg-red-950/40 border border-red-900/40 transition-colors"
+                          title="إعادة تعيين نطاق التواريخ"
+                        >
+                          تفريغ
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <button onClick={exportReceiptsExcel} className="px-5 py-2.5 bg-emerald-600/10 border border-emerald-500/20 text-emerald-400 hover:text-white rounded-xl text-xs font-black flex items-center gap-1">
                     <Download className="w-3.5 h-3.5" />
