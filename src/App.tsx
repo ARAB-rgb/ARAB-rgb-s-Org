@@ -1197,6 +1197,19 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
     e.preventDefault();
     if (!rFrom) return;
 
+    if (rExternalNo && rExternalNo.trim()) {
+      const trimmedExt = rExternalNo.trim();
+      const duplicate = receipts.find(
+        (r) =>
+          r.id !== editReceiptId &&
+          awExtractExternalNo(r.notes || "").trim() === trimmedExt
+      );
+      if (duplicate) {
+        showToast(`⚠️ رقم السند الخارجي (${trimmedExt}) مكرر ومسجل مسبقاً في السند رقم: ${duplicate.no}`, "error");
+        return;
+      }
+    }
+
     let linked = rSelectedInstallment;
     if (!linked && rContractQuery) {
       linked = installments.find(
@@ -2679,12 +2692,38 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-[10px] font-black text-emerald-400">رقم السند الخارجي</label>
+                    <div className="flex justify-between items-center">
+                      <label className="text-[10px] font-black text-emerald-400">رقم السند الخارجي</label>
+                      {(() => {
+                        if (!rExternalNo || !rExternalNo.trim()) return null;
+                        const duplicate = receipts.find(
+                          (r) =>
+                            r.id !== editReceiptId &&
+                            awExtractExternalNo(r.notes || "").trim() === rExternalNo.trim()
+                        );
+                        if (duplicate) {
+                          return (
+                            <span className="text-[9px] font-bold text-red-400 animate-pulse">
+                              ⚠️ مكرر بسند رقم ({duplicate.no})
+                            </span>
+                          );
+                        }
+                        return null;
+                      })()}
+                    </div>
                     <input
                       placeholder="رقم السند الخارجي (إن وُجد)"
                       value={rExternalNo}
                       onChange={(e) => setRExternalNo(e.target.value)}
-                      className="w-full px-3 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-emerald-500 transition-colors"
+                      className={`w-full px-3 py-2.5 bg-slate-950/40 border rounded-xl text-xs font-bold text-white focus:outline-none transition-colors ${
+                        rExternalNo && rExternalNo.trim() && receipts.some(
+                          (r) =>
+                            r.id !== editReceiptId &&
+                            awExtractExternalNo(r.notes || "").trim() === rExternalNo.trim()
+                        )
+                          ? "border-red-500 focus:border-red-500"
+                          : "border-slate-800 focus:border-emerald-500"
+                      }`}
                     />
                   </div>
 
