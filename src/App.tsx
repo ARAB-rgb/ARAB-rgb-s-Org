@@ -155,6 +155,11 @@ export default function App() {
   const [rNotes, setRNotes] = useState("");
   const [rTreasury, setRTreasury] = useState("خزنة التحصيل");
   const [rExternalNo, setRExternalNo] = useState("");
+  const [receiptCompanyId, setReceiptCompanyId] = useState("");
+  const [paymentCompanyId, setPaymentCompanyId] = useState("");
+  const [expenseCompanyId, setExpenseCompanyId] = useState("");
+  const [projectCompanyId, setProjectCompanyId] = useState("");
+  const [workerCompanyId, setWorkerCompanyId] = useState("");
 
   // Search/Sort filters for receipts
   const [rSearch, setRSearch] = useState("");
@@ -611,7 +616,17 @@ export default function App() {
     if (!currentUser) return [];
     if (currentUser.role === "admin") return companies;
     const userCompany = currentUser.company_id || "arab_world";
-    return companies.filter((c) => c.id === userCompany);
+    return companies.filter((c) => {
+      const compId = c.id;
+      if (currentUser.company_perms && Object.keys(currentUser.company_perms).length > 0) {
+        const permObj = currentUser.company_perms[compId];
+        if (permObj) {
+          return !!permObj.is_authorized;
+        }
+        return compId === userCompany;
+      }
+      return compId === userCompany;
+    });
   };
 
   const isCompanyAuthorized = (compId: string | undefined | null) => {
@@ -619,11 +634,26 @@ export default function App() {
     if (currentUser.role === "admin") return true;
     const userCompany = currentUser.company_id || "arab_world";
     const itemCompany = compId || "arab_world";
-    return itemCompany === userCompany;
+    
+    if (itemCompany === userCompany) return true;
+    if (currentUser.company_perms && currentUser.company_perms[itemCompany]) {
+      return !!currentUser.company_perms[itemCompany].is_authorized;
+    }
+    return false;
   };
 
   const getActivePerms = () => {
     if (!currentUser) return null;
+    if (currentUser.role === "admin") return currentUser.perms;
+    
+    const activeId = selectedCompanyId !== "all" ? selectedCompanyId : (currentUser.company_id || "arab_world");
+    
+    if (currentUser.company_perms && currentUser.company_perms[activeId]) {
+      const compPermObj = currentUser.company_perms[activeId];
+      if (compPermObj && !compPermObj.use_global) {
+        return compPermObj;
+      }
+    }
     return currentUser.perms;
   };
 
@@ -669,7 +699,10 @@ export default function App() {
           setSelectedCompanyId("all");
         }
       } else {
-        setSelectedCompanyId(currentUser.company_id || "arab_world");
+        const authComps = getAuthorizedCompanies();
+        if (!authComps.some((c) => c.id === selectedCompanyId)) {
+          setSelectedCompanyId(currentUser.company_id || "arab_world");
+        }
       }
     }
   }, [currentUser, companies]);
@@ -1258,7 +1291,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       nationality: linked ? linked.nationality : "",
       remaining_before: beforeAmt,
       remaining_after: afterAmt,
-      company_id: getTargetCompanyId(formCompanyId),
+      company_id: linked ? (linked.company_id || "arab_world") : getTargetCompanyId(receiptCompanyId),
     };
 
     if (!editReceiptId) {
@@ -1292,6 +1325,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       setRNotes("");
       setRTreasury("خزنة التحصيل");
       setRExternalNo("");
+      setReceiptCompanyId("");
       await loadEverything();
       showToast("تم حفظ السند وتحديث العقد التابع بنجاح!");
     } catch (err: any) {
@@ -1344,7 +1378,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       date: payDate,
       project: payProject.trim(),
       notes: awBuildNotesWithRegionAndTreasury(payNotes, userRegionFilter, payTreasury),
-      company_id: getTargetCompanyId(formCompanyId),
+      company_id: getTargetCompanyId(paymentCompanyId),
     };
 
     setIsLoading(true);
@@ -1366,6 +1400,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       setPayProject("");
       setPayNotes("");
       setPayTreasury("خزنة الشركة");
+      setPaymentCompanyId("");
       await loadEverything();
       showToast("تم قيّد سند الصرف بنجاح!");
     } catch {
@@ -1389,7 +1424,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       project: eProject.trim(),
       supplier: eSupplier.trim(),
       notes: awBuildNotesWithRegionAndTreasury(eNotes, userRegionFilter, eTreasury),
-      company_id: getTargetCompanyId(formCompanyId),
+      company_id: getTargetCompanyId(expenseCompanyId),
     };
 
     setIsLoading(true);
@@ -1412,6 +1447,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       setESupplier("");
       setENotes("");
       setETreasury("خزنة الشركة");
+      setExpenseCompanyId("");
       await loadEverything();
       showToast("تم توثيق المصروف في الدفتر المالي!");
     } catch {
@@ -1436,7 +1472,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       progress: Number(pProgress || 0),
       status: pStatus,
       notes: pNotes,
-      company_id: getTargetCompanyId(formCompanyId),
+      company_id: getTargetCompanyId(projectCompanyId),
     };
 
     setIsLoading(true);
@@ -1459,6 +1495,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       setPBudget("");
       setPProgress(0);
       setPNotes("");
+      setProjectCompanyId("");
       await loadEverything();
       showToast("تم حفظ بطاقة المشروع بنجاح!");
     } catch {
@@ -1487,7 +1524,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       balance: Math.max(0, tot - Number(wAdvance || 0)),
       status: wStatus,
       notes: wNotes,
-      company_id: getTargetCompanyId(formCompanyId),
+      company_id: getTargetCompanyId(workerCompanyId),
     };
 
     setIsLoading(true);
@@ -1512,6 +1549,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       setWDays("");
       setWAdvance(0);
       setWNotes("");
+      setWorkerCompanyId("");
       await loadEverything();
       showToast("تم تحديث سلف مستحقات العمال.");
     } catch {
@@ -2190,6 +2228,32 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
     }
   };
 
+  const deleteUserLogicExecute = async (id: string, name: string) => {
+    setIsLoading(true);
+    try {
+      const { error } = await sb.from("users").delete().eq("id", id);
+      if (error) {
+        showToast(error.message, "error");
+        return;
+      }
+      await logSession(currentUser!, `حذف حساب الموظف: ${name}`);
+      await loadEverything();
+      showToast(`تم مسح حساب الموظف "${name}" بنجاح.`);
+    } catch {
+      showToast("فشل إتمام عملية حذف الموظف", "error");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const deleteUserLogic = (id: string, name: string) => {
+    triggerConfirm(
+      "حذف حساب الموظف",
+      `هل أنت متأكد من حذف حساب الموظف "${name}" بشكل نهائي؟`,
+      () => deleteUserLogicExecute(id, name)
+    );
+  };
+
   // Excel Export logic for Receipts
   const exportReceiptsExcel = () => {
     try {
@@ -2781,6 +2845,22 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                     <input placeholder="المشروع" value={rProject} onChange={(e) => setRProject(e.target.value)} className="w-full px-3 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none" />
                   </div>
 
+                  {currentUser?.role === "admin" && companies.length > 0 && (
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-amber-500">🏢 الشركة التابع لها السند</label>
+                      <select
+                        value={receiptCompanyId}
+                        onChange={(e) => setReceiptCompanyId(e.target.value)}
+                        className="w-full px-3.5 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none cursor-pointer bg-slate-950"
+                      >
+                        <option value="">🏢 اختيار الشركة (تلقائي)</option>
+                        {companies.map((c) => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
                   <div className="sm:col-span-2 space-y-1">
                     <label className="text-[10px] font-black text-slate-400">البيان وشرائح الملاحظة</label>
                     <textarea placeholder="شرائح قسط يومي..." value={rNotes} onChange={(e) => setRNotes(e.target.value)} className="w-full px-3 py-1.5 h-[41px] bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none" />
@@ -2789,7 +2869,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
 
                 <div className="flex gap-2 justify-end">
                   {editReceiptId && (
-                    <button type="button" onClick={() => { setEditReceiptId(null); setRContractQuery(""); setRSelectedInstallment(null); setRFrom(""); setRAmount(""); setRProject(""); setRNotes(""); setRTreasury("خزنة التحصيل"); setRExternalNo(""); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
+                    <button type="button" onClick={() => { setEditReceiptId(null); setRContractQuery(""); setRSelectedInstallment(null); setRFrom(""); setRAmount(""); setRProject(""); setRNotes(""); setRTreasury("خزنة التحصيل"); setRExternalNo(""); setReceiptCompanyId(""); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
                   )}
                   <button type="submit" className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black">{editReceiptId ? "استبدال السند" : "حفظ وقيد سند القبض ماليًا"}</button>
                 </div>
@@ -2906,7 +2986,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                             </td>
                             <td className="py-3 px-3 text-center flex items-center justify-center gap-1">
                               <button onClick={() => onPrintReceipt(r.id)} className="p-1 text-emerald-400 hover:text-white" title="طباعة سند القبض"><Printer className="w-3.5 h-3.5" /></button>
-                              <button onClick={() => { setEditReceiptId(r.id); handleAutoFillReceipt(r.contract_no || ""); setRFrom(r.from_name || ""); setRAmount(r.amount || ""); setRMethod(r.method || ""); setRDate(r.date || ""); setRProject(r.project || ""); setRNotes(awCleanNotes(r.notes || "")); setRTreasury(awExtractTreasury(r.notes || "") || "خزنة التحصيل"); setRExternalNo(awExtractExternalNo(r.notes || "")); document.getElementById("receipts-tab-view")?.scrollIntoView({ behavior: "smooth" }); }} className="p-1 text-blue-400 hover:text-white" title="تعديل"><Edit2 className="w-3.5 h-3.5" /></button>
+                              <button onClick={() => { setEditReceiptId(r.id); handleAutoFillReceipt(r.contract_no || ""); setRFrom(r.from_name || ""); setRAmount(r.amount || ""); setRMethod(r.method || ""); setRDate(r.date || ""); setRProject(r.project || ""); setRNotes(awCleanNotes(r.notes || "")); setRTreasury(awExtractTreasury(r.notes || "") || "خزنة التحصيل"); setRExternalNo(awExtractExternalNo(r.notes || "")); setReceiptCompanyId(r.company_id || ""); document.getElementById("receipts-tab-view")?.scrollIntoView({ behavior: "smooth" }); }} className="p-1 text-blue-400 hover:text-white" title="تعديل"><Edit2 className="w-3.5 h-3.5" /></button>
                               <button onClick={() => deleteReceiptLogic(r.id, r.installment_id)} className="p-1 text-rose-400 hover:text-rose-500" title="حذف"><Trash2 className="w-3.5 h-3.5" /></button>
                             </td>
                           </tr>
@@ -2954,10 +3034,25 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                     <label className="text-[10px] font-black text-slate-400">تاريخ الصرف</label>
                     <input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} className="w-full px-3 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 transition-colors hover:text-amber-200" />
                   </div>
-                  <div className="space-y-1 sm:col-span-2 md:col-span-3">
+                  <div className="space-y-1 sm:col-span-2 md:col-span-2">
                     <label className="text-[10px] font-black text-slate-400">الارتباط بالمشروع</label>
                     <input placeholder="الارتباط بالمشروع" value={payProject} onChange={(e) => setPayProject(e.target.value)} className="w-full px-3 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 transition-colors" />
                   </div>
+                  {currentUser?.role === "admin" && companies.length > 0 && (
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-amber-500">🏢 الشركة التابع لها السند</label>
+                      <select
+                        value={paymentCompanyId}
+                        onChange={(e) => setPaymentCompanyId(e.target.value)}
+                        className="w-full px-3.5 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none cursor-pointer bg-slate-950"
+                      >
+                        <option value="">🏢 اختيار الشركة (تلقائي)</option>
+                        {companies.map((c) => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                   <div className="space-y-1 sm:col-span-2 md:col-span-4">
                     <label className="text-[10px] font-black text-slate-400">البيان والتفاصيل</label>
                     <textarea placeholder="البيان" value={payNotes} onChange={(e) => setPayNotes(e.target.value)} className="w-full px-3 py-2 h-[45px] bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 transition-colors" />
@@ -2965,7 +3060,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                 </div>
                 <div className="flex gap-2 justify-end">
                   {editPaymentId && (
-                    <button type="button" onClick={() => { setEditPaymentId(null); setPayTo(""); setPayAmount(""); setPayProject(""); setPayNotes(""); setPayTreasury("خزنة الشركة"); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
+                    <button type="button" onClick={() => { setEditPaymentId(null); setPayTo(""); setPayAmount(""); setPayProject(""); setPayNotes(""); setPayTreasury("خزنة الشركة"); setPaymentCompanyId(""); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
                   )}
                   <button type="submit" className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-black">{editPaymentId ? "استبدال وصيغة السند" : "قيد سند الصرف ماليًا"}</button>
                 </div>
@@ -3000,7 +3095,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                           {awCleanNotes(p.notes || "")}
                         </td>
                         <td className="py-3 px-3 text-center space-x-1">
-                          <button onClick={() => { setEditPaymentId(p.id); setPayTo(p.to_name || ""); setPayAmount(p.amount || ""); setPayMethod(p.method || ""); setPayDate(p.date || ""); setPayProject(p.project || ""); setPayNotes(awCleanNotes(p.notes || "")); setPayTreasury(awExtractTreasury(p.notes || "") || "خزنة الشركة"); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => { setEditPaymentId(p.id); setPayTo(p.to_name || ""); setPayAmount(p.amount || ""); setPayMethod(p.method || ""); setPayDate(p.date || ""); setPayProject(p.project || ""); setPayNotes(awCleanNotes(p.notes || "")); setPayTreasury(awExtractTreasury(p.notes || "") || "خزنة الشركة"); setPaymentCompanyId(p.company_id || ""); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
                           <button onClick={() => { if(confirm("تأكيد الحذف؟")) { sb.from("payments").delete().eq("id", p.id).then(() => loadEverything()); } }} className="p-1 text-rose-400 hover:text-rose-500"><Trash2 className="w-3.5 h-3.5" /></button>
                         </td>
                       </tr>
@@ -3041,11 +3136,23 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                       <option key={tName} value={tName} className="bg-slate-950 text-white">💰 {tName}</option>
                     ))}
                   </select>
+                  {currentUser?.role === "admin" && companies.length > 0 && (
+                    <select
+                      value={expenseCompanyId}
+                      onChange={(e) => setExpenseCompanyId(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none cursor-pointer bg-slate-950"
+                    >
+                      <option value="">🏢 اختيار الشركة (تلقائي)</option>
+                      {companies.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  )}
                   <textarea placeholder="ملاحظات" value={eNotes} onChange={(e) => setENotes(e.target.value)} className="w-full px-3 py-1.5 h-[41px] bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none" />
                 </div>
                 <div className="flex gap-2 justify-end">
                   {editExpenseId && (
-                    <button type="button" onClick={() => { setEditExpenseId(null); setEName(""); setEAmount(""); setEProject(""); setESupplier(""); setENotes(""); setETreasury("خزنة الشركة"); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
+                    <button type="button" onClick={() => { setEditExpenseId(null); setEName(""); setEAmount(""); setEProject(""); setESupplier(""); setENotes(""); setETreasury("خزنة الشركة"); setExpenseCompanyId(""); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
                   )}
                   <button type="submit" className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-black">{editExpenseId ? "تعديل القيّد" : "قيد المصروف ماليًا"}</button>
                 </div>
@@ -3083,7 +3190,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                           <span className="inline-block text-[9px] text-cyan-400 font-sans font-extrabold bg-cyan-950/45 px-1.5 py-0.5 rounded border border-cyan-850 mt-1">🏦 {awExtractTreasury(e.notes || "") || "خزنة الشركة"}</span>
                         </td>
                         <td className="py-3 px-3 text-center space-x-1">
-                          <button onClick={() => { setEditExpenseId(e.id); setEName(e.name || ""); setECategory(e.category || ""); setEAmount(e.amount || ""); setEDate(e.date || ""); setEProject(e.project || ""); setESupplier(e.supplier || ""); setENotes(awCleanNotes(e.notes || "")); setETreasury(awExtractTreasury(e.notes || "") || "خزنة الشركة"); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => { setEditExpenseId(e.id); setEName(e.name || ""); setECategory(e.category || ""); setEAmount(e.amount || ""); setEDate(e.date || ""); setEProject(e.project || ""); setESupplier(e.supplier || ""); setENotes(awCleanNotes(e.notes || "")); setETreasury(awExtractTreasury(e.notes || "") || "خزنة الشركة"); setExpenseCompanyId(e.company_id || ""); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
                           <button onClick={() => { if(confirm("تأكيد الحذف؟")) { sb.from("expenses").delete().eq("id", e.id).then(() => loadEverything()); } }} className="p-1 text-rose-400 hover:text-rose-500"><Trash2 className="w-3.5 h-3.5" /></button>
                         </td>
                       </tr>
@@ -3114,10 +3221,22 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                     <option value="متوقف">متوقف</option>
                     <option value="منتهي">منتهي</option>
                   </select>
+                  {currentUser?.role === "admin" && companies.length > 0 && (
+                    <select
+                      value={projectCompanyId}
+                      onChange={(e) => setProjectCompanyId(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none cursor-pointer bg-slate-950"
+                    >
+                      <option value="">🏢 اختيار الشركة (تلقائي)</option>
+                      {companies.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  )}
                 </div>
                 <div className="flex gap-2 justify-end">
                   {editProjectId && (
-                    <button type="button" onClick={() => { setEditProjectId(null); setPName(""); setPLocation(""); setPEngineer(""); setPBudget(""); setPProgress(0); setPNotes(""); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
+                    <button type="button" onClick={() => { setEditProjectId(null); setPName(""); setPLocation(""); setPEngineer(""); setPBudget(""); setPProgress(0); setPNotes(""); setProjectCompanyId(""); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
                   )}
                   <button type="submit" className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-black">{editProjectId ? "حفظ التحديث" : "إنشاء بطاقة المشروع"}</button>
                 </div>
@@ -3156,7 +3275,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                           <span className={`inline-block px-2.5 py-0.5 rounded text-[10px] font-black ${p.status === "نشط" ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"}`}>{p.status}</span>
                         </td>
                         <td className="py-3 px-3 text-center space-x-1">
-                          <button onClick={() => { setEditProjectId(p.id); setPName(p.name || ""); setPLocation(p.location || ""); setPEngineer(p.engineer || ""); setPBudget(p.budget || ""); setPProgress(p.progress !== undefined && p.progress !== null ? p.progress : 0); setPStatus(p.status || "نشط"); setPNotes(p.notes || ""); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => { setEditProjectId(p.id); setPName(p.name || ""); setPLocation(p.location || ""); setPEngineer(p.engineer || ""); setPBudget(p.budget || ""); setPProgress(p.progress !== undefined && p.progress !== null ? p.progress : 0); setPStatus(p.status || "نشط"); setPNotes(p.notes || ""); setProjectCompanyId(p.company_id || ""); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
                           <button onClick={() => { if(confirm("حذف ملف المشروع بشكل نهائي؟")) { sb.from("projects").delete().eq("id", p.id).then(() => loadEverything()); } }} className="p-1 text-rose-400 hover:text-rose-500"><Trash2 className="w-3.5 h-3.5" /></button>
                         </td>
                       </tr>
@@ -3195,11 +3314,23 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                     <option value="إجازة">إجازة</option>
                     <option value="موقوف">موقوف</option>
                   </select>
+                  {currentUser?.role === "admin" && companies.length > 0 && (
+                    <select
+                      value={workerCompanyId}
+                      onChange={(e) => setWorkerCompanyId(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none cursor-pointer bg-slate-950"
+                    >
+                      <option value="">🏢 اختيار الشركة (تلقائي)</option>
+                      {companies.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  )}
                   <textarea placeholder="ملاحظات" value={wNotes} onChange={(e) => setWNotes(e.target.value)} className="w-full px-3 py-1.5 h-[41px] bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white sm:col-span-2 focus:outline-none" />
                 </div>
                 <div className="flex gap-2 justify-end">
                   {editWorkerId && (
-                    <button type="button" onClick={() => { setEditWorkerId(null); setWName(""); setWId(""); setWPhone(""); setWProject(""); setWDaily(""); setWDays(""); setWAdvance(0); setWNotes(""); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
+                    <button type="button" onClick={() => { setEditWorkerId(null); setWName(""); setWId(""); setWPhone(""); setWProject(""); setWDaily(""); setWDays(""); setWAdvance(0); setWNotes(""); setWorkerCompanyId(""); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
                   )}
                   <button type="submit" className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-black">{editWorkerId ? "تعديل القيّد" : "قيد العامل بالمقاولات"}</button>
                 </div>
@@ -3236,7 +3367,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                         </td>
                         <td className="py-3 px-3 text-center space-x-1">
                           <button onClick={() => initHrWorker(w)} className="p-1 text-amber-400 hover:text-amber-300 hover:scale-110 duration-200 inline-block" title="الشؤون والملف الوظيفي"><Users className="w-3.5 h-3.5" /></button>
-                          <button onClick={() => { setEditWorkerId(w.id); setWName(w.name || ""); setWId(w.worker_id || ""); setWPhone(w.phone || ""); setWJob(w.job || "عامل"); setWProject(w.project || ""); setWDaily(w.daily || ""); setWDays(w.days || ""); setWAdvance(w.advance !== undefined && w.advance !== null ? w.advance : 0); setWStatus(w.status || "على رأس العمل"); setWNotes(w.notes || ""); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => { setEditWorkerId(w.id); setWName(w.name || ""); setWId(w.worker_id || ""); setWPhone(w.phone || ""); setWJob(w.job || "عامل"); setWProject(w.project || ""); setWDaily(w.daily || ""); setWDays(w.days || ""); setWAdvance(w.advance !== undefined && w.advance !== null ? w.advance : 0); setWStatus(w.status || "على رأس العمل"); setWNotes(w.notes || ""); setWorkerCompanyId(w.company_id || ""); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
                           <button onClick={() => { if(confirm("مسح العامل من قوائم الحساب؟")) { sb.from("workers").delete().eq("id", w.id).then(() => loadEverything()); } }} className="p-1 text-rose-400 hover:text-rose-500"><Trash2 className="w-3.5 h-3.5" /></button>
                         </td>
                       </tr>
@@ -4805,7 +4936,7 @@ CREATE TABLE IF NOT EXISTS sessions (
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>
                             {currentUser.code !== u.code && (
-                              <button onClick={() => { if(confirm("مسح حساب الموظف؟")) { sb.from("users").delete().eq("id", u.id).then(() => loadEverything()); } }} className="p-1 text-rose-400 hover:text-rose-500"><Trash2 className="w-3.5 h-3.5" /></button>
+                              <button onClick={() => deleteUserLogic(u.id, u.name || "")} className="p-1 text-rose-400 hover:text-rose-500"><Trash2 className="w-3.5 h-3.5" /></button>
                             )}
                           </td>
                         </tr>
