@@ -6,7 +6,7 @@
 import React from "react";
 import {
   FileText, Landmark, TrendingUp, TrendingDown, ClipboardCheck,
-  AlertTriangle, Receipt, Calendar, ArrowUpRight, ShieldCheck, ChevronLeft
+  AlertTriangle, Receipt, Calendar, ArrowUpRight, ShieldCheck, ChevronLeft, Coins
 } from "lucide-react";
 import { Installment, Receipt as ReceiptType } from "../types";
 import { getContractTiming } from "../db";
@@ -41,6 +41,8 @@ interface DashboardProps {
   expenses: any[];
   onNavigateToContracts: () => void;
   sbStatus?: "checking" | "connected" | "fallback";
+  companies?: any[];
+  selectedCompanyId?: string;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -49,9 +51,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
   payments,
   expenses,
   onNavigateToContracts,
-  sbStatus = "connected"
+  sbStatus = "connected",
+  companies = [],
+  selectedCompanyId = "all"
 }) => {
   // Global totals
+  const activeCompany = companies.find(c => c.id === selectedCompanyId);
+  const registeredCapital = activeCompany 
+    ? Number(activeCompany.capital || 0) 
+    : (selectedCompanyId === "all" ? companies.reduce((sum, c) => sum + Number(c.capital || 0), 0) : 0);
+
   const totalContractsCount = installments.length;
   const totalContractsAmount = installments.reduce((sum, item) => sum + Number(item.amount || 0), 0);
   const totalCollectedReceipts = receipts.reduce((sum, item) => sum + Number(item.amount || 0), 0);
@@ -150,12 +159,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   // KPI card elements helper
   const topStats = [
+    { title: "رأس مال الشركة", value: registeredCapital.toLocaleString(), unit: "ريال تأسيسي", icon: Coins, color: "text-amber-400 border-amber-500/20" },
     { title: "عدد العقود", value: totalContractsCount.toLocaleString(), unit: "عقد", icon: FileText, color: "text-blue-400 border-blue-500/20" },
     { title: "إجمالي العقود", value: totalContractsAmount.toLocaleString(), unit: "ريال", icon: ClipboardCheck, color: "text-indigo-400 border-indigo-500/20" },
     { title: "إجمالي القبض", value: totalCollectedReceipts.toLocaleString(), unit: "ريال", icon: Landmark, color: "text-emerald-400 border-emerald-500/20" },
     { title: "إجمالي الصرف", value: totalOutflows.toLocaleString(), unit: "ريال", icon: TrendingDown, color: "text-red-400 border-red-500/20" },
     { title: "رصيد الخزنة", value: treasuryBalance.toLocaleString(), unit: "ريال", icon: ShieldCheck, color: "text-cyan-400 border-cyan-500/20" },
-    { title: "إجمالي المتبقي", value: totalRemainingContracts.toLocaleString(), unit: "ريال", icon: TrendingUp, color: "text-teal-400 border-teal-500/20" },
     { title: "المتأخرات المعلقة", value: lateContractsCount.toLocaleString(), unit: "عقد", icon: AlertTriangle, color: "text-amber-400 border-amber-500/20" },
   ];
 

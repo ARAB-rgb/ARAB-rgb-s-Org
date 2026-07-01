@@ -18,11 +18,13 @@ interface TreasuryProps {
   installments: Installment[];
   authorizedTreasuries?: string[];
   isAdmin?: boolean;
+  selectedCompanyId?: string;
 }
 
-const getStoredTreasuries = (): string[] => {
+const getStoredTreasuries = (companyId?: string): string[] => {
   const defaults = ["خزنة الشركة", "خزنة التحصيل", "خزنة التحويل", "نقاط البيع", "خزنة المقاولات"];
-  const saved = localStorage.getItem("aw_treasuries");
+  const suffix = companyId && companyId !== "all" ? `_${companyId}` : "";
+  const saved = localStorage.getItem(`aw_treasuries${suffix}`);
   if (saved) {
     try {
       const arr = JSON.parse(saved);
@@ -40,9 +42,9 @@ const getStoredTreasuries = (): string[] => {
   return defaults;
 };
 
-export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses, installments, authorizedTreasuries, isAdmin = false }) => {
+export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses, installments, authorizedTreasuries, isAdmin = false, selectedCompanyId }) => {
   const [treasuries, setTreasuries] = useState<string[]>(() => {
-    const list = getStoredTreasuries();
+    const list = getStoredTreasuries(selectedCompanyId);
     if (authorizedTreasuries) {
       return list.filter(t => authorizedTreasuries.includes(t));
     }
@@ -52,7 +54,7 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
     if (authorizedTreasuries && authorizedTreasuries.length > 0) {
       return authorizedTreasuries[0];
     }
-    const list = getStoredTreasuries();
+    const list = getStoredTreasuries(selectedCompanyId);
     return list[0] || "خزنة الشركة";
   });
   const [searchQuery, setSearchQuery] = useState("");
@@ -60,9 +62,23 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
   const [inlineError, setInlineError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Reset/Reload treasuries when selectedCompanyId changes
+    const list = getStoredTreasuries(selectedCompanyId);
+    const filtered = authorizedTreasuries
+      ? list.filter(t => authorizedTreasuries.includes(t))
+      : list;
+    setTreasuries(filtered);
+    if (authorizedTreasuries && authorizedTreasuries.length > 0) {
+      setActiveTab(authorizedTreasuries[0]);
+    } else {
+      setActiveTab(filtered[0] || "خزنة الشركة");
+    }
+  }, [selectedCompanyId, authorizedTreasuries]);
+
+  useEffect(() => {
     // Reload if storage changes in other windows
     const handleStorageChange = () => {
-      const freshList = getStoredTreasuries();
+      const freshList = getStoredTreasuries(selectedCompanyId);
       const filtered = authorizedTreasuries
         ? freshList.filter(t => authorizedTreasuries.includes(t))
         : freshList;
@@ -75,7 +91,7 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
     return () => {
       window.removeEventListener("storage", handleStorageChange);
     };
-  }, [activeTab, authorizedTreasuries]);
+  }, [activeTab, authorizedTreasuries, selectedCompanyId]);
 
   // Handle adding a treasury
   const handleAddTreasury = (e: React.FormEvent) => {
@@ -89,7 +105,8 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
     }
     const updated = [...treasuries, name];
     setTreasuries(updated);
-    localStorage.setItem("aw_treasuries", JSON.stringify(updated));
+    const suffix = selectedCompanyId && selectedCompanyId !== "all" ? `_${selectedCompanyId}` : "";
+    localStorage.setItem(`aw_treasuries${suffix}`, JSON.stringify(updated));
     setNewTreasuryName("");
     // Dispatch to keep Installments synced
     window.dispatchEvent(new Event("storage"));
@@ -113,7 +130,8 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
     if (window.confirm(confirmMsg)) {
       const updated = treasuries.filter(t => t !== name);
       setTreasuries(updated);
-      localStorage.setItem("aw_treasuries", JSON.stringify(updated));
+      const suffix = selectedCompanyId && selectedCompanyId !== "all" ? `_${selectedCompanyId}` : "";
+      localStorage.setItem(`aw_treasuries${suffix}`, JSON.stringify(updated));
       if (activeTab === name) {
         setActiveTab(updated[0] || "خزنة الشركة");
       }

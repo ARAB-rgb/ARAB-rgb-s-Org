@@ -28,9 +28,10 @@ import { safeStorage } from "./safeStorage";
 const localStorage = safeStorage;
 import { Treasury } from "./components/Treasury";
 
-const getStoredTreasuries = (): string[] => {
+const getStoredTreasuries = (companyId?: string | null): string[] => {
   const defaults = ["خزنة الشركة", "خزنة التحصيل", "خزنة التحويل", "نقاط البيع", "خزنة المقاولات"];
-  const saved = localStorage.getItem("aw_treasuries");
+  const suffix = companyId && companyId !== "all" ? `_${companyId}` : "";
+  const saved = localStorage.getItem(`aw_treasuries${suffix}`);
   if (saved) {
     try {
       const arr = JSON.parse(saved);
@@ -253,6 +254,7 @@ export default function App() {
   const [uPass, setUPass] = useState("");
   const [uWorkerId, setUWorkerId] = useState("");
   const [uRole, setURole] = useState<"admin" | "employee" | "supervisor">("employee");
+  const [uCompanyId, setUCompanyId] = useState("");
   const [uRegion, setURegion] = useState("");
   const [selectedCompanyIdForPerms, setSelectedCompanyIdForPerms] = useState<string>("global");
   const [uCompanyPerms, setUCompanyPerms] = useState<Record<string, Record<string, boolean>>>({});
@@ -354,7 +356,48 @@ export default function App() {
       setProjects(pr.data || []);
       setWorkers(w.data || []);
       setSessions(s.data || []);
-      setCompanies(comp.data || []);
+      let compList = comp.data || [];
+      const hasArabWorld = compList.some((c) => c.id === "arab_world");
+      const hasDemoCompany = compList.some((c) => c.id === "demo_company");
+      
+      if (!hasArabWorld || !hasDemoCompany) {
+        const toAdd = [];
+        if (!hasArabWorld) {
+          toAdd.push({
+            id: "arab_world",
+            name: "شركة عرب وورلد للمقاولات والعقود",
+            commercial_register: "1010777555",
+            tax_no: "300099988800003",
+            capital: 10000000,
+            phone: "0556446888",
+            address: "الرياض، المملكة العربية السعودية",
+            created_at: new Date().toISOString()
+          });
+        }
+        if (!hasDemoCompany) {
+          toAdd.push({
+            id: "demo_company",
+            name: "شركة التجربة المستقلة (Demo)",
+            commercial_register: "1010123456",
+            tax_no: "310123456700003",
+            capital: 2500000,
+            phone: "0500000001",
+            address: "منطقة الدمام التجريبية",
+            created_at: new Date().toISOString()
+          });
+        }
+        
+        for (const item of toAdd) {
+          try {
+            await sb.from("companies").insert(item);
+          } catch (e) {
+            console.error("Failed to seed company:", item.id, e);
+          }
+        }
+        const freshComp = await sb.from("companies").select("*").order("created_at", { ascending: false });
+        compList = freshComp.data || compList;
+      }
+      setCompanies(compList);
       setExtracts(ext.data || []);
 
       // Autoresolve/refresh current user details to update links/permissions dynamically
@@ -556,40 +599,31 @@ export default function App() {
     }
   }, [currentUser]);
 
+  const getTargetCompanyId = (formCompanyVal?: string) => {
+    if (currentUser?.role !== "admin") {
+      return currentUser?.company_id || null;
+    }
+    return formCompanyVal || (selectedCompanyId !== "all" ? selectedCompanyId : null) || null;
+  };
+
   // Auth User allowed scope helpers
   const getAuthorizedCompanies = () => {
     if (!currentUser) return [];
-    if (currentUser.role === "admin" || currentUser.role === "supervisor") return companies;
-    
-    const hasCompanyPerms = currentUser.company_perms && Object.keys(currentUser.company_perms).length > 0;
-    if (!hasCompanyPerms) {
-      return companies.slice(0, 1);
-    }
-    
-    return companies.filter((c) => {
-      const p = currentUser.company_perms?.[c.id];
-      if (!p) return false;
-      return !!(p.is_authorized || p.use_global || Object.values(p).some((val) => val === true));
-    });
+    if (currentUser.role === "admin") return companies;
+    const userCompany = currentUser.company_id || "arab_world";
+    return companies.filter((c) => c.id === userCompany);
   };
 
   const isCompanyAuthorized = (compId: string | undefined | null) => {
-    return true;
+    if (!currentUser) return false;
+    if (currentUser.role === "admin") return true;
+    const userCompany = currentUser.company_id || "arab_world";
+    const itemCompany = compId || "arab_world";
+    return itemCompany === userCompany;
   };
 
   const getActivePerms = () => {
     if (!currentUser) return null;
-    if (selectedCompanyId && selectedCompanyId !== "all" && currentUser.company_perms?.[selectedCompanyId]) {
-      const compPerm = currentUser.company_perms[selectedCompanyId];
-      if (compPerm.use_global) {
-        return currentUser.perms;
-      }
-      return {
-        ...compPerm,
-        region: currentUser.perms?.region,
-        worker_id: currentUser.perms?.worker_id
-      };
-    }
     return currentUser.perms;
   };
 
@@ -597,7 +631,7 @@ export default function App() {
 
   const can = (perm: string) => {
     if (!currentUser) return false;
-    if (currentUser.role === "admin" || currentUser.role === "supervisor") return true;
+    if (currentUser.role === "admin") return true;
     
     const activePerms = getActivePerms();
     if (activePerms) {
@@ -608,24 +642,14 @@ export default function App() {
 
   const getActivePermsForCompany = (user: AuthUser | null, compId: string | undefined) => {
     if (!user) return null;
-    if (compId && compId !== "all" && user.company_perms?.[compId]) {
-      const compPerm = user.company_perms[compId];
-      if (compPerm.use_global) {
-        return user.perms;
-      }
-      return {
-        ...compPerm,
-        region: user.perms?.region,
-        worker_id: user.perms?.worker_id
-      };
-    }
     return user.perms;
   };
 
   const getAuthorizedTreasuries = (user: AuthUser | null, compId: string | undefined): string[] => {
-    const allSafes = getStoredTreasuries();
+    const targetCompId = compId || (user?.role !== "admin" ? user?.company_id : selectedCompanyId);
+    const allSafes = getStoredTreasuries(targetCompId);
     if (!user) return [];
-    if (user.role === "admin" || user.role === "supervisor") return allSafes;
+    if (user.role === "admin") return allSafes;
 
     const isSafeAllowedInPerm = (permsObj: any, safeName: string) => {
       const hasAnySafeToggle = Object.keys(permsObj).some(k => k.startsWith("safe_") && permsObj[k] === true);
@@ -635,38 +659,17 @@ export default function App() {
       return !!permsObj[`safe_${safeName}`];
     };
 
-    if (compId && compId !== "all") {
-      const activePerms = getActivePermsForCompany(user, compId);
-      if (!activePerms) return [];
-      return allSafes.filter(tName => isSafeAllowedInPerm(activePerms, tName));
-    } else {
-      const authComps = getAuthorizedCompanies();
-      const unionSafesSet = new Set<string>();
-      authComps.forEach(c => {
-        const activePerms = getActivePermsForCompany(user, c.id);
-        if (activePerms) {
-          allSafes.forEach(tName => {
-            if (isSafeAllowedInPerm(activePerms, tName)) {
-              unionSafesSet.add(tName);
-            }
-          });
-        }
-      });
-      if (unionSafesSet.size === 0 && authComps.length > 0) {
-        return allSafes;
-      }
-      return Array.from(unionSafesSet);
-    }
+    return allSafes.filter(tName => isSafeAllowedInPerm(user.perms, tName));
   };
 
   useEffect(() => {
-    if (currentUser && currentUser.role !== "admin") {
-      const authComps = getAuthorizedCompanies();
-      const hasCompanyPerms = currentUser.company_perms && Object.keys(currentUser.company_perms).length > 0;
-      if (hasCompanyPerms && authComps.length > 0) {
-        if (selectedCompanyId === "all" || !authComps.some((c) => c.id === selectedCompanyId)) {
-          setSelectedCompanyId(authComps[0].id);
+    if (currentUser) {
+      if (currentUser.role === "admin") {
+        if (selectedCompanyId !== "all" && !companies.some((c) => c.id === selectedCompanyId)) {
+          setSelectedCompanyId("all");
         }
+      } else {
+        setSelectedCompanyId(currentUser.company_id || "arab_world");
       }
     }
   }, [currentUser, companies]);
@@ -678,7 +681,8 @@ export default function App() {
         const rRegion = awExtractRegion(item.notes || "");
         if (rRegion !== userRegionFilter) return false;
       }
-      if (selectedCompanyId !== "all" && item.company_id !== selectedCompanyId) return false;
+      const itemComp = item.company_id || "arab_world";
+      if (selectedCompanyId !== "all" && itemComp !== selectedCompanyId) return false;
       if (rFromDate && item.date && item.date < rFromDate) return false;
       if (rToDate && item.date && item.date > rToDate) return false;
       return true;
@@ -692,7 +696,8 @@ export default function App() {
         const itemRegion = awExtractRegion(item.notes || "");
         if (itemRegion !== userRegionFilter) return false;
       }
-      return selectedCompanyId === "all" || item.company_id === selectedCompanyId;
+      const itemComp = item.company_id || "arab_world";
+      return selectedCompanyId === "all" || itemComp === selectedCompanyId;
     });
   };
 
@@ -703,7 +708,8 @@ export default function App() {
         const itemRegion = awExtractRegion(item.notes || "");
         if (itemRegion !== userRegionFilter) return false;
       }
-      return selectedCompanyId === "all" || item.company_id === selectedCompanyId;
+      const itemComp = item.company_id || "arab_world";
+      return selectedCompanyId === "all" || itemComp === selectedCompanyId;
     });
   };
 
@@ -714,7 +720,8 @@ export default function App() {
         const itemRegion = awExtractRegion(item.notes || "");
         if (itemRegion && itemRegion !== userRegionFilter) return false;
       }
-      return selectedCompanyId === "all" || item.company_id === selectedCompanyId;
+      const itemComp = item.company_id || "arab_world";
+      return selectedCompanyId === "all" || itemComp === selectedCompanyId;
     });
   };
 
@@ -725,28 +732,32 @@ export default function App() {
         const itemRegion = awExtractRegion(item.notes || "");
         if (itemRegion && itemRegion !== userRegionFilter) return false;
       }
-      return selectedCompanyId === "all" || item.company_id === selectedCompanyId;
+      const itemComp = item.company_id || "arab_world";
+      return selectedCompanyId === "all" || itemComp === selectedCompanyId;
     });
   };
 
   const getVisibleProjects = () => {
     return projects.filter((item) => {
       if (!isCompanyAuthorized(item.company_id)) return false;
-      return selectedCompanyId === "all" || item.company_id === selectedCompanyId;
+      const itemComp = item.company_id || "arab_world";
+      return selectedCompanyId === "all" || itemComp === selectedCompanyId;
     });
   };
 
   const getVisibleWorkers = () => {
     return workers.filter((item) => {
       if (!isCompanyAuthorized(item.company_id)) return false;
-      return selectedCompanyId === "all" || item.company_id === selectedCompanyId;
+      const itemComp = item.company_id || "arab_world";
+      return selectedCompanyId === "all" || itemComp === selectedCompanyId;
     });
   };
 
   const getVisibleExtracts = () => {
     return extracts.filter((item) => {
       if (!isCompanyAuthorized(item.company_id)) return false;
-      return selectedCompanyId === "all" || item.company_id === selectedCompanyId;
+      const itemComp = item.company_id || "arab_world";
+      return selectedCompanyId === "all" || itemComp === selectedCompanyId;
     });
   };
 
@@ -882,7 +893,7 @@ export default function App() {
     const payload = {
       ...row,
       notes: finalNotes,
-      company_id: row.company_id || (selectedCompanyId !== "all" ? selectedCompanyId : undefined),
+      company_id: getTargetCompanyId(row.company_id),
     };
     delete payload.region_input;
     delete payload.treasury_input;
@@ -1166,7 +1177,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       date: new Date().toISOString().slice(0, 10),
       status: qStatus,
       notes: qNotes,
-      company_id: formCompanyId || (selectedCompanyId !== "all" ? selectedCompanyId : undefined),
+      company_id: getTargetCompanyId(formCompanyId),
     };
 
     setIsLoading(true);
@@ -1247,7 +1258,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       nationality: linked ? linked.nationality : "",
       remaining_before: beforeAmt,
       remaining_after: afterAmt,
-      company_id: formCompanyId || (selectedCompanyId !== "all" ? selectedCompanyId : null) || null,
+      company_id: getTargetCompanyId(formCompanyId),
     };
 
     if (!editReceiptId) {
@@ -1333,7 +1344,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       date: payDate,
       project: payProject.trim(),
       notes: awBuildNotesWithRegionAndTreasury(payNotes, userRegionFilter, payTreasury),
-      company_id: formCompanyId || (selectedCompanyId !== "all" ? selectedCompanyId : undefined),
+      company_id: getTargetCompanyId(formCompanyId),
     };
 
     setIsLoading(true);
@@ -1378,7 +1389,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       project: eProject.trim(),
       supplier: eSupplier.trim(),
       notes: awBuildNotesWithRegionAndTreasury(eNotes, userRegionFilter, eTreasury),
-      company_id: formCompanyId || (selectedCompanyId !== "all" ? selectedCompanyId : undefined),
+      company_id: getTargetCompanyId(formCompanyId),
     };
 
     setIsLoading(true);
@@ -1425,7 +1436,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       progress: Number(pProgress || 0),
       status: pStatus,
       notes: pNotes,
-      company_id: formCompanyId || (selectedCompanyId !== "all" ? selectedCompanyId : undefined),
+      company_id: getTargetCompanyId(formCompanyId),
     };
 
     setIsLoading(true);
@@ -1476,7 +1487,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       balance: Math.max(0, tot - Number(wAdvance || 0)),
       status: wStatus,
       notes: wNotes,
-      company_id: formCompanyId || (selectedCompanyId !== "all" ? selectedCompanyId : undefined),
+      company_id: getTargetCompanyId(formCompanyId),
     };
 
     setIsLoading(true);
@@ -1515,7 +1526,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
     e.preventDefault();
     if (!cName) return;
 
-    const row = {
+    const row: any = {
       name: cName.trim(),
       commercial_register: cRegister.trim(),
       tax_no: cTaxNo.trim(),
@@ -1523,6 +1534,10 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       phone: cPhone.trim(),
       address: cAddress.trim(),
     };
+
+    if (!editCompanyId) {
+      row.id = "comp_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7);
+    }
 
     setIsLoading(true);
     try {
@@ -2100,11 +2115,17 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
     e.preventDefault();
     if (!uName || !uCode || !uPass) return;
 
+    if (uRole !== "admin" && !uCompanyId) {
+      showToast("⚠️ يرجى اختيار الشركة التابع لها الموظف!", "error");
+      return;
+    }
+
     const row = {
       name: uName.trim(),
       code: uCode.trim(),
       password: uPass.trim(),
       role: uRole,
+      company_id: uRole === "admin" ? null : uCompanyId,
       perms: {
         ...uPerms,
         region: uRegion,
@@ -2133,6 +2154,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       setUWorkerId("");
       setURegion("");
       setURole("employee");
+      setUCompanyId("");
       setSelectedCompanyIdForPerms("global");
       setUCompanyPerms({});
       setUPerms({
@@ -2230,6 +2252,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
     { key: "treasury", label: "الخزنة الفرعية", icon: Shield, visible: true },
     { key: "projects", label: "المشاريع الجارية", icon: Briefcase, visible: true },
     { key: "workers", label: "العمال والسلفيات", icon: Users, visible: true },
+    { key: "companies", label: "دليل الشركات والمستخلصات", icon: Building, visible: currentUser?.role === "admin" || can("companies") },
     { key: "users", label: "الموظفين والصلاحية", icon: Settings, visible: true },
     { key: "sessions", label: "سجل حركات النظام", icon: Clock, visible: true },
   ];
@@ -2480,7 +2503,21 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
               </div>
             </div>
 
-
+            {currentUser?.role === "admin" && companies.length > 0 && (
+              <div className="flex items-center gap-2 bg-slate-900/60 border border-amber-500/20 rounded-xl px-3 py-1.5 shadow-lg shadow-amber-500/5 hover:border-amber-500/40 transition-all font-sans">
+                <span className="text-[10px] text-amber-500 font-extrabold whitespace-nowrap">🏢 الشركة النشطة:</span>
+                <select
+                  value={selectedCompanyId}
+                  onChange={(e) => setSelectedCompanyId(e.target.value)}
+                  className="bg-transparent text-white font-extrabold text-xs focus:outline-none cursor-pointer text-slate-950 bg-white"
+                >
+                  <option value="all" className="text-slate-950 font-bold">✨ كل الشركات (لوحة تحكم كاملة)</option>
+                  {companies.map((c) => (
+                    <option key={c.id} value={c.id} className="text-slate-950 font-bold">🏢 {c.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
           
           <div className="flex flex-wrap items-center gap-3.5">
@@ -2532,6 +2569,8 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
               expenses={getVisibleExpenses()}
               onNavigateToContracts={() => setActiveSection("installments")}
               sbStatus={sbStatus}
+              companies={companies}
+              selectedCompanyId={selectedCompanyId}
             />
           )}
 
@@ -3669,6 +3708,16 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                       </div>
                     </div>
 
+                    <div className="mb-5 bg-gradient-to-l from-amber-500/10 via-yellow-500/5 to-transparent border border-amber-500/20 rounded-2xl p-4 flex gap-3 text-right">
+                      <span className="text-xl">🛡️</span>
+                      <div className="space-y-1 font-sans">
+                        <span className="block text-xs font-black text-amber-400">نظام الشركات المستقلة مفعل (Demo Mode)</span>
+                        <p className="text-[10px] text-slate-300 leading-relaxed font-medium">
+                          لقد تم تحويل المنظومة بنجاح لنظام متعدد الشركات المستقلة. كل شركة تمتلك خزائنها، وموظفيها، وعقودها، وسنداتها، وعملائها، ومصروفاتها بشكل معزول تماماً ومستقل منطقياً. لا يمكن لأي موظف أو مستخدم رؤية بيانات شركة أخرى، بينما يملك الأدمن العام فقط الصلاحية الكاملة للتنقل بين الشركات عبر خيار <b>"الشركة النشطة"</b> بأعلى الشاشة لإدارة المنظومة بشكل متكامل.
+                        </p>
+                      </div>
+                    </div>
+
                     {companies.length === 0 ? (
                       <div className="text-center py-12 bg-slate-950/20 border border-dashed border-slate-805 rounded-2xl">
                         <span className="text-3xl block">🏛️</span>
@@ -4394,6 +4443,23 @@ CREATE TABLE IF NOT EXISTS sessions (
                         </select>
                       </div>
 
+                      {uRole !== "admin" && (
+                        <div className="space-y-1">
+                          <label className="text-[10px] text-slate-400 font-black block">🏢 الشركة التابع لها الموظف *</label>
+                          <select
+                            required
+                            value={uCompanyId}
+                            onChange={(e) => setUCompanyId(e.target.value)}
+                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none text-slate-950 bg-white font-sans"
+                          >
+                            <option value="" className="text-slate-950">اختر الشركة...</option>
+                            {companies.map((c) => (
+                              <option key={c.id} value={c.id} className="text-slate-950 font-bold">🏢 {c.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
                       <div className="space-y-1">
                         <label className="text-[10px] text-slate-400 font-black block">النطاق الإداري / المنطقة</label>
                         <select
@@ -4596,7 +4662,7 @@ CREATE TABLE IF NOT EXISTS sessions (
                     (تنبيه: إذا لم تقم بتحديد أي خزنة، فسيتم منح الموظف صلاحية رؤية كافة الخزائن بشكل افتراضي لتسهيل العمل دون قيود)
                   </p>
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 mt-2">
-                    {getStoredTreasuries().map((tName) => {
+                    {getStoredTreasuries(selectedCompanyIdForPerms !== "global" ? selectedCompanyIdForPerms : selectedCompanyId).map((tName) => {
                       const permKey = `safe_${tName}`;
                       const hasCompObj = !!uCompanyPerms[selectedCompanyIdForPerms];
                       const isCustomActive = selectedCompanyIdForPerms === "global" || (hasCompObj && !uCompanyPerms[selectedCompanyIdForPerms].use_global);
@@ -4649,7 +4715,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 
                 <div className="flex gap-2 justify-end">
                   {editUserId && (
-                    <button type="button" onClick={() => { setEditUserId(null); setUName(""); setUCode(""); setUPass(""); setUWorkerId(""); setURegion(""); setURole("employee"); setUCompanyPerms({}); setSelectedCompanyIdForPerms("global"); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
+                    <button type="button" onClick={() => { setEditUserId(null); setUName(""); setUCode(""); setUPass(""); setUWorkerId(""); setURegion(""); setURole("employee"); setUCompanyId(""); setUCompanyPerms({}); setSelectedCompanyIdForPerms("global"); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
                   )}
                   <button type="submit" className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-black">حفظ وإرسال الصلاحية للموظف</button>
                 </div>
@@ -4658,13 +4724,13 @@ CREATE TABLE IF NOT EXISTS sessions (
               <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl overflow-x-auto">
                 <table className="w-full text-right text-xs">
                   <thead>
-                    <tr className="bg-slate-950 border-b border-slate-800 text-slate-300">
-                      <th className="py-2.5 px-3 font-bold">الاسم والكود</th>
-                      <th className="py-2.5 px-3 font-bold">الدور الإداري</th>
-                      <th className="py-2.5 px-3 font-bold">الفرع / الإدارة المقررة</th>
-                      <th className="py-2.5 px-3 font-bold">صلاحيات الولوج النشطة</th>
-                      <th className="py-2.5 px-3 font-bold text-center">إجراء</th>
-                    </tr>
+                      <tr className="bg-slate-950 border-b border-slate-800 text-slate-300">
+                        <th className="py-2.5 px-3 font-bold">الاسم والكود</th>
+                        <th className="py-2.5 px-3 font-bold">الدور الإداري</th>
+                        <th className="py-2.5 px-3 font-bold">الشركة / النطاق الإداري</th>
+                        <th className="py-2.5 px-3 font-bold">صلاحيات الولوج النشطة</th>
+                        <th className="py-2.5 px-3 font-bold text-center">إجراء</th>
+                      </tr>
                   </thead>
                   <tbody>
                     {users.map((u, idx) => {
@@ -4687,7 +4753,14 @@ CREATE TABLE IF NOT EXISTS sessions (
                           <td className="py-3 px-3">
                             <span className="px-2.5 py-0.5 rounded text-[10px] bg-slate-800 text-amber-400 font-bold border border-slate-700">{u.role === "admin" ? "أدمن مكتب عام" : (u.role === "supervisor" ? "مشرف مكتب عام / رئيسي" : "موظف فرع")}</span>
                           </td>
-                          <td className="py-3 px-3 font-bold text-indigo-400">{permissionsObj.region || "كامل فروع المملكة"}</td>
+                          <td className="py-3 px-3">
+                            <span className="block font-black text-indigo-400">
+                              🏢 {companies.find((c) => c.id === u.company_id)?.name || "أدمن عام (كل الشركات)"}
+                            </span>
+                            <span className="block text-[10px] text-slate-500 font-bold mt-0.5 font-sans">
+                              📍 النطاق: {permissionsObj.region || "كامل فروع المملكة"}
+                            </span>
+                          </td>
                           <td className="py-3 px-3 text-slate-400 max-w-sm truncate" title={names.join(" - ")}>
                             {names.length > 0 ? names.join(" • ") : "صلاحيات محدودة كافية للعرض فقط"}
                             {u.company_perms && Object.keys(u.company_perms).length > 0 && (
@@ -4718,6 +4791,7 @@ CREATE TABLE IF NOT EXISTS sessions (
                                 setUPass(u.password || "");
                                 setUWorkerId(effectiveWorkerId || "");
                                 setURole(u.role || "employee");
+                                setUCompanyId(u.company_id || "");
                                 setURegion(permissionsObj.region || "");
                                 setSelectedCompanyIdForPerms("global");
                                 setUCompanyPerms(u.company_perms || {});
