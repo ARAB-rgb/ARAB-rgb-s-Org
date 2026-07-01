@@ -758,6 +758,25 @@ export default function App() {
     });
   };
 
+  const getInstallmentsForReceipt = () => {
+    return installments.filter((item) => {
+      if (!isCompanyAuthorized(item.company_id)) return false;
+      if (currentUser && currentUser.role !== "admin" && userRegionFilter) {
+        const itemRegion = awExtractRegion(item.notes || "");
+        if (itemRegion && itemRegion !== userRegionFilter) return false;
+      }
+      const itemComp = item.company_id || "arab_world";
+      
+      if (receiptCompanyId) {
+        return itemComp === receiptCompanyId;
+      }
+      if (selectedCompanyId !== "all") {
+        return itemComp === selectedCompanyId;
+      }
+      return true;
+    });
+  };
+
   const getVisibleQuotes = () => {
     return quotes.filter((item) => {
       if (!isCompanyAuthorized(item.company_id)) return false;
@@ -2287,7 +2306,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
   // Fill in active inputs of receipts once linked installment matched
   const handleAutoFillReceipt = (val: string) => {
     setRContractQuery(val);
-    const linked = installments.find(
+    const linked = getInstallmentsForReceipt().find(
       (x) =>
         x.no === val ||
         x.client === val ||
@@ -2756,7 +2775,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                       className="w-full px-3.5 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-amber-400 focus:outline-none"
                     />
                     <datalist id="contractsListDatalist">
-                      {installments.map((x, idx) => (
+                      {getInstallmentsForReceipt().map((x, idx) => (
                         <option key={idx} value={`${x.no} | ${x.client} | ${x.identity}`} />
                       ))}
                     </datalist>
