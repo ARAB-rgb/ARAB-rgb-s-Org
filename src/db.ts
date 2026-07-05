@@ -495,6 +495,23 @@ export function awExtractRegion(notes: string): string {
   return "";
 }
 
+export function awExtractCycle(notes: string): string {
+  const text = String(notes || "");
+  const m1 = text.match(/\[الدورية:\s*([^\]]+)\]/);
+  if (m1) return m1[1].trim();
+  return "";
+}
+
+export function awExtractClassification(notes: string): "مدين" | "دائن" {
+  const text = String(notes || "");
+  const m1 = text.match(/\[التصنيف:\s*([^\]]+)\]/);
+  if (m1) {
+    const val = m1[1].trim();
+    if (val === "دائن" || val === "مدين") return val;
+  }
+  return "مدين";
+}
+
 export function awExtractTreasury(notes: string): string {
   const text = String(notes || "");
   const m1 = text.match(/\[الخزنة:\s*([^\]]+)\]/);
@@ -604,6 +621,8 @@ export function awCleanNotes(notes: string): string {
     .replace(/\s*\[رأس_المال_تحصيل:\s*[^\]]+\]\s*/g, " ")
     .replace(/\s*\[رأس_المال_تقسيم_[^\]]+:\s*[^\]]+\]\s*/g, " ")
     .replace(/\s*\[السند_الخارجي:\s*[^\]]+\]\s*/g, " ")
+    .replace(/\s*\[الدورية:\s*[^\]]+\]\s*/g, " ")
+    .replace(/\s*\[التصنيف:\s*[^\]]+\]\s*/g, " ")
     .replace(/\s*\[\[?AW_BRANCH:\s*[^\]\s]+\]?\]\s*/gi, " ")
     .trim();
 }
@@ -684,35 +703,64 @@ export function generateNextNo(prefix: string, list: any[], field: string = "no"
 }
 
 export function getContractTiming(x: Installment) {
+  const cycle = awExtractCycle(x.notes || "") || "يومي";
   const start = x.start_date ? new Date(x.start_date) : null;
-  const daily = Number(x.installment || 0);
+  const installmentAmount = Number(x.installment || 0);
   const paid = Number(x.paid || 0);
-  const paidDays = daily > 0 ? Math.floor(paid / daily) : 0;
+  const paidPeriods = installmentAmount > 0 ? Math.floor(paid / installmentAmount) : 0;
   
   let lastPaid = "غير مسدد";
-  if (start && paidDays > 0) {
+  if (start && paidPeriods > 0) {
     const d = new Date(start);
-    d.setDate(d.getDate() + paidDays - 1);
+    if (cycle === "اسبوعي") {
+      d.setDate(d.getDate() + (paidPeriods * 7) - 1);
+    } else if (cycle === "نصف شهر") {
+      d.setDate(d.getDate() + (paidPeriods * 15) - 1);
+    } else if (cycle === "شهري") {
+      d.setMonth(d.getMonth() + paidPeriods);
+      d.setDate(d.getDate() - 1);
+    } else { // "يومي"
+      d.setDate(d.getDate() + paidPeriods - 1);
+    }
     lastPaid = d.toISOString().slice(0, 10);
   }
 
-  let dueDays = 0;
+  let duePeriods = 0;
   if (start) {
     const today = new Date();
     const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     const startOnly = new Date(start.getFullYear(), start.getMonth(), start.getDate());
-    dueDays = Math.max(0, Math.floor((todayOnly.getTime() - startOnly.getTime()) / 86400000) + 1);
+    const diffMs = todayOnly.getTime() - startOnly.getTime();
+    const diffDays = Math.max(0, Math.floor(diffMs / 86400000) + 1);
+
+    if (cycle === "اسبوعي") {
+      duePeriods = Math.max(0, Math.floor((diffDays - 1) / 7) + 1);
+    } else if (cycle === "نصف شهر") {
+      duePeriods = Math.max(0, Math.floor((diffDays - 1) / 15) + 1);
+    } else if (cycle === "شهري") {
+      const yearsDiff = todayOnly.getFullYear() - startOnly.getFullYear();
+      const monthsDiff = todayOnly.getMonth() - startOnly.getMonth();
+      const totalMonths = yearsDiff * 12 + monthsDiff;
+      if (todayOnly.getDate() >= startOnly.getDate()) {
+        duePeriods = totalMonths + 1;
+      } else {
+        duePeriods = Math.max(0, totalMonths);
+      }
+    } else { // "يومي"
+      duePeriods = diffDays;
+    }
   }
 
-  const overdueDays = Math.max(0, dueDays - paidDays);
-  const overdueAmount = overdueDays * daily;
+  const overduePeriods = Math.max(0, duePeriods - paidPeriods);
+  const overdueAmount = overduePeriods * installmentAmount;
 
   return {
-    paidDays,
+    paidDays: paidPeriods,
     lastPaid,
-    dueDays,
-    overdueDays,
+    dueDays: duePeriods,
+    overdueDays: overduePeriods,
     overdueAmount,
+    cycle,
   };
 }
 

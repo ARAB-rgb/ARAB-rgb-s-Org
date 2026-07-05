@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from "react";
+import React, { useState } from "react";
 import {
   FileText, Landmark, TrendingUp, TrendingDown, ClipboardCheck,
-  AlertTriangle, Receipt, Calendar, ArrowUpRight, ShieldCheck, ChevronLeft, Coins
+  AlertTriangle, Receipt, Calendar, ArrowUpRight, ShieldCheck, ChevronLeft, Coins, HelpCircle
 } from "lucide-react";
 import { Installment, Receipt as ReceiptType } from "../types";
 import { getContractTiming } from "../db";
@@ -55,6 +55,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   companies = [],
   selectedCompanyId = "all"
 }) => {
+  const [showCapitalExplanation, setShowCapitalExplanation] = useState(false);
   // Global totals
   const activeCompany = companies.find(c => c.id === selectedCompanyId);
   const registeredCapital = activeCompany 
@@ -200,7 +201,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
             className={`bg-slate-900/50 backdrop-blur-md rounded-2xl p-4 border ${stat.color} shadow-lg shadow-black/10 transition-transform duration-200 hover:scale-[1.02] flex flex-col justify-between`}
           >
             <div className="flex justify-between items-start">
-              <span className="text-[11px] font-black text-slate-400 leading-tight">{stat.title}</span>
+              <div className="flex items-center gap-1">
+                <span className="text-[11px] font-black text-slate-400 leading-tight">{stat.title}</span>
+                {stat.title === "رأس مال الشركة" && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowCapitalExplanation(prev => !prev);
+                    }}
+                    className="text-amber-500 hover:text-amber-400 transition-colors focus:outline-none"
+                    title="كيف جاء هذا المبلغ؟ اضغط للتفاصيل"
+                  >
+                    <HelpCircle className="w-3 h-3 cursor-pointer" />
+                  </button>
+                )}
+              </div>
               <stat.icon className="w-3.5 h-3.5 text-slate-400" />
             </div>
             <div className="mt-2">
@@ -210,6 +226,45 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
         ))}
       </div>
+
+      {/* Capital Explanation Panel */}
+      {showCapitalExplanation && (
+        <div className="relative overflow-hidden bg-slate-900/90 border-2 border-amber-500/30 p-5 rounded-3xl shadow-2xl flex flex-col md:flex-row items-start justify-between gap-4 animate-fadeIn">
+          <div className="absolute -left-12 -bottom-12 w-32 h-32 bg-amber-500/5 rounded-full blur-2xl pointer-events-none" />
+          <div className="flex items-start gap-3.5 relative z-10 w-full">
+            <div className="p-3 bg-amber-500/15 border border-amber-500/35 rounded-2xl text-amber-400 shrink-0 mt-0.5">
+              <Coins className="w-5 h-5 animate-bounce" />
+            </div>
+            <div className="space-y-2 w-full text-right">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-black text-amber-400">
+                  💡 تفاصيل رأس مال الشركة: كيف جاني هذا المبلغ؟
+                </h4>
+                <button 
+                  onClick={() => setShowCapitalExplanation(false)}
+                  className="text-[11px] text-slate-400 hover:text-white font-bold bg-slate-800 px-2.5 py-1 rounded-lg border border-slate-700 focus:outline-none transition-colors"
+                >
+                  إغلاق التوضيح ×
+                </button>
+              </div>
+              <p className="text-xs text-slate-300 leading-relaxed max-w-6xl mt-1.5">
+                هذا المبلغ يمثل <b>رأس المال التأسيسي المرخص والمسجل قانونياً</b> للمؤسسة أو الشركة في النظام المحاسبي:
+              </p>
+              <ul className="list-disc list-inside text-xs text-slate-400 space-y-1.5 pr-2">
+                <li>
+                  <b className="text-slate-200">مصدر القيمة:</b> يتم تعيين قيمة رأس المال يدوياً بواسطة الإدارة عند إدخال أو تعديل بيانات الشركة في تبويب <span className="text-amber-500 font-bold">"دليل الشركات والمستخلصات"</span>.
+                </li>
+                <li>
+                  <b className="text-slate-200">الشركة الحالية:</b> لـ <b className="text-slate-200">"شركة عرب وورلد للمقاولات"</b>، تم تعيين القيمة التأسيسية افتراضياً بـ <span className="text-amber-400 font-mono font-bold">10,000,000 ريال</span> للتوافق مع السجل التجاري والملاءة الائتمانية للشركة.
+                </li>
+                <li>
+                  <b className="text-slate-200">كيفية التعديل:</b> إذا كنت مديراً للنظام أو تمتلك الصلاحيات، يمكنك تعديل هذا المبلغ في أي وقت بالذهاب إلى <span className="text-white font-semibold">دليل الشركات والمستخلصات</span> ← <span className="text-white font-semibold">تعديل الشركة</span> ثم تحديث حقل <span className="text-amber-500 font-bold">رأس مال الشركة التأسيسي (ريال)</span> ليقوم النظام بتحديث المؤشر في جميع شاشات القيادة تلقائياً.
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main interactive grid containing pulse reports & smart summaries */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">

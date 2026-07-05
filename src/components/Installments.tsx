@@ -9,7 +9,7 @@ import {
   Printer, Trash2, Edit2, FileText, CheckCircle, AlertTriangle, Eye, X, Globe
 } from "lucide-react";
 import { Installment, Project, User as AuthUser, Company } from "../types";
-import { getContractTiming, awExtractRegion, awCleanNotes, generateNextNo, awExtractTreasury, awExtractCapital, awExtractCapitalSource, awExtractCapitalCompany, awExtractCapitalCollection, awExtractCapitalSplit } from "../db";
+import { getContractTiming, awExtractRegion, awCleanNotes, generateNextNo, awExtractTreasury, awExtractCapital, awExtractCapitalSource, awExtractCapitalCompany, awExtractCapitalCollection, awExtractCapitalSplit, awExtractCycle, awExtractClassification } from "../db";
 import { safeStorage } from "../safeStorage";
 
 const localStorage = safeStorage;
@@ -64,6 +64,9 @@ export const Installments: React.FC<InstallmentsProps> = ({
 
   // Form Fields
   const [client, setClient] = useState("");
+  const [contractType, setContractType] = useState<string>("تقسيط");
+  const [installmentCycle, setInstallmentCycle] = useState<string>("يومي");
+  const [classification, setClassification] = useState<string>("مدين");
   const [identity, setIdentity] = useState("");
   const [nationality, setNationality] = useState("");
   const [region, setRegion] = useState("");
@@ -175,6 +178,8 @@ export const Installments: React.FC<InstallmentsProps> = ({
 
   // Filters State
   const [qSearch, setQSearch] = useState("");
+  const [fType, setFType] = useState("");
+  const [fClassification, setFClassification] = useState("");
   const [fStatus, setFStatus] = useState("");
   const [fNationality, setFNationality] = useState("");
   const [fProject, setFProject] = useState("");
@@ -196,7 +201,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
   // Auto computation triggers
   useEffect(() => {
     recalcLogic();
-  }, [amount, paid, discount, periods, startDate]);
+  }, [amount, paid, discount, periods, startDate, installmentCycle]);
 
   useEffect(() => {
     // Fill custom auto sequence code on startup
@@ -214,7 +219,16 @@ export const Installments: React.FC<InstallmentsProps> = ({
     let calculatedEnd = "";
     if (days > 0 && startDate) {
       const d = new Date(startDate);
-      d.setDate(d.getDate() + days - 1);
+      if (installmentCycle === "اسبوعي") {
+        d.setDate(d.getDate() + (days * 7) - 1);
+      } else if (installmentCycle === "نصف شهر") {
+        d.setDate(d.getDate() + (days * 15) - 1);
+      } else if (installmentCycle === "شهري") {
+        d.setMonth(d.getMonth() + days);
+        d.setDate(d.getDate() - 1);
+      } else { // "يومي"
+        d.setDate(d.getDate() + days - 1);
+      }
       calculatedEnd = d.toISOString().slice(0, 10);
     }
     setEndDate(calculatedEnd);
@@ -230,6 +244,9 @@ export const Installments: React.FC<InstallmentsProps> = ({
   const handleClear = () => {
     setEditId(null);
     setClient("");
+    setContractType("تقسيط");
+    setInstallmentCycle("يومي");
+    setClassification("مدين");
     setIdentity("");
     setNationality("");
     // Keep or enforce authorized region restriction
@@ -265,6 +282,9 @@ export const Installments: React.FC<InstallmentsProps> = ({
   const handleEdit = (x: Installment) => {
     setEditId(x.id);
     setClient(x.client || "");
+    setContractType(x.type === "daily" || !x.type ? "تقسيط" : x.type);
+    setInstallmentCycle(awExtractCycle(x.notes || "") || "يومي");
+    setClassification(awExtractClassification(x.notes || "") || "مدين");
     setIdentity(x.identity || "");
     setNationality(x.nationality || "");
     setRegion(awExtractRegion(x.notes || "") || (finalPerms?.region || ""));
@@ -313,7 +333,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
       amount: Number(amount || 0),
       paid: Number(paid || 0),
       remaining: Math.max(0, Number(amount || 0) - Number(paid || 0)),
-      type: "daily",
+      type: contractType,
       start_date: startDate,
       end_date: endDate,
       periods: Number(periods || 0),
@@ -327,6 +347,8 @@ export const Installments: React.FC<InstallmentsProps> = ({
       notes: notes.trim(), // notes builder handling appended inside App.tsx
       region_input: region, // to be passed down
       treasury_input: treasury, // to be passed down
+      cycle_input: installmentCycle, // pass down cycle to onSaveInstallment
+      classification_input: classification, // pass down classification (دائن/مدين)
       capital_input: capitalSource === "كلاهما" ? Object.values(capitalSplits).reduce<number>((sum, val) => sum + Number(val || 0), 0) : Number(capital || 0),
       capital_source_input: capitalSource,
       capital_company_input: capitalSource === "كلاهما" ? Number(capitalSplits["خزنة الشركة"] || 0) : (capitalSource === "خزنة الشركة" ? Number(capital || 0) : 0),
@@ -358,13 +380,17 @@ export const Installments: React.FC<InstallmentsProps> = ({
       const r = awExtractRegion(x.notes || "");
 
       const txt = `${x.client} ${x.identity} ${x.phone} ${x.no} ${x.project} ${x.workplace} ${x.nationality} ${r}`.toLowerCase();
+      const itemType = x.type === "daily" || !x.type ? "تقسيط" : x.type;
+      const itemClassification = awExtractClassification(x.notes || "");
 
       return (
         (!qSearch || txt.includes(qSearch.toLowerCase().trim())) &&
         (!fStatus || computedStatus === fStatus) &&
         (!fNationality || x.nationality === fNationality) &&
         (!fProject || String(x.project).toLowerCase().includes(fProject.toLowerCase().trim())) &&
-        (!fRegion || r === fRegion)
+        (!fRegion || r === fRegion) &&
+        (!fType || itemType === fType) &&
+        (!fClassification || itemClassification === fClassification)
       );
     });
 
@@ -404,7 +430,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
           <div className="border-b border-slate-850 pb-4">
             <h3 className="text-base font-black text-white flex items-center gap-2">
               <span className="p-1.5 rounded-lg bg-blue-600/20 border border-blue-500/30 text-blue-400">📝</span>
-              {editId ? `تعديل عقد العميل — ${client}` : "إضافة عقد تقسيط يومي جديد"}
+              {editId ? `تعديل عقد العميل — ${client}` : `إضافة عقد تقسيط ${installmentCycle} جديد`}
             </h3>
           </div>
 
@@ -483,6 +509,32 @@ export const Installments: React.FC<InstallmentsProps> = ({
             </div>
 
             <div className="space-y-1">
+              <label className="text-[10px] font-black text-slate-400">نوع العقد</label>
+              <select
+                value={contractType}
+                onChange={(e) => setContractType(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-950/40 border border-slate-850 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-blue-500 transition-colors"
+              >
+                <option value="تقسيط">تقسيط</option>
+                <option value="المشروع">المشروع</option>
+                <option value="عقد عمل">عقد عمل</option>
+                <option value="عقد مقاولات">عقد مقاولات</option>
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-black text-slate-400">تصنيف الحساب (مدين / دائن)</label>
+              <select
+                value={classification}
+                onChange={(e) => setClassification(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-950/40 border border-slate-850 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-blue-500 transition-colors"
+              >
+                <option value="مدين">مدين (العميل عليه التزام مالي لنا)</option>
+                <option value="دائن">دائن (العميل له مستحقات مالية لدينا)</option>
+              </select>
+            </div>
+
+            <div className="space-y-1">
               <label className="text-[10px] font-black text-slate-400">رقم جوال العميل</label>
               <div className="relative">
                 <Phone className="absolute right-3.5 top-3.5 w-4 h-4 text-slate-500" />
@@ -542,11 +594,33 @@ export const Installments: React.FC<InstallmentsProps> = ({
             </div>
 
             <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-400">عدد أيام العقد</label>
+              <label className="text-[10px] font-black text-slate-400">دورية سداد القسط</label>
+              <select
+                value={installmentCycle}
+                onChange={(e) => setInstallmentCycle(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-950/40 border border-slate-850 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-blue-500 transition-colors"
+              >
+                <option value="يومي">يومي</option>
+                <option value="اسبوعي">أسبوعي</option>
+                <option value="نصف شهر">نصف شهري</option>
+                <option value="شهري">شهري</option>
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-black text-slate-400">
+                {installmentCycle === "اسبوعي" ? "عدد أسابيع العقد" :
+                 installmentCycle === "نصف شهر" ? "عدد الدفعات (كل 15 يوم)" :
+                 installmentCycle === "شهري" ? "عدد أشهر العقد" : "عدد أيام العقد"}
+              </label>
               <input
                 required
                 type="number"
-                placeholder="مثال: 30 يوم"
+                placeholder={
+                  installmentCycle === "اسبوعي" ? "مثال: 4 أسابيع" :
+                  installmentCycle === "نصف شهر" ? "مثال: 6 دفعات" :
+                  installmentCycle === "شهري" ? "مثال: 12 شهر" : "مثال: 30 يوم"
+                }
                 value={periods}
                 onChange={(e) => setPeriods(e.target.value ? Number(e.target.value) : "")}
                 className="w-full px-3.5 py-2.5 bg-slate-950/40 border border-slate-850 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-blue-500 transition-colors"
@@ -554,12 +628,20 @@ export const Installments: React.FC<InstallmentsProps> = ({
             </div>
 
             <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-400">القسط اليومي المستحق</label>
+              <label className="text-[10px] font-black text-slate-400">
+                {installmentCycle === "اسبوعي" ? "القسط الأسبوعي المستحق" :
+                 installmentCycle === "نصف شهر" ? "القسط نصف الشهري المستحق" :
+                 installmentCycle === "شهري" ? "القسط الشهري المستحق" : "القسط اليومي المستحق"}
+              </label>
               <input
                 readOnly
                 type="text"
                 placeholder="تلقائي بقسمة المتبقي"
-                value={installment ? `${installment} ريال / يوم` : ""}
+                value={installment ? `${installment} ريال / ${
+                  installmentCycle === "اسبوعي" ? "أسبوع" :
+                  installmentCycle === "نصف شهر" ? "نصف شهر" :
+                  installmentCycle === "شهري" ? "شهر" : "يوم"
+                }` : ""}
                 className="w-full px-3.5 py-2.5 bg-slate-950/70 border border-slate-850 rounded-xl text-xs font-bold text-emerald-400"
               />
             </div>
@@ -895,7 +977,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
       {/* Filter and Tables Section */}
       <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
         {/* Quick Filter Controls */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-6 gap-3 p-4 bg-slate-950/30 rounded-2xl border border-slate-850/80">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-8 gap-3 p-4 bg-slate-950/30 rounded-2xl border border-slate-850/80">
           <input
             type="text"
             placeholder="البحث باسم العميل أو العقد أو الجوال..."
@@ -913,6 +995,26 @@ export const Installments: React.FC<InstallmentsProps> = ({
             <option value="متأخر">متأخر</option>
             <option value="متعثر">متعثر</option>
             <option value="مكتمل">مكتمل</option>
+          </select>
+          <select
+            value={fType}
+            onChange={(e) => setFType(e.target.value)}
+            className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none"
+          >
+            <option value="">كل أنواع العقود</option>
+            <option value="تقسيط">تقسيط</option>
+            <option value="المشروع">المشروع</option>
+            <option value="عقد عمل">عقد عمل</option>
+            <option value="عقد مقاولات">عقد مقاولات</option>
+          </select>
+          <select
+            value={fClassification}
+            onChange={(e) => setFClassification(e.target.value)}
+            className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none"
+          >
+            <option value="">كل التصنيفات (مدين/دائن)</option>
+            <option value="مدين">مدين</option>
+            <option value="دائن">دائن</option>
           </select>
           <select
             value={fNationality}
@@ -995,7 +1097,27 @@ export const Installments: React.FC<InstallmentsProps> = ({
                     >
                       <td className="py-3.5 px-4">
                         <span className="block font-black text-white">{item.client}</span>
-                        <span className="block text-[10px] text-slate-400 mt-0.5">{item.nationality || "غير محدد"}</span>
+                        <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                          <span className="text-[10px] text-slate-400 font-bold">{item.nationality || "غير محدد"}</span>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 text-blue-400 font-bold font-sans">
+                            {item.type === "daily" || !item.type ? "تقسيط" : item.type}
+                          </span>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-400 font-bold font-sans">
+                            {(() => {
+                              const c = awExtractCycle(item.notes || "") || "يومي";
+                              return c === "يومي" ? "يومي" :
+                                     c === "اسبوعي" ? "أسبوعي" :
+                                     c === "نصف شهر" ? "نصف شهري" : "شهري";
+                            })()}
+                          </span>
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded font-black font-sans ${
+                            awExtractClassification(item.notes || "") === "دائن"
+                              ? "bg-emerald-500/10 border border-emerald-500/20 text-emerald-400"
+                              : "bg-purple-500/10 border border-purple-500/20 text-purple-400"
+                          }`}>
+                            {awExtractClassification(item.notes || "")}
+                          </span>
+                        </div>
                       </td>
                       <td className="py-3.5 px-4 font-mono">
                         <span className="block text-slate-200 font-bold">{item.no}</span>
@@ -1009,7 +1131,12 @@ export const Installments: React.FC<InstallmentsProps> = ({
                       <td className="py-3.5 px-4 text-center">
                         {t.overdueDays > 0 ? (
                           <span className="inline-block px-2.5 py-0.5 rounded bg-rose-500/10 border border-rose-500/20 text-rose-400 font-black font-mono">
-                            {t.overdueDays} أيام
+                            {t.overdueDays} {(() => {
+                              const c = awExtractCycle(item.notes || "") || "يومي";
+                              return c === "يومي" ? "يوم" :
+                                     c === "اسبوعي" ? "أسبوع" :
+                                     c === "نصف شهر" ? "نصف شهر" : "شهر";
+                            })()}
                           </span>
                         ) : (
                           <span className="text-slate-500 font-bold">0</span>
@@ -1115,6 +1242,26 @@ export const Installments: React.FC<InstallmentsProps> = ({
                   <span className="font-bold text-white text-xs">{selectedFileContract.nationality || "سعودي"}</span>
                 </div>
                 <div className="bg-slate-950/30 p-3.5 rounded-2xl border border-slate-850">
+                  <span className="block text-[10px] font-bold text-slate-400 mb-1">نوع العقد</span>
+                  <span className="font-bold text-blue-400 text-xs">
+                    {selectedFileContract.type === "daily" || !selectedFileContract.type ? "تقسيط" : selectedFileContract.type}
+                  </span>
+                </div>
+                <div className="bg-slate-950/30 p-3.5 rounded-2xl border border-slate-850">
+                  <span className="block text-[10px] font-bold text-slate-400 mb-1">تصنيف الحساب</span>
+                  <span className={`font-black text-xs ${
+                    awExtractClassification(selectedFileContract.notes || "") === "دائن"
+                      ? "text-emerald-400"
+                      : "text-purple-400"
+                  }`}>
+                    {awExtractClassification(selectedFileContract.notes || "")} ({
+                      awExtractClassification(selectedFileContract.notes || "") === "دائن"
+                        ? "مستحقات للعميل علينا"
+                        : "التزام على العميل لنا"
+                    })
+                  </span>
+                </div>
+                <div className="bg-slate-950/30 p-3.5 rounded-2xl border border-slate-850">
                   <span className="block text-[10px] font-bold text-slate-400 mb-1">مبلغ العقد الكلي</span>
                   <span className="font-mono text-white font-black text-sm">{Number(selectedFileContract.amount).toLocaleString()} ريال</span>
                 </div>
@@ -1158,8 +1305,22 @@ export const Installments: React.FC<InstallmentsProps> = ({
                   <span className="font-mono text-rose-400 font-extrabold text-sm">{Number(selectedFileContract.remaining).toLocaleString()} ريال</span>
                 </div>
                 <div className="bg-slate-950/30 p-3.5 rounded-2xl border border-slate-850">
-                  <span className="block text-[10px] font-bold text-slate-400 mb-1">القسط اليومي</span>
-                  <span className="font-mono text-amber-500 font-extrabold text-xs">{Number(selectedFileContract.installment).toLocaleString()} ريال / يوم</span>
+                  <span className="block text-[10px] font-bold text-slate-400 mb-1">
+                    {(() => {
+                      const c = awExtractCycle(selectedFileContract.notes || "") || "يومي";
+                      return c === "يومي" ? "القسط اليومي" :
+                             c === "اسبوعي" ? "القسط الأسبوعي" :
+                             c === "نصف شهر" ? "القسط نصف الشهري" : "القسط الشهري";
+                    })()}
+                  </span>
+                  <span className="font-mono text-amber-500 font-extrabold text-xs">
+                    {Number(selectedFileContract.installment).toLocaleString()} ريال / {(() => {
+                      const c = awExtractCycle(selectedFileContract.notes || "") || "يومي";
+                      return c === "يومي" ? "يوم" :
+                             c === "اسبوعي" ? "أسبوع" :
+                             c === "نصف شهر" ? "نصف شهر" : "شهر";
+                    })()}
+                  </span>
                 </div>
                 <div className="bg-slate-950/30 p-3.5 rounded-2xl border border-slate-850">
                   <span className="block text-[10px] font-bold text-slate-400 mb-1">تاريخ البدء والانتهاء</span>
@@ -1170,8 +1331,15 @@ export const Installments: React.FC<InstallmentsProps> = ({
                   <span className="font-mono text-white font-bold text-xs">{activeTiming.lastPaid}</span>
                 </div>
                 <div className="bg-slate-950/30 p-3.5 rounded-2xl border border-slate-850">
-                  <span className="block text-[10px] font-bold text-slate-400 mb-1">أيام ومبالغ التأخير اليوم</span>
-                  <span className="font-bold text-rose-400 text-xs">{activeTiming.overdueDays} يوم | {activeTiming.overdueAmount.toLocaleString()} ريال</span>
+                  <span className="block text-[10px] font-bold text-slate-400 mb-1">مبالغ وفترات التأخير</span>
+                  <span className="font-bold text-rose-400 text-xs">
+                    {activeTiming.overdueDays} {(() => {
+                      const c = awExtractCycle(selectedFileContract.notes || "") || "يومي";
+                      return c === "يومي" ? "يوم" :
+                             c === "اسبوعي" ? "أسبوع" :
+                             c === "نصف شهر" ? "نصف شهر" : "شهر";
+                    })()} | {activeTiming.overdueAmount.toLocaleString()} ريال
+                  </span>
                 </div>
                 <div className="bg-slate-950/30 p-3.5 rounded-2xl border border-slate-850">
                   <span className="block text-[10px] font-bold text-slate-400 mb-1">المشروع المرتبط</span>
@@ -1266,7 +1434,13 @@ export const Installments: React.FC<InstallmentsProps> = ({
                           <tr key={rIdx} className="hover:bg-slate-800/10">
                             <td className="py-2 px-3 font-mono text-slate-300 font-bold">{rec.no}</td>
                             <td className="py-2 px-3 font-mono text-slate-400">{rec.date}</td>
-                            <td className="py-2 px-3 text-slate-300">{rec.notes || "قبض دفعة قسط يومي"}</td>
+                            <td className="py-2 px-3 text-slate-300">
+                              {rec.notes || (() => {
+                                const contract = installments.find(inst => inst.id === rec.installment_id || inst.no === rec.contract_no);
+                                const c = contract ? (awExtractCycle(contract.notes || "") || "يومي") : "يومي";
+                                return "قبض دفعة قسط " + (c === "يومي" ? "يومي" : c === "اسبوعي" ? "أسبوعي" : c === "نصف شهر" ? "نصف شهري" : "شهري");
+                              })()}
+                            </td>
                             <td className="py-2 px-3 font-bold">{rec.from_name}</td>
                             <td className="py-2 px-3 text-slate-400">{rec.method}</td>
                             <td className="py-2 px-3 font-black text-emerald-400 font-mono">+{Number(rec.amount || 0).toLocaleString()} ريال</td>

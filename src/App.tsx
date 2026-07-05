@@ -17,7 +17,7 @@ import {
   awExtractCapitalSource, awExtractCapitalCompany, awExtractCapitalCollection,
   awExtractWorkerContract, awExtractWorkerLeaves, awBuildWorkerNotes, awCleanWorkerNotes,
   getSupabaseCredentials, saveSupabaseCredentials, checkSupabaseHealth, isSupabaseHealthy,
-  awExtractExternalNo, awBuildNotesWithRegionAndTreasuryAndExternalNo
+  awExtractExternalNo, awBuildNotesWithRegionAndTreasuryAndExternalNo, awExtractClassification, awExtractCycle
 } from "./db";
 
 import { Toast, ToastItem, ToastType } from "./components/Shared/Toast";
@@ -35,17 +35,14 @@ const getStoredTreasuries = (companyId?: string | null): string[] => {
   if (saved) {
     try {
       const arr = JSON.parse(saved);
-      if (Array.isArray(arr) && arr.length > 0) {
-        const merged = [...arr];
-        defaults.forEach(d => {
-          if (!merged.includes(d)) {
-            merged.push(d);
-          }
-        });
-        return merged;
+      if (Array.isArray(arr)) {
+        return arr;
       }
     } catch {}
   }
+  try {
+    localStorage.setItem(`aw_treasuries${suffix}`, JSON.stringify(defaults));
+  } catch {}
   return defaults;
 };
 
@@ -157,6 +154,7 @@ export default function App() {
   const [rExternalNo, setRExternalNo] = useState("");
   const [receiptCompanyId, setReceiptCompanyId] = useState("");
   const [paymentCompanyId, setPaymentCompanyId] = useState("");
+  const [payWorkerId, setPayWorkerId] = useState("");
   const [expenseCompanyId, setExpenseCompanyId] = useState("");
   const [projectCompanyId, setProjectCompanyId] = useState("");
   const [workerCompanyId, setWorkerCompanyId] = useState("");
@@ -175,6 +173,12 @@ export default function App() {
   const [payProject, setPayProject] = useState("");
   const [payNotes, setPayNotes] = useState("");
   const [payTreasury, setPayTreasury] = useState("خزنة الشركة");
+
+  // Treasury management & update state triggers
+  const [treasuryUpdateKey, setTreasuryUpdateKey] = useState(0);
+  const [showAddTreasuryModal, setShowAddTreasuryModal] = useState(false);
+  const [newTreasuryInputName, setNewTreasuryInputName] = useState("");
+  const [targetCompanyIdForModal, setTargetCompanyIdForModal] = useState<string | undefined>(undefined);
 
   // 4. Expenses Forms
   const [eName, setEName] = useState("");
@@ -676,6 +680,8 @@ export default function App() {
   };
 
   const getAuthorizedTreasuries = (user: AuthUser | null, compId: string | undefined): string[] => {
+    // We reference treasuryUpdateKey here to force re-evaluation when we add a new treasury
+    const _dummy = treasuryUpdateKey;
     const targetCompId = compId || (user?.role !== "admin" ? user?.company_id : selectedCompanyId);
     const allSafes = getStoredTreasuries(targetCompId);
     if (!user) return [];
@@ -690,6 +696,29 @@ export default function App() {
     };
 
     return allSafes.filter(tName => isSafeAllowedInPerm(user.perms, tName));
+  };
+
+  const addNewTreasury = (name: string, compId?: string) => {
+    const cleanName = name.trim();
+    if (!cleanName) return;
+    const targetCompId = compId || (currentUser?.role !== "admin" ? currentUser?.company_id : selectedCompanyId);
+    const currentSafes = getStoredTreasuries(targetCompId);
+    if (currentSafes.includes(cleanName)) {
+      showToast("هذه الخزنة مسجلة مسبقاً في النظام!", "error");
+      return;
+    }
+    const updated = [...currentSafes, cleanName];
+    const suffix = targetCompId && targetCompId !== "all" ? `_${targetCompId}` : "";
+    localStorage.setItem(`aw_treasuries${suffix}`, JSON.stringify(updated));
+    showToast(`تم إضافة خزنة جديدة بنجاح: ${cleanName}`);
+    setTreasuryUpdateKey(prev => prev + 1);
+    window.dispatchEvent(new Event("storage"));
+  };
+
+  const openAddTreasuryDialog = (compId?: string) => {
+    setTargetCompanyIdForModal(compId || selectedCompanyId);
+    setNewTreasuryInputName("");
+    setShowAddTreasuryModal(true);
   };
 
   useEffect(() => {
@@ -774,6 +803,17 @@ export default function App() {
         return itemComp === selectedCompanyId;
       }
       return true;
+    });
+  };
+
+  const getWorkersForPaymentCompany = () => {
+    const activeCompanyId = paymentCompanyId || (currentUser?.company_id || "");
+    return workers.filter((w) => {
+      const wComp = w.company_id || "";
+      if (!activeCompanyId) return true;
+      const comp1 = activeCompanyId === "arab_world" ? "" : activeCompanyId;
+      const comp2 = wComp === "arab_world" ? "" : wComp;
+      return comp1 === comp2;
     });
   };
 
@@ -931,7 +971,9 @@ export default function App() {
     const capitalCompany = Number(row.capital_company_input || 0);
     const capitalCollection = Number(row.capital_collection_input || 0);
     const capitalSplits = row.capital_splits_input;
-    const finalNotes = awBuildNotesWithRegionAndTreasuryAndCapital(
+    const activeCycle = row.cycle_input || "يومي";
+    const activeClassification = row.classification_input || "مدين";
+    let finalNotes = awBuildNotesWithRegionAndTreasuryAndCapital(
       row.notes, 
       activeRegion, 
       activeTreasury, 
@@ -941,6 +983,14 @@ export default function App() {
       capitalCollection,
       capitalSplits
     );
+
+    if (activeCycle) {
+      finalNotes = `[الدورية: ${activeCycle}] ` + finalNotes;
+    }
+
+    if (activeClassification) {
+      finalNotes = `[التصنيف: ${activeClassification}] ` + finalNotes;
+    }
 
     const payload = {
       ...row,
@@ -954,6 +1004,8 @@ export default function App() {
     delete payload.capital_company_input;
     delete payload.capital_collection_input;
     delete payload.capital_splits_input;
+    delete payload.cycle_input;
+    delete payload.classification_input;
 
     setIsLoading(true);
     try {
@@ -1038,6 +1090,12 @@ export default function App() {
       return;
     }
 
+    const classificationVal = awExtractClassification(x.notes || "") || "مدين";
+    const classificationTxt = classificationVal === "دائن" ? "دائن (العميل له مستحقات مالية لدينا)" : "مدين (العميل عليه التزام مالي لنا)";
+    const cCycle = awExtractCycle(x.notes || "") || "يومي";
+    const cycleLabel = cCycle === "يومي" ? "يوم" : cCycle === "اسبوعي" ? "أسبوع" : cCycle === "نصف شهر" ? "دفعة (نصف شهر)" : "شهر";
+    const cycleInstLabel = cCycle === "يومي" ? "القسط اليومي الإجباري" : cCycle === "اسبوعي" ? "القسط الأسبوعي الإجباري" : cCycle === "نصف شهر" ? "القسط نصف الشهري الإجباري" : "القسط الشهري الإجباري";
+
     w.document.write(`
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -1090,18 +1148,19 @@ td{border:1px solid #d8dee9;padding:8px;text-align:center;font-weight:600}
   </div>
   <div class="title">ورقة اتفاقية عقد مالي وسياق التزام</div>
   <div class="grid">
-    <div class="box"><b>اسم الطرف المدين</b><span>${x.client}</span></div>
+    <div class="box"><b>اسم الطرف العميل</b><span>${x.client}</span></div>
     <div class="box"><b>رقم السجل / الهوية</b><span>${x.identity}</span></div>
     <div class="box"><b>رقم الجوال الاتصالي</b><span>${x.phone}</span></div>
     <div class="box"><b>جنسية السجل</b><span>${x.nationality || "سعودي"}</span></div>
+    <div class="box"><b>تصنيف الحساب المالي</b><span style="color:${classificationVal === "دائن" ? "#10b981" : "#8b5cf6"}">${classificationTxt}</span></div>
     <div class="box"><b>المشروع المرفق</b><span>${x.project || "عام"}</span></div>
     <div class="box"><b>مقر ووظيفة العمل</b><span>${x.workplace || "غير محدد"}</span></div>
     <div class="box"><b>تاريخ العقد وإيجاده</b><span>${x.start_date}</span></div>
-    <div class="box"><b>عدد فترات الدفع</b><span>${x.periods} أيام</span></div>
-    <div class="box"><b>القسط اليومي الإجباري</b><span>${Number(x.installment || 0).toLocaleString()} ريال</span></div>
+    <div class="box"><b>مدة / فترات العقد</b><span>${x.periods} ${cycleLabel}</span></div>
+    <div class="box"><b>${cycleInstLabel}</b><span>${Number(x.installment || 0).toLocaleString()} ريال</span></div>
     <div class="box"><b>الفرع الإداري</b><span>${awExtractRegion(x.notes || "") || "غير محدد"}</span></div>
     <div class="box"><b>الكفيل والضامن الغارم</b><span>${x.guarantor || "لا يوجد كفيل"}</span></div>
-    <div class="box"><b>وضعية الملف</b><span>${x.status}</span></div>
+    <div class="box" style="grid-column: span 3"><b>وضعية الملف الجاري</b><span>${x.status}</span></div>
     <div class="box" style="grid-column: span 3"><b>سياق الملاحظات والشروط</b><span>${awCleanNotes(x.notes || "") || "لا يوجد"}</span></div>
   </div>
   <div class="summary">
@@ -1389,8 +1448,12 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
     e.preventDefault();
     if (!payTo || !payAmount) return;
 
+    const targetNo = editPaymentId
+      ? (payments.find(p => p.id === editPaymentId)?.no || generateNextNo("AW-PAY", payments, "no"))
+      : generateNextNo("AW-PAY", payments, "no");
+
     const row = {
-      no: generateNextNo("AW-PAY", payments, "no"),
+      no: targetNo,
       to_name: payTo.trim(),
       amount: Number(payAmount),
       method: payMethod,
@@ -1398,10 +1461,63 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       project: payProject.trim(),
       notes: awBuildNotesWithRegionAndTreasury(payNotes, userRegionFilter, payTreasury),
       company_id: getTargetCompanyId(paymentCompanyId),
+      worker_id: payWorkerId || null,
     };
 
     setIsLoading(true);
     try {
+      // Handle Worker calculations before saving/updating payment
+      if (editPaymentId) {
+        const oldPayment = payments.find(p => p.id === editPaymentId);
+        if (oldPayment) {
+          if (oldPayment.worker_id === payWorkerId) {
+            // Same worker, adjust the difference
+            if (payWorkerId) {
+              const w = workers.find(x => x.id === payWorkerId);
+              if (w) {
+                const diff = Number(payAmount) - Number(oldPayment.amount || 0);
+                const newAdvance = Number(w.advance || 0) + diff;
+                const tot = Number(w.daily || 0) * Number(w.days || 0);
+                const newBalance = Math.max(0, tot - newAdvance);
+                await sb.from("workers").update({ advance: newAdvance, balance: newBalance }).eq("id", w.id);
+              }
+            }
+          } else {
+            // Worker changed (or unlinked/linked)
+            if (oldPayment.worker_id) {
+              const oldW = workers.find(x => x.id === oldPayment.worker_id);
+              if (oldW) {
+                const oldAdvance = Math.max(0, Number(oldW.advance || 0) - Number(oldPayment.amount || 0));
+                const tot = Number(oldW.daily || 0) * Number(oldW.days || 0);
+                const oldBalance = Math.max(0, tot - oldAdvance);
+                await sb.from("workers").update({ advance: oldAdvance, balance: oldBalance }).eq("id", oldW.id);
+              }
+            }
+            if (payWorkerId) {
+              const newW = workers.find(x => x.id === payWorkerId);
+              if (newW) {
+                const newAdvance = Number(newW.advance || 0) + Number(payAmount);
+                const tot = Number(newW.daily || 0) * Number(newW.days || 0);
+                const newBalance = Math.max(0, tot - newAdvance);
+                await sb.from("workers").update({ advance: newAdvance, balance: newBalance }).eq("id", newW.id);
+              }
+            }
+          }
+        }
+      } else {
+        // New payment, apply advance to selected worker
+        if (payWorkerId) {
+          const w = workers.find(x => x.id === payWorkerId);
+          if (w) {
+            const currentAdvance = Number(w.advance || 0);
+            const newAdvance = currentAdvance + Number(payAmount);
+            const tot = Number(w.daily || 0) * Number(w.days || 0);
+            const newBalance = Math.max(0, tot - newAdvance);
+            await sb.from("workers").update({ advance: newAdvance, balance: newBalance }).eq("id", w.id);
+          }
+        }
+      }
+
       const q = editPaymentId
         ? sb.from("payments").update(row).eq("id", editPaymentId)
         : sb.from("payments").insert(row);
@@ -1420,10 +1536,44 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       setPayNotes("");
       setPayTreasury("خزنة الشركة");
       setPaymentCompanyId("");
+      setPayWorkerId("");
       await loadEverything();
-      showToast("تم قيّد سند الصرف بنجاح!");
+      showToast("تم قيّد سند الصرف بنجاح وتحديث أرصدة العمل المرتبط.");
     } catch {
       showToast("خطأ في القيود المحاسبية للصرف", "error");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const deletePaymentLogic = async (paymentId: string) => {
+    const p = payments.find((x) => x.id === paymentId);
+    if (!p) return;
+
+    setIsLoading(true);
+    try {
+      if (p.worker_id) {
+        const w = workers.find((x) => x.id === p.worker_id);
+        if (w) {
+          const currentAdvance = Number(w.advance || 0);
+          const newAdvance = Math.max(0, currentAdvance - Number(p.amount || 0));
+          const tot = Number(w.daily || 0) * Number(w.days || 0);
+          const newBalance = Math.max(0, tot - newAdvance);
+          await sb.from("workers").update({ advance: newAdvance, balance: newBalance }).eq("id", w.id);
+        }
+      }
+
+      const { error } = await sb.from("payments").delete().eq("id", paymentId);
+      if (error) {
+        showToast(error.message, "error");
+        return;
+      }
+
+      await logSession(currentUser!, `حذف سند الصرف رقم: ${p.no}`);
+      await loadEverything();
+      showToast("تم حذف سند الصرف المالي بنجاح وتحديث حساب العامل.");
+    } catch {
+      showToast("خطأ أثناء حذف سند الصرف", "error");
     } finally {
       setIsLoading(false);
     }
@@ -2178,6 +2328,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
     }
 
     const row = {
+      id: editUserId || undefined,
       name: uName.trim(),
       code: uCode.trim(),
       password: uPass.trim(),
@@ -2271,6 +2422,35 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       `هل أنت متأكد من حذف حساب الموظف "${name}" بشكل نهائي؟`,
       () => deleteUserLogicExecute(id, name)
     );
+  };
+
+  const handleSelectPaymentWorker = (workerId: string) => {
+    setPayWorkerId(workerId);
+    if (!workerId) return;
+    const w = workers.find(x => x.id === workerId);
+    if (w) {
+      setPayTo(w.name);
+      if (w.project) {
+        setPayProject(w.project);
+      }
+      if (w.company_id) {
+        setPaymentCompanyId(w.company_id);
+      }
+    }
+  };
+
+  const handlePaymentCompanyChange = (val: string) => {
+    setPaymentCompanyId(val);
+    if (payWorkerId) {
+      const w = workers.find(x => x.id === payWorkerId);
+      if (w) {
+        const wComp = w.company_id || "";
+        const targetComp = val || "";
+        if (wComp !== targetComp) {
+          setPayWorkerId("");
+        }
+      }
+    }
   };
 
   // Excel Export logic for Receipts
@@ -2679,7 +2859,9 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
               payments={getVisiblePayments()}
               expenses={getVisibleExpenses()}
               authorizedTreasuries={getAuthorizedTreasuries(currentUser, selectedCompanyId)}
-              isAdmin={currentUser?.role === "admin"}
+              isAdmin={currentUser?.role === "admin" || can("treasury")}
+              selectedCompanyId={selectedCompanyId}
+              onUpdate={loadEverything}
             />
           )}
 
@@ -2806,7 +2988,18 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-[10px] font-black text-amber-500">الخزنة المستهدفة بالقيد</label>
+                    <div className="flex justify-between items-center">
+                      <label className="text-[10px] font-black text-amber-500">الخزنة المستهدفة بالقيد</label>
+                      {(currentUser?.role === "admin" || can("treasury")) && (
+                        <button
+                          type="button"
+                          onClick={() => openAddTreasuryDialog(receiptCompanyId || selectedCompanyId)}
+                          className="text-[9px] text-amber-550 hover:text-amber-400 font-black transition-colors"
+                        >
+                          ➕ إضافة خزنة جديدة
+                        </button>
+                      )}
+                    </div>
                     <select
                       value={rTreasury}
                       onChange={(e) => setRTreasury(e.target.value)}
@@ -3034,7 +3227,18 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                     <input type="number" required placeholder="مبلغ الصرف" value={payAmount} onChange={(e) => setPayAmount(e.target.value ? Number(e.target.value) : "")} className="w-full px-3 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 transition-colors" />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-black text-amber-500">حساب الخزنة الممول</label>
+                    <div className="flex justify-between items-center">
+                      <label className="text-[10px] font-black text-amber-500">حساب الخزنة الممول</label>
+                      {(currentUser?.role === "admin" || can("treasury")) && (
+                        <button
+                          type="button"
+                          onClick={() => openAddTreasuryDialog(paymentCompanyId || selectedCompanyId)}
+                          className="text-[9px] text-amber-550 hover:text-amber-400 font-black transition-colors"
+                        >
+                          ➕ إضافة خزنة جديدة
+                        </button>
+                      )}
+                    </div>
                     <select
                       value={payTreasury}
                       onChange={(e) => setPayTreasury(e.target.value)}
@@ -3057,12 +3261,27 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                     <label className="text-[10px] font-black text-slate-400">الارتباط بالمشروع</label>
                     <input placeholder="الارتباط بالمشروع" value={payProject} onChange={(e) => setPayProject(e.target.value)} className="w-full px-3 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 transition-colors" />
                   </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-amber-500">👷 عامل الشركة المرتبط (اختياري)</label>
+                    <select
+                      value={payWorkerId}
+                      onChange={(e) => handleSelectPaymentWorker(e.target.value)}
+                      className="w-full px-3 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-amber-400 focus:outline-none focus:border-amber-500 transition-colors cursor-pointer bg-slate-950"
+                    >
+                      <option value="" className="text-slate-400">👤 تحديد عامل لتعبئة البيانات...</option>
+                      {getWorkersForPaymentCompany().map((w) => (
+                        <option key={w.id} value={w.id} className="text-white bg-slate-950">
+                          {w.name} ({w.job || "عامل"})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                   {currentUser?.role === "admin" && companies.length > 0 && (
                     <div className="space-y-1">
                       <label className="text-[10px] font-black text-amber-500">🏢 الشركة التابع لها السند</label>
                       <select
                         value={paymentCompanyId}
-                        onChange={(e) => setPaymentCompanyId(e.target.value)}
+                        onChange={(e) => handlePaymentCompanyChange(e.target.value)}
                         className="w-full px-3.5 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none cursor-pointer bg-slate-950"
                       >
                         <option value="">🏢 اختيار الشركة (تلقائي)</option>
@@ -3079,7 +3298,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                 </div>
                 <div className="flex gap-2 justify-end">
                   {editPaymentId && (
-                    <button type="button" onClick={() => { setEditPaymentId(null); setPayTo(""); setPayAmount(""); setPayProject(""); setPayNotes(""); setPayTreasury("خزنة الشركة"); setPaymentCompanyId(""); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
+                    <button type="button" onClick={() => { setEditPaymentId(null); setPayTo(""); setPayAmount(""); setPayProject(""); setPayNotes(""); setPayTreasury("خزنة الشركة"); setPaymentCompanyId(""); setPayWorkerId(""); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
                   )}
                   <button type="submit" className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-black">{editPaymentId ? "استبدال وصيغة السند" : "قيد سند الصرف ماليًا"}</button>
                 </div>
@@ -3103,7 +3322,14 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                       <tr key={idx} className="border-b border-slate-850 hover:bg-slate-800/10 transition-colors">
                         <td className="py-3 px-3 font-mono font-bold text-slate-300">{p.no}</td>
                         <td className="py-3 px-3 font-mono text-slate-400">{p.date}</td>
-                        <td className="py-3 px-3 font-black text-white">{p.to_name}</td>
+                        <td className="py-3 px-3 font-black text-white">
+                          <span className="block">{p.to_name}</span>
+                          {p.worker_id && (
+                            <span className="inline-flex items-center gap-1 text-[10px] text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 mt-1">
+                              👷 {workers.find((w) => w.id === p.worker_id)?.name || "عامل مسجل"}
+                            </span>
+                          )}
+                        </td>
                         <td className="py-3 px-3 font-black text-rose-400 font-mono">-{p.amount.toLocaleString()} ريال</td>
                         <td className="py-3 px-3 font-bold">
                           <span className="block">{p.method}</span>
@@ -3114,8 +3340,8 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                           {awCleanNotes(p.notes || "")}
                         </td>
                         <td className="py-3 px-3 text-center space-x-1">
-                          <button onClick={() => { setEditPaymentId(p.id); setPayTo(p.to_name || ""); setPayAmount(p.amount || ""); setPayMethod(p.method || ""); setPayDate(p.date || ""); setPayProject(p.project || ""); setPayNotes(awCleanNotes(p.notes || "")); setPayTreasury(awExtractTreasury(p.notes || "") || "خزنة الشركة"); setPaymentCompanyId(p.company_id || ""); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
-                          <button onClick={() => { if(confirm("تأكيد الحذف؟")) { sb.from("payments").delete().eq("id", p.id).then(() => loadEverything()); } }} className="p-1 text-rose-400 hover:text-rose-500"><Trash2 className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => { setEditPaymentId(p.id); setPayTo(p.to_name || ""); setPayAmount(p.amount || ""); setPayMethod(p.method || ""); setPayDate(p.date || ""); setPayProject(p.project || ""); setPayNotes(awCleanNotes(p.notes || "")); setPayTreasury(awExtractTreasury(p.notes || "") || "خزنة الشركة"); setPaymentCompanyId(p.company_id || ""); setPayWorkerId(p.worker_id || ""); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => { triggerConfirm("حذف سند الصرف", "هل أنت متأكد من حذف هذا السند وتحديث حساب العمال المرتبط؟", () => deletePaymentLogic(p.id)); }} className="p-1 text-rose-400 hover:text-rose-500"><Trash2 className="w-3.5 h-3.5" /></button>
                         </td>
                       </tr>
                     ))}
@@ -3146,15 +3372,29 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                   <input type="date" value={eDate} onChange={(e) => setEDate(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none" />
                   <input placeholder="المشروع التابع" value={eProject} onChange={(e) => setEProject(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none" />
                   <input placeholder="المورد أو المستفيد" value={eSupplier} onChange={(e) => setESupplier(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none" />
-                  <select
-                    value={eTreasury}
-                    onChange={(e) => setETreasury(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none cursor-pointer bg-slate-950"
-                  >
-                    {getAuthorizedTreasuries(currentUser, selectedCompanyId).map((tName) => (
-                      <option key={tName} value={tName} className="bg-slate-950 text-white">💰 {tName}</option>
-                    ))}
-                  </select>
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center">
+                      <label className="text-[10px] font-black text-amber-500">من صندوق / خزنة</label>
+                      {(currentUser?.role === "admin" || can("treasury")) && (
+                        <button
+                          type="button"
+                          onClick={() => openAddTreasuryDialog(expenseCompanyId || selectedCompanyId)}
+                          className="text-[9px] text-amber-550 hover:text-amber-400 font-black transition-colors"
+                        >
+                          ➕ إضافة خزنة جديدة
+                        </button>
+                      )}
+                    </div>
+                    <select
+                      value={eTreasury}
+                      onChange={(e) => setETreasury(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none cursor-pointer bg-slate-950"
+                    >
+                      {getAuthorizedTreasuries(currentUser, selectedCompanyId).map((tName) => (
+                        <option key={tName} value={tName} className="bg-slate-950 text-white">💰 {tName}</option>
+                      ))}
+                    </select>
+                  </div>
                   {currentUser?.role === "admin" && companies.length > 0 && (
                     <select
                       value={expenseCompanyId}
@@ -3586,7 +3826,18 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                           </div>
 
                           <div className="space-y-1">
-                            <label className="text-[10px] text-slate-400 font-bold">صرف مالي من الخزنة</label>
+                            <div className="flex justify-between items-center">
+                              <label className="text-[10px] text-slate-400 font-bold">صرف مالي من الخزنة</label>
+                              {(currentUser?.role === "admin" || can("treasury")) && (
+                                <button
+                                  type="button"
+                                  onClick={() => openAddTreasuryDialog(selectedWorkerForHr?.company_id || selectedCompanyId)}
+                                  className="text-[9px] text-amber-500 hover:text-amber-400 font-bold transition-colors"
+                                >
+                                  ➕ إضافة خزنة
+                                </button>
+                              )}
+                            </div>
                             <select 
                               value={advTreasury} 
                               onChange={(e) => setAdvTreasury(e.target.value)} 
@@ -5184,7 +5435,18 @@ CREATE TABLE IF NOT EXISTS sessions (
                             </div>
 
                             <div className="space-y-1">
-                              <label className="text-[10px] text-slate-400 font-bold block">صرف السند ماليًا من صندوق</label>
+                              <div className="flex justify-between items-center">
+                                <label className="text-[10px] text-slate-400 font-bold block">صرف السند ماليًا من صندوق</label>
+                                {(currentUser?.role === "admin" || can("treasury")) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => openAddTreasuryDialog(profileWorker?.company_id || selectedCompanyId)}
+                                    className="text-[9px] text-amber-500 hover:text-amber-400 font-bold transition-colors"
+                                  >
+                                    ➕ إضافة خزنة
+                                  </button>
+                                )}
+                              </div>
                               <select 
                                 value={advTreasury} 
                                 onChange={(e) => setAdvTreasury(e.target.value)} 
@@ -5590,6 +5852,60 @@ CREATE TABLE IF NOT EXISTS sessions (
                     </div>
                   );
                 })()}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Dynamic Add Treasury Modal */}
+        {showAddTreasuryModal && (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-[100]" dir="rtl">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 space-y-5 text-right">
+              <div>
+                <h3 className="text-base font-black text-white flex items-center gap-2">
+                  <span className="text-amber-500">💰</span>
+                  <span>إضافة خزنة مالية جديدة</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                  سيتم تسجيل هذه الخزنة كصندوق معتمد لتسهيل المتابعة والفرز والعمليات المالية للشركة المحددة.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-400">اسم الخزنة المقترح</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="مثال: خزنة المعارض، خزنة جدة، الخ"
+                  value={newTreasuryInputName}
+                  onChange={(e) => setNewTreasuryInputName(e.target.value)}
+                  className="w-full px-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 transition-colors"
+                />
+              </div>
+
+              <div className="flex gap-2 justify-end pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddTreasuryModal(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-750 text-xs font-bold rounded-xl transition-colors border border-slate-750 text-white"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const cleanName = newTreasuryInputName.trim();
+                    if (!cleanName) {
+                      showToast("الرجاء إدخال اسم الخزنة!", "error");
+                      return;
+                    }
+                    addNewTreasury(cleanName, targetCompanyIdForModal);
+                    setShowAddTreasuryModal(false);
+                  }}
+                  className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-xs font-black rounded-xl text-slate-950 transition-colors"
+                >
+                  إضافة الآن
+                </button>
               </div>
             </div>
           </div>

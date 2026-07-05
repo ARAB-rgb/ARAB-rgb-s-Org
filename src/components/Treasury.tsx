@@ -4,9 +4,9 @@
  */
 
 import React, { useState, useEffect } from "react";
-import { Wallet, Landmark, TrendingUp, Search, Plus, Trash2, AlertTriangle, Coins } from "lucide-react";
+import { Wallet, Landmark, TrendingUp, Search, Plus, Trash2, AlertTriangle, Coins, Edit2, Check, X } from "lucide-react";
 import { Receipt, Payment, Expense, Installment } from "../types";
-import { awExtractTreasury, awExtractCapital, awExtractCapitalSource, awExtractCapitalCompany, awExtractCapitalCollection, awGetSafeCapitalOutflow } from "../db";
+import { sb, awExtractTreasury, awExtractCapital, awExtractCapitalSource, awExtractCapitalCompany, awExtractCapitalCollection, awGetSafeCapitalOutflow } from "../db";
 import { safeStorage } from "../safeStorage";
 
 const localStorage = safeStorage;
@@ -19,6 +19,7 @@ interface TreasuryProps {
   authorizedTreasuries?: string[];
   isAdmin?: boolean;
   selectedCompanyId?: string;
+  onUpdate?: () => void;
 }
 
 const getStoredTreasuries = (companyId?: string): string[] => {
@@ -28,21 +29,18 @@ const getStoredTreasuries = (companyId?: string): string[] => {
   if (saved) {
     try {
       const arr = JSON.parse(saved);
-      if (Array.isArray(arr) && arr.length > 0) {
-        const merged = [...arr];
-        defaults.forEach(d => {
-          if (!merged.includes(d)) {
-            merged.push(d);
-          }
-        });
-        return merged;
+      if (Array.isArray(arr)) {
+        return arr;
       }
     } catch {}
   }
+  try {
+    localStorage.setItem(`aw_treasuries${suffix}`, JSON.stringify(defaults));
+  } catch {}
   return defaults;
 };
 
-export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses, installments, authorizedTreasuries, isAdmin = false, selectedCompanyId }) => {
+export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses, installments, authorizedTreasuries, isAdmin = false, selectedCompanyId, onUpdate }) => {
   const [treasuries, setTreasuries] = useState<string[]>(() => {
     const list = getStoredTreasuries(selectedCompanyId);
     if (authorizedTreasuries) {
@@ -60,6 +58,9 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
   const [searchQuery, setSearchQuery] = useState("");
   const [newTreasuryName, setNewTreasuryName] = useState("");
   const [inlineError, setInlineError] = useState<string | null>(null);
+  const [editingTreasuryName, setEditingTreasuryName] = useState<string | null>(null);
+  const [editInputVal, setEditInputVal] = useState("");
+  const [isUpdating, setIsUpdating] = useState(false);
 
   useEffect(() => {
     // Reset/Reload treasuries when selectedCompanyId changes
@@ -110,6 +111,103 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
     setNewTreasuryName("");
     // Dispatch to keep Installments synced
     window.dispatchEvent(new Event("storage"));
+  };
+
+  const updateNotesTreasury = (notes: string | undefined, oldT: string, newT: string, defaultT: string): string => {
+    const text = String(notes || "").trim();
+    // Check if contains exact [الخزنة: oldT]
+    const escapedOldT = oldT.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const regex = new RegExp(`\\[الخزنة:\\s*${escapedOldT}\\s*\\]`);
+    const hasOldExplicit = text.includes(`[الخزنة: ${oldT}]`) || text.match(regex);
+    if (hasOldExplicit) {
+      const globalRegex = new RegExp(`\\[الخزنة:\\s*${escapedOldT}\\s*\\]`, 'g');
+      return text.replace(globalRegex, `[الخزنة: ${newT}]`);
+    }
+    
+    const hasAnyExplicit = text.includes(`[الخزنة:`);
+    if (hasAnyExplicit) {
+      return text;
+    }
+    
+    if (oldT === defaultT) {
+      return `[الخزنة: ${newT}]` + (text ? ` ${text}` : "");
+    }
+    
+    return text;
+  };
+
+  const handleEditTreasurySubmit = async (oldName: string) => {
+    setInlineError(null);
+    const cleanOld = oldName.trim();
+    const cleanNew = editInputVal.trim();
+    if (!cleanNew) {
+      setInlineError("⚠️ اسم الخزنة الجديد لا يمكن أن يكون فارغاً!");
+      return;
+    }
+    if (cleanOld === cleanNew) {
+      setEditingTreasuryName(null);
+      return;
+    }
+    if (treasuries.includes(cleanNew) && cleanNew !== cleanOld) {
+      setInlineError("⚠️ يوجد خزنة أخرى مسجلة بنفس هذا الاسم!");
+      return;
+    }
+
+    try {
+      setIsUpdating(true);
+      
+      // 1. Update treasuries list in state & localStorage
+      const updated = treasuries.map(t => t === cleanOld ? cleanNew : t);
+      setTreasuries(updated);
+      const suffix = selectedCompanyId && selectedCompanyId !== "all" ? `_${selectedCompanyId}` : "";
+      localStorage.setItem(`aw_treasuries${suffix}`, JSON.stringify(updated));
+
+      // 2. Update existing entries in Database
+      // Receipts
+      const affectedReceipts = receipts.filter(r => getReceiptTreasury(r) === cleanOld);
+      for (const r of affectedReceipts) {
+        const updatedNotes = updateNotesTreasury(r.notes, cleanOld, cleanNew, "خزنة التحصيل");
+        await sb.from("receipts").update({ notes: updatedNotes }).eq("id", r.id);
+      }
+
+      // Payments
+      const affectedPayments = payments.filter(p => getPaymentTreasury(p) === cleanOld);
+      for (const p of affectedPayments) {
+        const updatedNotes = updateNotesTreasury(p.notes, cleanOld, cleanNew, "خزنة الشركة");
+        await sb.from("payments").update({ notes: updatedNotes }).eq("id", p.id);
+      }
+
+      // Expenses
+      const affectedExpenses = expenses.filter(e => getExpenseTreasury(e) === cleanOld);
+      for (const e of affectedExpenses) {
+        const updatedNotes = updateNotesTreasury(e.notes, cleanOld, cleanNew, "خزنة الشركة");
+        await sb.from("expenses").update({ notes: updatedNotes }).eq("id", e.id);
+      }
+
+      // Installments
+      const affectedInstallments = installments.filter(inst => awExtractTreasury(inst.notes || "") === cleanOld);
+      for (const inst of affectedInstallments) {
+        const updatedNotes = updateNotesTreasury(inst.notes, cleanOld, cleanNew, "خزنة التحصيل");
+        await sb.from("installments").update({ notes: updatedNotes }).eq("id", inst.id);
+      }
+
+      // 3. Keep active tab synced if it was renamed
+      if (activeTab === cleanOld) {
+        setActiveTab(cleanNew);
+      }
+      
+      // 4. Dispatch storage event and trigger reload
+      window.dispatchEvent(new Event("storage"));
+      if (onUpdate) {
+        onUpdate();
+      }
+
+      setEditingTreasuryName(null);
+    } catch (err: any) {
+      setInlineError(`⚠️ حدث خطأ أثناء تعديل الخزنة: ${err.message || err}`);
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
   // Handle deleting a treasury
@@ -583,21 +681,67 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
                   const txCount = getCompiledTransactionsForSafe(name).length;
                   return (
                     <div key={name} className="flex justify-between items-center bg-slate-900/50 p-2.5 rounded-xl border border-slate-850">
-                      <div className="flex items-center gap-2">
-                        <Coins className="w-4 h-4 text-emerald-400" />
-                        <div>
-                          <span className="text-xs font-black text-white">{name}</span>
-                          <span className="block text-[9px] text-slate-500">تحتوي على عدد {txCount} قيد بالدفتر</span>
-                        </div>
+                      <div className="flex items-center gap-2 flex-grow">
+                        <Coins className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                        {editingTreasuryName === name ? (
+                          <div className="flex items-center gap-2 flex-grow ml-2" dir="rtl">
+                            <input
+                              type="text"
+                              value={editInputVal}
+                              onChange={(e) => setEditInputVal(e.target.value)}
+                              disabled={isUpdating}
+                              className="px-2 py-1 bg-slate-950 border border-slate-800 rounded-lg text-xs font-bold text-white focus:outline-none focus:border-blue-500 w-full"
+                            />
+                            <button
+                              type="button"
+                              disabled={isUpdating}
+                              onClick={() => handleEditTreasurySubmit(name)}
+                              className="p-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg border border-emerald-500/20 transition-colors cursor-pointer"
+                              title="حفظ التعديل"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isUpdating}
+                              onClick={() => setEditingTreasuryName(null)}
+                              className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-lg border border-slate-750 transition-colors cursor-pointer"
+                              title="إلغاء التعديل"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div>
+                            <span className="text-xs font-black text-white">{name}</span>
+                            <span className="block text-[9px] text-slate-500">تحتوي على عدد {txCount} قيد بالدفتر</span>
+                          </div>
+                        )}
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteTreasury(name)}
-                        className="p-1 px-2 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 rounded-lg text-rose-400 hover:text-rose-300 text-[10px] font-semibold transition-all flex items-center gap-1"
-                        title="حذف وإلغاء هذه الخزنة من القائمة"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" /> إلغاء
-                      </button>
+                      
+                      {editingTreasuryName !== name && (
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingTreasuryName(name);
+                              setEditInputVal(name);
+                            }}
+                            className="p-1 px-2 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-lg text-blue-400 hover:text-blue-300 text-[10px] font-semibold transition-all flex items-center gap-1 cursor-pointer"
+                            title="تعديل اسم الخزنة"
+                          >
+                            <Edit2 className="w-3 h-3" /> تعديل
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteTreasury(name)}
+                            className="p-1 px-2 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 rounded-lg text-rose-400 hover:text-rose-300 text-[10px] font-semibold transition-all flex items-center gap-1 cursor-pointer"
+                            title="حذف وإلغاء هذه الخزنة من القائمة"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" /> إلغاء
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}

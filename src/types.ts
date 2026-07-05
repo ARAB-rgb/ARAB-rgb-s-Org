@@ -55,7 +55,7 @@ export interface Installment {
   amount: number;
   paid: number;
   remaining: number;
-  type: "daily";
+  type: string;
   start_date: string;
   end_date: string;
   next_due?: string;
@@ -110,6 +110,7 @@ export interface Receipt {
 export interface Payment {
   id: string;
   company_id?: string;
+  worker_id?: string;
   no: string;
   to_name: string;
   amount: number;
