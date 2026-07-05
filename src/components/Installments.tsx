@@ -27,9 +27,10 @@ interface InstallmentsProps {
   selectedCompanyId?: string;
 }
 
-const getStoredTreasuries = (): string[] => {
-  const defaults = ["خزنة الشركة", "خزنة التحصيل", "خزنة التحويل", "نقاط البيع"];
-  const saved = localStorage.getItem("aw_treasuries");
+const getStoredTreasuries = (companyId?: string | null): string[] => {
+  const defaults = ["خزنة الشركة", "خزنة التحصيل", "خزنة التحويل", "نقاط البيع", "خزنة المقاولات"];
+  const suffix = companyId && companyId !== "all" ? `_${companyId}` : "";
+  const saved = localStorage.getItem(`aw_treasuries${suffix}`);
   if (saved) {
     try {
       const arr = JSON.parse(saved);
@@ -92,7 +93,20 @@ export const Installments: React.FC<InstallmentsProps> = ({
   const [capitalCollection, setCapitalCollection] = useState<number | "">("");
   const [capitalSplits, setCapitalSplits] = useState<Record<string, number | "">>({});
   const [installmentCompanyId, setInstallmentCompanyId] = useState("");
-  const [dynamicTreasuries, setDynamicTreasuries] = useState<string[]>(getStoredTreasuries);
+  const [dynamicTreasuries, setDynamicTreasuries] = useState<string[]>(() => 
+    getStoredTreasuries(installmentCompanyId || selectedCompanyId)
+  );
+
+  useEffect(() => {
+    const handleStorageChange = () => {
+      setDynamicTreasuries(getStoredTreasuries(installmentCompanyId || selectedCompanyId));
+    };
+    window.addEventListener("storage", handleStorageChange);
+    handleStorageChange();
+    return () => {
+      window.removeEventListener("storage", handleStorageChange);
+    };
+  }, [installmentCompanyId, selectedCompanyId]);
   const [isCapitalManuallyEdited, setIsCapitalManuallyEdited] = useState(false);
 
   // Sync selected company when not in edit mode
@@ -269,7 +283,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
     setGuarantor("");
     setStatus("منتظم");
     setNotes("");
-    setTreasury(getStoredTreasuries()[0] || "خزنة التحصيل");
+    setTreasury(getStoredTreasuries(installmentCompanyId || selectedCompanyId)[0] || "خزنة التحصيل");
     setCapital("");
     setCapitalSource("خزنة الشركة");
     setCapitalCompany("");
@@ -300,7 +314,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
     setGuarantor(x.guarantor || "");
     setStatus(x.status || "منتظم");
     setNotes(awCleanNotes(x.notes || ""));
-    setTreasury(awExtractTreasury(x.notes || "") || getStoredTreasuries()[0] || "خزنة التحصيل");
+    setTreasury(awExtractTreasury(x.notes || "") || getStoredTreasuries(installmentCompanyId || selectedCompanyId)[0] || "خزنة التحصيل");
     setCapital(awExtractCapital(x.notes || "") || "");
     const rawSrc = awExtractCapitalSource(x.notes || "");
     const mappedSrc = rawSrc === "شركة" ? "خزنة الشركة" : (rawSrc === "تحصيل" ? "خزنة التحصيل" : rawSrc);

@@ -629,7 +629,7 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
       </div>
 
       {/* Dynamic Treasury Management section */}
-      {isAdmin && (
+      {true && (
         <div className="bg-slate-900/60 rounded-3xl border border-slate-800 p-6 shadow-xl space-y-5">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-850 pb-4">
             <div>
