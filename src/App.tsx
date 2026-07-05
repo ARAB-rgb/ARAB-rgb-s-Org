@@ -173,6 +173,8 @@ export default function App() {
   const [payProject, setPayProject] = useState("");
   const [payNotes, setPayNotes] = useState("");
   const [payTreasury, setPayTreasury] = useState("خزنة الشركة");
+  const [payContractQuery, setPayContractQuery] = useState("");
+  const [paySelectedInstallment, setPaySelectedInstallment] = useState<Installment | null>(null);
 
   // Treasury management & update state triggers
   const [treasuryUpdateKey, setTreasuryUpdateKey] = useState(0);
@@ -1537,6 +1539,8 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       setPayTreasury("خزنة الشركة");
       setPaymentCompanyId("");
       setPayWorkerId("");
+      setPayContractQuery("");
+      setPaySelectedInstallment(null);
       await loadEverything();
       showToast("تم قيّد سند الصرف بنجاح وتحديث أرصدة العمل المرتبط.");
     } catch {
@@ -2503,6 +2507,25 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
     }
   };
 
+  // Fill in active inputs of payments once linked installment matched (optional)
+  const handleAutoFillPayment = (val: string) => {
+    setPayContractQuery(val);
+    const linked = getInstallmentsForReceipt().find(
+      (x) =>
+        x.no === val ||
+        x.client === val ||
+        x.identity === val ||
+        `${x.no} | ${x.client} | ${x.identity}` === val
+    );
+    if (linked) {
+      setPaySelectedInstallment(linked);
+      setPayTo(linked.client);
+      setPayProject(linked.project || "عام");
+    } else {
+      setPaySelectedInstallment(null);
+    }
+  };
+
   // Nav categories helpers
   const navigationItems = [
     { key: "dashboard", label: "الرئيسية", icon: Home, visible: true },
@@ -3218,7 +3241,23 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                   <h3 className="text-base font-black text-white flex items-center gap-2"><span>💸</span> تحرير سند صرف صادر للشركة</h3>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="space-y-1">
+                  <div className="space-y-1 sm:col-span-2 md:col-span-2">
+                    <label className="text-[10px] font-black text-amber-500">ربط العقد التابع — اختياري (للبحث وتعبئة اسم العميل والمشروع تلقائياً)</label>
+                    <input
+                      placeholder="ابحث باسم العميل أو رقم العقد لربطه تلقائياً..."
+                      value={payContractQuery}
+                      onChange={(e) => handleAutoFillPayment(e.target.value)}
+                      maxLength={180}
+                      list="paymentsContractsListDatalist"
+                      className="w-full px-3.5 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-amber-400 focus:outline-none focus:border-amber-500 transition-colors"
+                    />
+                    <datalist id="paymentsContractsListDatalist">
+                      {getInstallmentsForReceipt().map((x, idx) => (
+                        <option key={idx} value={`${x.no} | ${x.client} | ${x.identity}`} />
+                      ))}
+                    </datalist>
+                  </div>
+                  <div className="space-y-1 sm:col-span-2 md:col-span-2">
                     <label className="text-[10px] font-black text-slate-400">صرفنا إلى المستفيد</label>
                     <input required placeholder="صرفنا إلى المستفيد" value={payTo} onChange={(e) => setPayTo(e.target.value)} className="w-full px-3 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 transition-colors" />
                   </div>
@@ -3298,7 +3337,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                 </div>
                 <div className="flex gap-2 justify-end">
                   {editPaymentId && (
-                    <button type="button" onClick={() => { setEditPaymentId(null); setPayTo(""); setPayAmount(""); setPayProject(""); setPayNotes(""); setPayTreasury("خزنة الشركة"); setPaymentCompanyId(""); setPayWorkerId(""); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
+                    <button type="button" onClick={() => { setEditPaymentId(null); setPayTo(""); setPayAmount(""); setPayProject(""); setPayNotes(""); setPayTreasury("خزنة الشركة"); setPaymentCompanyId(""); setPayWorkerId(""); setPayContractQuery(""); setPaySelectedInstallment(null); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
                   )}
                   <button type="submit" className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-black">{editPaymentId ? "استبدال وصيغة السند" : "قيد سند الصرف ماليًا"}</button>
                 </div>
@@ -3340,7 +3379,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                           {awCleanNotes(p.notes || "")}
                         </td>
                         <td className="py-3 px-3 text-center space-x-1">
-                          <button onClick={() => { setEditPaymentId(p.id); setPayTo(p.to_name || ""); setPayAmount(p.amount || ""); setPayMethod(p.method || ""); setPayDate(p.date || ""); setPayProject(p.project || ""); setPayNotes(awCleanNotes(p.notes || "")); setPayTreasury(awExtractTreasury(p.notes || "") || "خزنة الشركة"); setPaymentCompanyId(p.company_id || ""); setPayWorkerId(p.worker_id || ""); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => { setEditPaymentId(p.id); setPayTo(p.to_name || ""); setPayAmount(p.amount || ""); setPayMethod(p.method || ""); setPayDate(p.date || ""); setPayProject(p.project || ""); setPayNotes(awCleanNotes(p.notes || "")); setPayTreasury(awExtractTreasury(p.notes || "") || "خزنة الشركة"); setPaymentCompanyId(p.company_id || ""); setPayWorkerId(p.worker_id || ""); setPayContractQuery(p.to_name || ""); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
                           <button onClick={() => { triggerConfirm("حذف سند الصرف", "هل أنت متأكد من حذف هذا السند وتحديث حساب العمال المرتبط؟", () => deletePaymentLogic(p.id)); }} className="p-1 text-rose-400 hover:text-rose-500"><Trash2 className="w-3.5 h-3.5" /></button>
                         </td>
                       </tr>
