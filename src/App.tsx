@@ -4996,6 +4996,7 @@ CREATE TABLE IF NOT EXISTS workers (
   name TEXT,
   job TEXT,
   salary NUMERIC,
+  recipient_name TEXT,
   notes TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );
