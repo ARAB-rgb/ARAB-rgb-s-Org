@@ -78,7 +78,7 @@ service cloud.firestore {
         && data.id is string && data.id.size() <= 128
         && data.no is string && data.no.size() <= 50
         && data.name is string && data.name.size() <= 200
-        && data.category is string && (data.category == 'مواد' || data.category == 'عمالة' || data.category == 'نقل' || data.category == 'إيجار' || data.category == 'وقود' || data.category == 'أخرى')
+        && data.category is string && (data.category == 'مواد' || data.category == 'عمالة' || data.category == 'نقل' || data.category == 'إيجار' || data.category == 'وقود' || data.category == 'إعاشة' || data.category == 'سيارات' || data.category == 'عدة' || data.category == 'بنزين' || data.category == 'تغيير زيت' || data.category == 'صيانة' || data.category == 'اتصالات' || data.category == 'أخرى')
         && data.amount is number && data.amount > 0
         && data.date is string && data.date.size() <= 50;
     }

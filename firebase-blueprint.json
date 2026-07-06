@@ -141,7 +141,7 @@
         "id": { "type": "string" },
         "no": { "type": "string" },
         "name": { "type": "string" },
-        "category": { "type": "string", "enum": ["مواد", "عمالة", "نقل", "إيجار", "وقود", "أخرى"] },
+        "category": { "type": "string", "enum": ["مواد", "عمالة", "نقل", "إيجار", "وقود", "إعاشة", "سيارات", "عدة", "بنزين", "تغيير زيت", "صيانة", "اتصالات", "أخرى"] },
         "amount": { "type": "number" },
         "date": { "type": "string" },
         "project": { "type": "string" },

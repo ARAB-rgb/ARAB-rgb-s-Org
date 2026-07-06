@@ -126,7 +126,7 @@ export interface Expense {
   company_id?: string;
   no: string;
   name: string;
-  category: "مواد" | "عمالة" | "نقل" | "إيجار" | "وقود" | "أخرى";
+  category: "مواد" | "عمالة" | "نقل" | "إيجار" | "وقود" | "إعاشة" | "سيارات" | "عدة" | "بنزين" | "تغيير زيت" | "صيانة" | "اتصالات" | "أخرى" | string;
   amount: number;
   date: string;
   project: string;

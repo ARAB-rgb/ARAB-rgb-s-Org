@@ -165,6 +165,7 @@ export default function App() {
   const [rSort, setRSort] = useState("date_desc");
   const [rFromDate, setRFromDate] = useState("");
   const [rToDate, setRToDate] = useState("");
+  const [rMethodFilter, setRMethodFilter] = useState("");
 
   // 3. Payments Forms
   const [payTo, setPayTo] = useState("");
@@ -185,7 +186,7 @@ export default function App() {
 
   // 4. Expenses Forms
   const [eName, setEName] = useState("");
-  const [eCategory, setECategory] = useState<"مواد" | "عمالة" | "نقل" | "إيجار" | "وقود" | "أخرى">("مواد");
+  const [eCategory, setECategory] = useState<"مواد" | "عمالة" | "نقل" | "إيجار" | "وقود" | "إعاشة" | "سيارات" | "عدة" | "بنزين" | "تغيير زيت" | "صيانة" | "اتصالات" | "أخرى">("مواد");
   const [eAmount, setEAmount] = useState<number | "">("");
   const [eDate, setEDate] = useState(new Date().toISOString().slice(0, 10));
   const [eProject, setEProject] = useState("");
@@ -2478,7 +2479,9 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       const targetRowsArr = getVisibleReceipts().filter((x) => {
         const query = rSearch.toLowerCase().trim();
         const text = `${x.no} ${x.date} ${x.from_name} ${x.contract_no} ${x.identity} ${x.phone} ${x.amount} ${x.remaining_after} ${x.method} ${x.project}`.toLowerCase();
-        return !query || text.includes(query);
+        const matchesQuery = !query || text.includes(query);
+        const matchesMethod = !rMethodFilter || x.method === rMethodFilter;
+        return matchesQuery && matchesMethod;
       });
 
       let csvContent = "\ufeff"; // BOM for Arabic support
@@ -3156,6 +3159,13 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                       <option value="amount_asc">الأقل ماليًا</option>
                     </select>
 
+                    <select value={rMethodFilter} onChange={(e) => setRMethodFilter(e.target.value)} className="px-4 py-2 bg-slate-950/60 border border-slate-800 rounded-xl text-xs font-bold text-emerald-400 focus:outline-none">
+                      <option value="" className="text-white">💳 كل طرق الاستلام</option>
+                      <option value="مدى" className="text-white">💳 مدى</option>
+                      <option value="تحويل بنكي" className="text-white">🏦 تحويل بنكي</option>
+                      <option value="نقداً" className="text-white">💵 نقداً</option>
+                    </select>
+
                     <div className="flex flex-wrap items-center gap-2 bg-slate-950/40 p-1.5 rounded-xl border border-slate-850/60">
                       <div className="flex items-center gap-1 px-1">
                         <span className="text-[10px] font-black text-slate-400">من:</span>
@@ -3214,7 +3224,9 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                         .filter((x) => {
                           const query = rSearch.toLowerCase().trim();
                           const text = `${x.no} ${x.date} ${x.from_name} ${x.contract_no} ${x.identity} ${x.phone} ${x.amount} ${x.remaining_after} ${x.method} ${x.project}`.toLowerCase();
-                          return !query || text.includes(query);
+                          const matchesQuery = !query || text.includes(query);
+                          const matchesMethod = !rMethodFilter || x.method === rMethodFilter;
+                          return matchesQuery && matchesMethod;
                         })
                         .sort((a, b) => {
                           if (rSort === "name_asc") {
@@ -3434,10 +3446,17 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                   <input required placeholder="اسم المصروف ووصفه" value={eName} onChange={(e) => setEName(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none" />
                   <select value={eCategory} onChange={(e: any) => setECategory(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none">
                     <option value="مواد">مواد</option>
+                    <option value="إعاشة">إعاشة (أكل وشرب)</option>
+                    <option value="سيارات">سيارات</option>
+                    <option value="عدة">عدة وأدوات</option>
+                    <option value="بنزين">بنزين</option>
+                    <option value="تغيير زيت">تغيير زيت</option>
+                    <option value="وقود">وقود عام</option>
                     <option value="عمالة">عمالة</option>
-                    <option value="نقل">نقل</option>
+                    <option value="نقل">نقل وشحن</option>
                     <option value="إيجار">إيجار</option>
-                    <option value="وقود">وقود</option>
+                    <option value="صيانة">صيانة وإصلاح</option>
+                    <option value="اتصالات">اتصالات وإنترنت</option>
                     <option value="أخرى">أخرى</option>
                   </select>
                   <input type="number" required placeholder="المبلغ" value={eAmount} onChange={(e) => setEAmount(e.target.value ? Number(e.target.value) : "")} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none" />
