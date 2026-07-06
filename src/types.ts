@@ -164,6 +164,7 @@ export interface Worker {
   total: number;
   balance: number;
   status: "على رأس العمل" | "إجازة" | "موقوف";
+  recipient_name?: string;
   notes?: string;
   created_at?: string;
 }

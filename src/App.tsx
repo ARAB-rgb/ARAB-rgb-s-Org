@@ -7,7 +7,7 @@ import React, { useState, useEffect, useRef } from "react";
 import {
   Home, ClipboardList, FileText, Landmark, TrendingUp, TrendingDown, Briefcase, Users,
   Settings, LogOut, Calendar, MapPin, User, Phone, Shield, Search, Plus,
-  Edit2, Trash2, Download, AlertTriangle, Sparkles, Clock, RefreshCw, Key, Printer, Building
+  Edit2, Trash2, Download, AlertTriangle, Sparkles, Clock, RefreshCw, Key, Printer, Building, ChevronDown, ChevronUp
 } from "lucide-react";
 
 import { User as AuthUser, Installment, Quote, Receipt, Payment, Expense, Project, Worker, DbSession, Company, Extract } from "./types";
@@ -109,12 +109,22 @@ export default function App() {
     open: boolean;
     title: string;
     message: string;
-    onConfirm: () => void;
+    onConfirm: (reason?: string) => void;
+    requireReason?: boolean;
+    reasonPlaceholder?: string;
   } | null>(null);
+  const [confirmReason, setConfirmReason] = useState("");
   const [printingReceiptId, setPrintingReceiptId] = useState<string | null>(null);
 
-  const triggerConfirm = (title: string, message: string, onConfirm: () => void) => {
-    setConfirmDialog({ open: true, title, message, onConfirm });
+  const triggerConfirm = (
+    title: string,
+    message: string,
+    onConfirm: (reason?: string) => void,
+    requireReason?: boolean,
+    reasonPlaceholder?: string
+  ) => {
+    setConfirmReason("");
+    setConfirmDialog({ open: true, title, message, onConfirm, requireReason, reasonPlaceholder });
   };
 
   // Supabase Dynamic Integration Settings
@@ -123,6 +133,11 @@ export default function App() {
   const [sbStatus, setSbStatus] = useState<"checking" | "connected" | "fallback">("checking");
   const [sbTesting, setSbTesting] = useState(false);
   const [sbConfigExpanded, setSbConfigExpanded] = useState(false);
+
+  // Expanded rows for tables
+  const [expandedReceipts, setExpandedReceipts] = useState<Record<string, boolean>>({});
+  const [expandedPayments, setExpandedPayments] = useState<Record<string, boolean>>({});
+  const [expandedExpenses, setExpandedExpenses] = useState<Record<string, boolean>>({});
 
   // Backup & Restore states
   const [isRestoring, setIsRestoring] = useState(false);
@@ -215,6 +230,7 @@ export default function App() {
   const [wDays, setWDays] = useState<number | "">("");
   const [wAdvance, setWAdvance] = useState<number | "">(0);
   const [wStatus, setWStatus] = useState<"على رأس العمل" | "إجازة" | "موقوف">("على رأس العمل");
+  const [wRecipientName, setWRecipientName] = useState("");
   const [wNotes, setWNotes] = useState("");
 
   // 7. Companies Forms
@@ -1424,9 +1440,14 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
     }
   };
 
-  const deleteReceiptLogicExecute = async (id: string, instId?: string) => {
+  const deleteReceiptLogicExecute = async (id: string, instId?: string, reason?: string) => {
     setIsLoading(true);
     try {
+      const r = receipts.find((x) => x.id === id);
+      const receiptNo = r ? r.no : id;
+      const amount = r ? r.amount : "";
+      const payerName = r ? r.from_name : "";
+
       const { error } = await sb.from("receipts").delete().eq("id", id);
       if (error) {
         showToast(error.message, "error");
@@ -1435,7 +1456,8 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       if (instId) {
         await recalcLinkedContractFromReceipts(instId);
       }
-      await logSession(currentUser!, `حذف سند قبض مالي ID: ${id}`);
+      const logMsg = `حذف سند قبض مالي رقم: ${receiptNo}${amount ? ` بمبلغ ${amount} ريال` : ""}${payerName ? ` من ${payerName}` : ""} | مذكرة تسوية (سبب الحذف): ${reason || "لم يذكر"}`;
+      await logSession(currentUser!, logMsg);
       await loadEverything();
       showToast("تم الحذف وإعادة حساب دفوعات العقد المالي بنجاح");
     } catch {
@@ -1448,8 +1470,10 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
   const deleteReceiptLogic = (id: string, instId?: string) => {
     triggerConfirm(
       "حذف سند القبض المالي",
-      "هل أنت متأكد من مسح سند القبض ماليًا بشكل نهائي وتحديث العقد؟",
-      () => deleteReceiptLogicExecute(id, instId)
+      "هل أنت متأكد من مسح سند القبض ماليًا بشكل نهائي وتحديث العقد؟ يتطلب هذا الإجراء كتابة مذكرة تسوية توضح سبب الحذف للرقابة المالية.",
+      (reason) => deleteReceiptLogicExecute(id, instId, reason),
+      true,
+      "اكتب هنا سبب حذف سند القبض (مذكرة التسوية)..."
     );
   };
 
@@ -1558,7 +1582,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
     }
   };
 
-  const deletePaymentLogic = async (paymentId: string) => {
+  const deletePaymentLogic = async (paymentId: string, reason?: string) => {
     const p = payments.find((x) => x.id === paymentId);
     if (!p) return;
 
@@ -1581,7 +1605,8 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
         return;
       }
 
-      await logSession(currentUser!, `حذف سند الصرف رقم: ${p.no}`);
+      const logMsg = `حذف سند الصرف رقم: ${p.no}${p.amount ? ` بمبلغ ${p.amount} ريال` : ""}${p.to_name ? ` إلى ${p.to_name}` : ""} | مذكرة تسوية (سبب الحذف): ${reason || "لم يذكر"}`;
+      await logSession(currentUser!, logMsg);
       await loadEverything();
       showToast("تم حذف سند الصرف المالي بنجاح وتحديث حساب العامل.");
     } catch {
@@ -1704,6 +1729,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       total: tot,
       balance: Math.max(0, tot - Number(wAdvance || 0)),
       status: wStatus,
+      recipient_name: wRecipientName.trim() || null,
       notes: wNotes,
       company_id: getTargetCompanyId(workerCompanyId),
     };
@@ -1729,6 +1755,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       setWDaily("");
       setWDays("");
       setWAdvance(0);
+      setWRecipientName("");
       setWNotes("");
       setWorkerCompanyId("");
       await loadEverything();
@@ -2449,7 +2476,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
     if (!workerId) return;
     const w = workers.find(x => x.id === workerId);
     if (w) {
-      setPayTo(w.name);
+      setPayTo(w.recipient_name || w.name);
       if (w.project) {
         setPayProject(w.project);
       }
@@ -3209,6 +3236,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                   <table className="w-full text-right text-xs">
                     <thead>
                       <tr className="bg-slate-950 border-b border-slate-800 text-slate-300">
+                        <th className="py-2.5 px-3 font-bold text-center w-10"></th>
                         <th className="py-2.5 px-3 font-bold">رقم السند</th>
                         <th className="py-2.5 px-3 font-bold">التاريخ</th>
                         <th className="py-2.5 px-3 font-bold">المستلم من</th>
@@ -3240,36 +3268,116 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                           return String(b.date || "").localeCompare(String(a.date || ""));
                         })
                         .map((r, idx) => (
-                          <tr key={idx} className="border-b border-slate-850 hover:bg-slate-800/10 transition-colors">
-                            <td className="py-3 px-3 font-mono">
-                              {awExtractExternalNo(r.notes || "") && (
-                                <span className="block text-[11px] text-emerald-300 font-sans font-extrabold bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-500/40 mb-1 w-max">
-                                  📄 سند خارجي: {awExtractExternalNo(r.notes || "")}
-                                </span>
-                              )}
-                              <span className="block font-bold text-slate-300">{r.no}</span>
-                            </td>
-                            <td className="py-3 px-3 font-mono text-slate-400">{r.date}</td>
-                            <td className="py-3 px-3 font-black text-white">{r.from_name}</td>
-                            <td className="py-3 px-3 font-mono">
-                              <span className="block">{r.contract_no || "عام"}</span>
-                              <div className="flex flex-wrap gap-1.5 items-center mt-0.5">
-                                <span className="text-[9px] text-amber-500 font-sans font-extrabold">{awExtractRegion(r.notes || "")}</span>
-                                <span className="text-[9px] text-cyan-400 font-sans font-extrabold bg-cyan-950/45 px-1.5 py-0.5 rounded border border-cyan-850">🏦 {awExtractTreasury(r.notes || "") || "خزنة التحصيل"}</span>
-                              </div>
-                            </td>
-                            <td className="py-3 px-3 font-black text-emerald-400 font-mono">+{Number(r.amount || 0).toLocaleString()} ريال</td>
-                            <td className="py-3 px-3 font-black text-slate-300 font-mono">{Number(r.remaining_after || 0).toLocaleString()} ريال</td>
-                            <td className="py-3 px-3 text-slate-400 max-w-xs truncate">
-                              <b className="text-white text-[11px] block">{r.method}</b>
-                              {awCleanNotes(r.notes || "")}
-                            </td>
-                            <td className="py-3 px-3 text-center flex items-center justify-center gap-1">
-                              <button onClick={() => onPrintReceipt(r.id)} className="p-1 text-emerald-400 hover:text-white" title="طباعة سند القبض"><Printer className="w-3.5 h-3.5" /></button>
-                              <button onClick={() => { setEditReceiptId(r.id); handleAutoFillReceipt(r.contract_no || ""); setRFrom(r.from_name || ""); setRAmount(r.amount || ""); setRMethod(r.method || ""); setRDate(r.date || ""); setRProject(r.project || ""); setRNotes(awCleanNotes(r.notes || "")); setRTreasury(awExtractTreasury(r.notes || "") || "خزنة التحصيل"); setRExternalNo(awExtractExternalNo(r.notes || "")); setReceiptCompanyId(r.company_id || ""); document.getElementById("receipts-tab-view")?.scrollIntoView({ behavior: "smooth" }); }} className="p-1 text-blue-400 hover:text-white" title="تعديل"><Edit2 className="w-3.5 h-3.5" /></button>
-                              <button onClick={() => deleteReceiptLogic(r.id, r.installment_id)} className="p-1 text-rose-400 hover:text-rose-500" title="حذف"><Trash2 className="w-3.5 h-3.5" /></button>
-                            </td>
-                          </tr>
+                          <React.Fragment key={r.id || idx}>
+                            <tr className={`border-b border-slate-850 hover:bg-slate-800/10 transition-colors ${expandedReceipts[r.id] ? "bg-slate-900/20" : ""}`}>
+                              <td className="py-3 px-2 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => setExpandedReceipts(prev => ({ ...prev, [r.id]: !prev[r.id] }))}
+                                  className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
+                                  title={expandedReceipts[r.id] ? "طي التفاصيل" : "توسيع وعرض التفاصيل"}
+                                >
+                                  {expandedReceipts[r.id] ? (
+                                    <ChevronUp className="w-4 h-4 text-amber-500" />
+                                  ) : (
+                                    <ChevronDown className="w-4 h-4 text-slate-400" />
+                                  )}
+                                </button>
+                              </td>
+                              <td className="py-3 px-3 font-mono">
+                                {awExtractExternalNo(r.notes || "") && (
+                                  <span className="block text-[11px] text-emerald-300 font-sans font-extrabold bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-500/40 mb-1 w-max">
+                                    📄 سند خارجي: {awExtractExternalNo(r.notes || "")}
+                                  </span>
+                                )}
+                                <span className="block font-bold text-slate-300">{r.no}</span>
+                              </td>
+                              <td className="py-3 px-3 font-mono text-slate-400">{r.date}</td>
+                              <td className="py-3 px-3 font-black text-white">{r.from_name}</td>
+                              <td className="py-3 px-3 font-mono">
+                                <span className="block">{r.contract_no || "عام"}</span>
+                                <div className="flex flex-wrap gap-1.5 items-center mt-0.5">
+                                  <span className="text-[9px] text-amber-500 font-sans font-extrabold">{awExtractRegion(r.notes || "")}</span>
+                                  <span className="text-[9px] text-cyan-400 font-sans font-extrabold bg-cyan-950/45 px-1.5 py-0.5 rounded border border-cyan-850">🏦 {awExtractTreasury(r.notes || "") || "خزنة التحصيل"}</span>
+                                </div>
+                              </td>
+                              <td className="py-3 px-3 font-black text-emerald-400 font-mono">+{Number(r.amount || 0).toLocaleString()} ريال</td>
+                              <td className="py-3 px-3 font-black text-slate-300 font-mono">{Number(r.remaining_after || 0).toLocaleString()} ريال</td>
+                              <td className="py-3 px-3 text-slate-400 max-w-xs truncate">
+                                <b className="text-white text-[11px] block">{r.method}</b>
+                                {awCleanNotes(r.notes || "")}
+                              </td>
+                              <td className="py-3 px-3 text-center flex items-center justify-center gap-1">
+                                <button onClick={() => onPrintReceipt(r.id)} className="p-1 text-emerald-400 hover:text-white" title="طباعة سند القبض"><Printer className="w-3.5 h-3.5" /></button>
+                                <button onClick={() => { setEditReceiptId(r.id); handleAutoFillReceipt(r.contract_no || ""); setRFrom(r.from_name || ""); setRAmount(r.amount || ""); setRMethod(r.method || ""); setRDate(r.date || ""); setRProject(r.project || ""); setRNotes(awCleanNotes(r.notes || "")); setRTreasury(awExtractTreasury(r.notes || "") || "خزنة التحصيل"); setRExternalNo(awExtractExternalNo(r.notes || "")); setReceiptCompanyId(r.company_id || ""); document.getElementById("receipts-tab-view")?.scrollIntoView({ behavior: "smooth" }); }} className="p-1 text-blue-400 hover:text-white" title="تعديل"><Edit2 className="w-3.5 h-3.5" /></button>
+                                <button onClick={() => deleteReceiptLogic(r.id, r.installment_id)} className="p-1 text-rose-400 hover:text-rose-500" title="حذف"><Trash2 className="w-3.5 h-3.5" /></button>
+                              </td>
+                            </tr>
+                            {expandedReceipts[r.id] && (
+                              <tr className="bg-slate-950/40 border-b border-slate-800/80">
+                                <td colSpan={9} className="p-4">
+                                  <div className="bg-slate-900/40 rounded-2xl p-4 border border-slate-800/60 shadow-xl grid grid-cols-1 md:grid-cols-3 gap-4 text-right">
+                                    {/* Customer & ID info */}
+                                    <div className="space-y-1 bg-slate-950/45 p-3.5 rounded-xl border border-slate-800/80">
+                                      <h4 className="text-[11px] font-black text-amber-500 mb-2.5 flex items-center gap-1.5 border-b border-slate-800/60 pb-1.5">
+                                        <span>👤</span> معلومات العميل والمستند
+                                      </h4>
+                                      <div className="grid grid-cols-2 gap-y-2 gap-x-1 text-[11px] font-bold text-slate-400">
+                                        <div>الاسم الكامل:</div>
+                                        <div className="text-white text-left truncate">{r.from_name || "—"}</div>
+                                        <div>رقم الهوية/الإقامة:</div>
+                                        <div className="text-white text-left font-mono">{r.identity || "—"}</div>
+                                        <div>رقم الهاتف المحمول:</div>
+                                        <div className="text-white text-left font-mono">{r.phone || "—"}</div>
+                                        <div>الجنسية:</div>
+                                        <div className="text-white text-left">{r.nationality || "—"}</div>
+                                      </div>
+                                    </div>
+
+                                    {/* Financial & Balances */}
+                                    <div className="space-y-1 bg-slate-950/45 p-3.5 rounded-xl border border-slate-800/80">
+                                      <h4 className="text-[11px] font-black text-emerald-400 mb-2.5 flex items-center gap-1.5 border-b border-slate-800/60 pb-1.5">
+                                        <span>💰</span> التفاصيل المالية والشركاء
+                                      </h4>
+                                      <div className="grid grid-cols-2 gap-y-2 gap-x-1 text-[11px] font-bold text-slate-400">
+                                        <div>المبلغ المقبوض:</div>
+                                        <div className="text-emerald-400 text-left font-black font-mono">{Number(r.amount || 0).toLocaleString()} ريال</div>
+                                        <div>الرصيد ما قبل القبض:</div>
+                                        <div className="text-slate-200 text-left font-mono">{Number(r.remaining_before || 0).toLocaleString()} ريال</div>
+                                        <div>الرصيد المتبقي الكلي:</div>
+                                        <div className="text-slate-200 text-left font-mono">{Number(r.remaining_after || 0).toLocaleString()} ريال</div>
+                                        <div>الشركة / الفرع:</div>
+                                        <div className="text-white text-left truncate">{companies.find(c => c.id === r.company_id)?.name || "عام"}</div>
+                                      </div>
+                                    </div>
+
+                                    {/* Metadata & Administrative tags */}
+                                    <div className="space-y-1 bg-slate-950/45 p-3.5 rounded-xl border border-slate-800/80">
+                                      <h4 className="text-[11px] font-black text-cyan-400 mb-2.5 flex items-center gap-1.5 border-b border-slate-800/60 pb-1.5">
+                                        <span>📋</span> التصنيف والتدقيق المالي
+                                      </h4>
+                                      <div className="grid grid-cols-2 gap-y-2 gap-x-1 text-[11px] font-bold text-slate-400">
+                                        <div>المشروع التابع:</div>
+                                        <div className="text-white text-left truncate">{r.project || "—"}</div>
+                                        <div>طريقة القبض:</div>
+                                        <div className="text-white text-left">{r.method || "—"}</div>
+                                        <div>صندوق / خزنة الإيداع:</div>
+                                        <div className="text-cyan-400 text-left font-black">🏦 {awExtractTreasury(r.notes || "") || "خزنة التحصيل"}</div>
+                                        <div>تاريخ ووقت القيد الإجرائي:</div>
+                                        <div className="text-slate-400 text-left font-mono text-[9px]">{r.created_at ? new Date(r.created_at).toLocaleString("ar-EG") : "—"}</div>
+                                      </div>
+                                    </div>
+
+                                    {/* Full Notes & Statement */}
+                                    <div className="md:col-span-3 bg-slate-950/25 p-3 rounded-xl border border-slate-850 mt-1">
+                                      <span className="text-[10px] font-black text-slate-400 block mb-1">البيان وملاحظات السند الكاملة:</span>
+                                      <p className="text-slate-200 text-xs font-bold leading-relaxed whitespace-pre-wrap">{r.notes ? awCleanNotes(r.notes) : "لا توجد ملاحظات إضافية مسجلة."}</p>
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
                         ))}
                     </tbody>
                   </table>
@@ -3392,6 +3500,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                 <table className="w-full text-right text-xs">
                   <thead>
                     <tr className="bg-slate-950 border-b border-slate-800 text-slate-300">
+                      <th className="py-2.5 px-3 font-bold text-center w-10"></th>
                       <th className="py-2.5 px-3 font-bold">رقم السند</th>
                       <th className="py-2.5 px-3 font-bold">التاريخ</th>
                       <th className="py-2.5 px-3 font-bold">صرف إلى</th>
@@ -3403,31 +3512,113 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                   </thead>
                   <tbody>
                     {getVisiblePayments().map((p, idx) => (
-                      <tr key={idx} className="border-b border-slate-850 hover:bg-slate-800/10 transition-colors">
-                        <td className="py-3 px-3 font-mono font-bold text-slate-300">{p.no}</td>
-                        <td className="py-3 px-3 font-mono text-slate-400">{p.date}</td>
-                        <td className="py-3 px-3 font-black text-white">
-                          <span className="block">{p.to_name}</span>
-                          {p.worker_id && (
-                            <span className="inline-flex items-center gap-1 text-[10px] text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 mt-1">
-                              👷 {workers.find((w) => w.id === p.worker_id)?.name || "عامل مسجل"}
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-3 px-3 font-black text-rose-400 font-mono">-{p.amount.toLocaleString()} ريال</td>
-                        <td className="py-3 px-3 font-bold">
-                          <span className="block">{p.method}</span>
-                          <span className="block text-[10px] text-amber-400 font-extrabold mt-0.5 font-sans">🏦 {awExtractTreasury(p.notes || "") || "خزنة الشركة"}</span>
-                        </td>
-                        <td className="py-3 px-3 text-slate-400">
-                          <b className="text-white text-[11px] block">{p.project}</b>
-                          {awCleanNotes(p.notes || "")}
-                        </td>
-                        <td className="py-3 px-3 text-center space-x-1">
-                          <button onClick={() => { setEditPaymentId(p.id); setPayTo(p.to_name || ""); setPayAmount(p.amount || ""); setPayMethod(p.method || ""); setPayDate(p.date || ""); setPayProject(p.project || ""); setPayNotes(awCleanNotes(p.notes || "")); setPayTreasury(awExtractTreasury(p.notes || "") || "خزنة الشركة"); setPaymentCompanyId(p.company_id || ""); setPayWorkerId(p.worker_id || ""); setPayContractQuery(p.to_name || ""); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
-                          <button onClick={() => { triggerConfirm("حذف سند الصرف", "هل أنت متأكد من حذف هذا السند وتحديث حساب العمال المرتبط؟", () => deletePaymentLogic(p.id)); }} className="p-1 text-rose-400 hover:text-rose-500"><Trash2 className="w-3.5 h-3.5" /></button>
-                        </td>
-                      </tr>
+                      <React.Fragment key={p.id || idx}>
+                        <tr className={`border-b border-slate-850 hover:bg-slate-800/10 transition-colors ${expandedPayments[p.id] ? "bg-slate-900/20" : ""}`}>
+                          <td className="py-3 px-2 text-center">
+                            <button
+                              type="button"
+                              onClick={() => setExpandedPayments(prev => ({ ...prev, [p.id]: !prev[p.id] }))}
+                              className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
+                              title={expandedPayments[p.id] ? "طي التفاصيل" : "توسيع وعرض التفاصيل"}
+                            >
+                              {expandedPayments[p.id] ? (
+                                <ChevronUp className="w-4 h-4 text-amber-500" />
+                              ) : (
+                                <ChevronDown className="w-4 h-4 text-slate-400" />
+                              )}
+                            </button>
+                          </td>
+                          <td className="py-3 px-3 font-mono font-bold text-slate-300">{p.no}</td>
+                          <td className="py-3 px-3 font-mono text-slate-400">{p.date}</td>
+                          <td className="py-3 px-3 font-black text-white">
+                            <span className="block">{p.to_name}</span>
+                            {p.worker_id && (
+                              <span className="inline-flex items-center gap-1 text-[10px] text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 mt-1">
+                                👷 {workers.find((w) => w.id === p.worker_id)?.name || "عامل مسجل"}
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 px-3 font-black text-rose-400 font-mono">-{p.amount.toLocaleString()} ريال</td>
+                          <td className="py-3 px-3 font-bold">
+                            <span className="block">{p.method}</span>
+                            <span className="block text-[10px] text-amber-400 font-extrabold mt-0.5 font-sans">🏦 {awExtractTreasury(p.notes || "") || "خزنة الشركة"}</span>
+                          </td>
+                          <td className="py-3 px-3 text-slate-400">
+                            <b className="text-white text-[11px] block">{p.project}</b>
+                            {awCleanNotes(p.notes || "")}
+                          </td>
+                          <td className="py-3 px-3 text-center space-x-1">
+                            <button onClick={() => { setEditPaymentId(p.id); setPayTo(p.to_name || ""); setPayAmount(p.amount || ""); setPayMethod(p.method || ""); setPayDate(p.date || ""); setPayProject(p.project || ""); setPayNotes(awCleanNotes(p.notes || "")); setPayTreasury(awExtractTreasury(p.notes || "") || "خزنة الشركة"); setPaymentCompanyId(p.company_id || ""); setPayWorkerId(p.worker_id || ""); setPayContractQuery(p.to_name || ""); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
+                            <button onClick={() => { triggerConfirm("حذف سند الصرف", "هل أنت متأكد من حذف هذا السند وتحديث حساب العمال المرتبط؟ يتطلب هذا الإجراء كتابة مذكرة تسوية توضح سبب الحذف للرقابة المالية.", (reason) => deletePaymentLogic(p.id, reason), true, "اكتب هنا سبب حذف سند الصرف (مذكرة التسوية)..."); }} className="p-1 text-rose-400 hover:text-rose-500"><Trash2 className="w-3.5 h-3.5" /></button>
+                          </td>
+                        </tr>
+                        {expandedPayments[p.id] && (
+                          <tr className="bg-slate-950/40 border-b border-slate-800/80">
+                            <td colSpan={8} className="p-4">
+                              <div className="bg-slate-900/40 rounded-2xl p-4 border border-slate-800/60 shadow-xl grid grid-cols-1 md:grid-cols-3 gap-4 text-right">
+                                {/* Beneficiary Details */}
+                                <div className="space-y-1 bg-slate-950/45 p-3.5 rounded-xl border border-slate-800/80">
+                                  <h4 className="text-[11px] font-black text-amber-500 mb-2.5 flex items-center gap-1.5 border-b border-slate-800/60 pb-1.5">
+                                    <span>👤</span> مستلم السند والمستفيد
+                                  </h4>
+                                  <div className="grid grid-cols-2 gap-y-2 gap-x-1 text-[11px] font-bold text-slate-400">
+                                    <div>صرف إلى:</div>
+                                    <div className="text-white text-left truncate">{p.to_name || "—"}</div>
+                                    <div>عامل مسجل لدينا:</div>
+                                    <div className="text-white text-left font-black">
+                                      {p.worker_id ? "نعم (عامل الشركة)" : "لا"}
+                                    </div>
+                                    {p.worker_id && (
+                                      <>
+                                        <div>الاسم الكامل:</div>
+                                        <div className="text-white text-left truncate">{workers.find(w => w.id === p.worker_id)?.name || "—"}</div>
+                                        <div>الراتب اليومي:</div>
+                                        <div className="text-amber-400 text-left font-mono">{workers.find(w => w.id === p.worker_id)?.daily || "—"} ريال</div>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Financial details */}
+                                <div className="space-y-1 bg-slate-950/45 p-3.5 rounded-xl border border-slate-800/80">
+                                  <h4 className="text-[11px] font-black text-rose-400 mb-2.5 flex items-center gap-1.5 border-b border-slate-800/60 pb-1.5">
+                                    <span>💸</span> تفاصيل الصرف المالي
+                                  </h4>
+                                  <div className="grid grid-cols-2 gap-y-2 gap-x-1 text-[11px] font-bold text-slate-400">
+                                    <div>قيمة المصروف:</div>
+                                    <div className="text-rose-400 text-left font-black font-mono">-{Number(p.amount || 0).toLocaleString()} ريال</div>
+                                    <div>طريقة الصرف المالي:</div>
+                                    <div className="text-white text-left">{p.method || "—"}</div>
+                                    <div>الصندوق / الخزنة الممولة:</div>
+                                    <div className="text-amber-400 text-left font-black">🏦 {awExtractTreasury(p.notes || "") || "خزنة الشركة"}</div>
+                                  </div>
+                                </div>
+
+                                {/* Meta / Auditing info */}
+                                <div className="space-y-1 bg-slate-950/45 p-3.5 rounded-xl border border-slate-800/80">
+                                  <h4 className="text-[11px] font-black text-cyan-400 mb-2.5 flex items-center gap-1.5 border-b border-slate-800/60 pb-1.5">
+                                    <span>📋</span> الجهة والمشروع والرقابة
+                                  </h4>
+                                  <div className="grid grid-cols-2 gap-y-2 gap-x-1 text-[11px] font-bold text-slate-400">
+                                    <div>المشروع التابع:</div>
+                                    <div className="text-white text-left truncate">{p.project || "—"}</div>
+                                    <div>الشركة المصدرة:</div>
+                                    <div className="text-white text-left truncate">{companies.find(c => c.id === p.company_id)?.name || "عام"}</div>
+                                    <div>تاريخ ووقت قيد المعاملة:</div>
+                                    <div className="text-slate-400 text-left font-mono text-[9px]">{p.created_at ? new Date(p.created_at).toLocaleString("ar-EG") : "—"}</div>
+                                  </div>
+                                </div>
+
+                                {/* Statement / Notes */}
+                                <div className="md:col-span-3 bg-slate-950/25 p-3 rounded-xl border border-slate-850 mt-1">
+                                  <span className="text-[10px] font-black text-slate-400 block mb-1">البيان والسبب التفصيلي المقيّد:</span>
+                                  <p className="text-slate-200 text-xs font-bold leading-relaxed whitespace-pre-wrap">{p.notes ? awCleanNotes(p.notes) : "لا توجد تفاصيل إضافية مسجلة."}</p>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     ))}
                   </tbody>
                 </table>
@@ -3512,6 +3703,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                 <table className="w-full text-right text-xs">
                   <thead>
                     <tr className="bg-slate-950 border-b border-slate-800 text-slate-300">
+                      <th className="py-2.5 px-3 font-bold text-center w-10"></th>
                       <th className="py-2.5 px-3 font-bold">رقم المصروف</th>
                       <th className="py-2.5 px-3 font-bold">التاريخ</th>
                       <th className="py-2.5 px-3 font-bold">اسم المصروف وفئته</th>
@@ -3523,27 +3715,99 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                   </thead>
                   <tbody>
                     {getVisibleExpenses().map((e, idx) => (
-                      <tr key={idx} className="border-b border-slate-850 hover:bg-slate-800/10 transition-colors">
-                        <td className="py-3 px-3 font-mono font-bold text-slate-300">{e.no}</td>
-                        <td className="py-3 px-3 font-mono text-slate-400">{e.date}</td>
-                        <td className="py-3 px-3">
-                          <span className="block font-black text-white">{e.name}</span>
-                          <span className="block text-[10px] text-amber-500 mt-0.5 font-bold">فئة: {e.category}</span>
-                        </td>
-                        <td className="py-3 px-3 font-black text-rose-400 font-mono">-{e.amount.toLocaleString()} ريال</td>
-                        <td className="py-3 px-3">
-                          <span className="block font-bold text-slate-200">{e.supplier || "مورد كلي"}</span>
-                          <span className="block text-[10px] text-slate-400 font-bold mt-0.5">{e.project}</span>
-                        </td>
-                        <td className="py-3 px-3">
-                          <span className="block text-slate-400 max-w-xs truncate">{awCleanNotes(e.notes || "")}</span>
-                          <span className="inline-block text-[9px] text-cyan-400 font-sans font-extrabold bg-cyan-950/45 px-1.5 py-0.5 rounded border border-cyan-850 mt-1">🏦 {awExtractTreasury(e.notes || "") || "خزنة الشركة"}</span>
-                        </td>
-                        <td className="py-3 px-3 text-center space-x-1">
-                          <button onClick={() => { setEditExpenseId(e.id); setEName(e.name || ""); setECategory(e.category || ""); setEAmount(e.amount || ""); setEDate(e.date || ""); setEProject(e.project || ""); setESupplier(e.supplier || ""); setENotes(awCleanNotes(e.notes || "")); setETreasury(awExtractTreasury(e.notes || "") || "خزنة الشركة"); setExpenseCompanyId(e.company_id || ""); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
-                          <button onClick={() => { if(confirm("تأكيد الحذف؟")) { sb.from("expenses").delete().eq("id", e.id).then(() => loadEverything()); } }} className="p-1 text-rose-400 hover:text-rose-500"><Trash2 className="w-3.5 h-3.5" /></button>
-                        </td>
-                      </tr>
+                      <React.Fragment key={e.id || idx}>
+                        <tr className={`border-b border-slate-850 hover:bg-slate-800/10 transition-colors ${expandedExpenses[e.id] ? "bg-slate-900/20" : ""}`}>
+                          <td className="py-3 px-2 text-center">
+                            <button
+                              type="button"
+                              onClick={() => setExpandedExpenses(prev => ({ ...prev, [e.id]: !prev[e.id] }))}
+                              className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
+                              title={expandedExpenses[e.id] ? "طي التفاصيل" : "توسيع وعرض التفاصيل"}
+                            >
+                              {expandedExpenses[e.id] ? (
+                                <ChevronUp className="w-4 h-4 text-amber-500" />
+                              ) : (
+                                <ChevronDown className="w-4 h-4 text-slate-400" />
+                              )}
+                            </button>
+                          </td>
+                          <td className="py-3 px-3 font-mono font-bold text-slate-300">{e.no}</td>
+                          <td className="py-3 px-3 font-mono text-slate-400">{e.date}</td>
+                          <td className="py-3 px-3">
+                            <span className="block font-black text-white">{e.name}</span>
+                            <span className="block text-[10px] text-amber-500 mt-0.5 font-bold">فئة: {e.category}</span>
+                          </td>
+                          <td className="py-3 px-3 font-black text-rose-400 font-mono">-{e.amount.toLocaleString()} ريال</td>
+                          <td className="py-3 px-3">
+                            <span className="block font-bold text-slate-200">{e.supplier || "مورد كلي"}</span>
+                            <span className="block text-[10px] text-slate-400 font-bold mt-0.5">{e.project}</span>
+                          </td>
+                          <td className="py-3 px-3">
+                            <span className="block text-slate-400 max-w-xs truncate">{awCleanNotes(e.notes || "")}</span>
+                            <span className="inline-block text-[9px] text-cyan-400 font-sans font-extrabold bg-cyan-950/45 px-1.5 py-0.5 rounded border border-cyan-850 mt-1">🏦 {awExtractTreasury(e.notes || "") || "خزنة الشركة"}</span>
+                          </td>
+                          <td className="py-3 px-3 text-center space-x-1">
+                            <button onClick={() => { setEditExpenseId(e.id); setEName(e.name || ""); setECategory(e.category || ""); setEAmount(e.amount || ""); setEDate(e.date || ""); setEProject(e.project || ""); setESupplier(e.supplier || ""); setENotes(awCleanNotes(e.notes || "")); setETreasury(awExtractTreasury(e.notes || "") || "خزنة الشركة"); setExpenseCompanyId(e.company_id || ""); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
+                            <button onClick={() => { if(confirm("تأكيد الحذف؟")) { sb.from("expenses").delete().eq("id", e.id).then(() => loadEverything()); } }} className="p-1 text-rose-400 hover:text-rose-500"><Trash2 className="w-3.5 h-3.5" /></button>
+                          </td>
+                        </tr>
+                        {expandedExpenses[e.id] && (
+                          <tr className="bg-slate-950/40 border-b border-slate-800/80">
+                            <td colSpan={8} className="p-4">
+                              <div className="bg-slate-900/40 rounded-2xl p-4 border border-slate-800/60 shadow-xl grid grid-cols-1 md:grid-cols-3 gap-4 text-right">
+                                {/* Name and category */}
+                                <div className="space-y-1 bg-slate-950/45 p-3.5 rounded-xl border border-slate-800/80">
+                                  <h4 className="text-[11px] font-black text-amber-500 mb-2.5 flex items-center gap-1.5 border-b border-slate-800/60 pb-1.5">
+                                    <span>🧾</span> تصنيف وبند المصروف
+                                  </h4>
+                                  <div className="grid grid-cols-2 gap-y-2 gap-x-1 text-[11px] font-bold text-slate-400">
+                                    <div>اسم المصروف:</div>
+                                    <div className="text-white text-left truncate">{e.name || "—"}</div>
+                                    <div>الفئة والتصنيف:</div>
+                                    <div className="text-amber-500 text-left font-black">{e.category || "—"}</div>
+                                    <div>المورد/المستفيد:</div>
+                                    <div className="text-white text-left truncate">{e.supplier || "—"}</div>
+                                  </div>
+                                </div>
+
+                                {/* Cost info */}
+                                <div className="space-y-1 bg-slate-950/45 p-3.5 rounded-xl border border-slate-800/80">
+                                  <h4 className="text-[11px] font-black text-rose-400 mb-2.5 flex items-center gap-1.5 border-b border-slate-800/60 pb-1.5">
+                                    <span>💸</span> تفاصيل التكلفة والصندوق
+                                  </h4>
+                                  <div className="grid grid-cols-2 gap-y-2 gap-x-1 text-[11px] font-bold text-slate-400">
+                                    <div>المبلغ المصروف:</div>
+                                    <div className="text-rose-400 text-left font-black font-mono">-{Number(e.amount || 0).toLocaleString()} ريال</div>
+                                    <div>الخزنة الممولة:</div>
+                                    <div className="text-cyan-400 text-left font-black">🏦 {awExtractTreasury(e.notes || "") || "خزنة الشركة"}</div>
+                                  </div>
+                                </div>
+
+                                {/* Projects / Admin info */}
+                                <div className="space-y-1 bg-slate-950/45 p-3.5 rounded-xl border border-slate-800/80">
+                                  <h4 className="text-[11px] font-black text-cyan-400 mb-2.5 flex items-center gap-1.5 border-b border-slate-800/60 pb-1.5">
+                                    <span>🏢</span> المشروع الإداري والفرع
+                                  </h4>
+                                  <div className="grid grid-cols-2 gap-y-2 gap-x-1 text-[11px] font-bold text-slate-400">
+                                    <div>المشروع التابع:</div>
+                                    <div className="text-white text-left truncate">{e.project || "—"}</div>
+                                    <div>الشركة التابعة:</div>
+                                    <div className="text-white text-left truncate">{companies.find(c => c.id === e.company_id)?.name || "عام"}</div>
+                                    <div>تاريخ قيد السند:</div>
+                                    <div className="text-slate-400 text-left font-mono text-[9px]">{e.created_at ? new Date(e.created_at).toLocaleString("ar-EG") : "—"}</div>
+                                  </div>
+                                </div>
+
+                                {/* Notes */}
+                                <div className="md:col-span-3 bg-slate-950/25 p-3 rounded-xl border border-slate-850 mt-1">
+                                  <span className="text-[10px] font-black text-slate-400 block mb-1">الملاحظات والبيان التفصيلي بالكامل:</span>
+                                  <p className="text-slate-200 text-xs font-bold leading-relaxed whitespace-pre-wrap">{e.notes ? awCleanNotes(e.notes) : "لا توجد ملاحظات إضافية مسجلة."}</p>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     ))}
                   </tbody>
                 </table>
@@ -3664,6 +3928,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                     <option value="إجازة">إجازة</option>
                     <option value="موقوف">موقوف</option>
                   </select>
+                  <input placeholder="المستلم من سند الصرف (إذا اختلف عن العامل)" value={wRecipientName} onChange={(e) => setWRecipientName(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none" />
                   {currentUser?.role === "admin" && companies.length > 0 && (
                     <select
                       value={workerCompanyId}
@@ -3680,7 +3945,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                 </div>
                 <div className="flex gap-2 justify-end">
                   {editWorkerId && (
-                    <button type="button" onClick={() => { setEditWorkerId(null); setWName(""); setWId(""); setWPhone(""); setWProject(""); setWDaily(""); setWDays(""); setWAdvance(0); setWNotes(""); setWorkerCompanyId(""); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
+                    <button type="button" onClick={() => { setEditWorkerId(null); setWName(""); setWId(""); setWPhone(""); setWProject(""); setWDaily(""); setWDays(""); setWAdvance(0); setWRecipientName(""); setWNotes(""); setWorkerCompanyId(""); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
                   )}
                   <button type="submit" className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-black">{editWorkerId ? "تعديل القيّد" : "قيد العامل بالمقاولات"}</button>
                 </div>
@@ -3695,6 +3960,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                       <th className="py-2.5 px-3 font-bold text-center">أيام العمل الجارية</th>
                       <th className="py-2.5 px-3 font-bold">إجمالي المستحق اليومي</th>
                       <th className="py-2.5 px-3 font-bold">سلفة مسحوبة</th>
+                      <th className="py-2.5 px-3 font-bold">المستلم في السند</th>
                       <th className="py-2.5 px-3 font-bold">الصافي المعلق</th>
                       <th className="py-2.5 px-3 font-bold">الوضعية</th>
                       <th className="py-2.5 px-3 font-bold text-center">إجراء</th>
@@ -3711,13 +3977,16 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                         <td className="py-3 px-3 font-mono font-bold text-center text-white">{w.days} يومًا</td>
                         <td className="py-3 px-3 font-mono text-slate-200">{(w.daily * w.days).toLocaleString()} ريال</td>
                         <td className="py-3 px-3 font-black text-rose-400 font-mono">-{Number(w.advance || 0).toLocaleString()} ريال</td>
+                        <td className="py-3 px-3 font-bold text-slate-300">
+                          {w.recipient_name || <span className="text-slate-500 text-[10px] italic">العامل نفسه</span>}
+                        </td>
                         <td className="py-3 px-3 font-black text-emerald-400 font-mono">{(w.total - w.advance).toLocaleString()} ريال</td>
                         <td className="py-3 px-3">
                           <span className={`inline-block px-2.5 py-0.5 rounded text-[10px] font-black ${w.status === "على رأس العمل" ? "bg-emerald-500/10 text-emerald-400" : "bg-slate-850 text-slate-400"}`}>{w.status}</span>
                         </td>
                         <td className="py-3 px-3 text-center space-x-1">
                           <button onClick={() => initHrWorker(w)} className="p-1 text-amber-400 hover:text-amber-300 hover:scale-110 duration-200 inline-block" title="الشؤون والملف الوظيفي"><Users className="w-3.5 h-3.5" /></button>
-                          <button onClick={() => { setEditWorkerId(w.id); setWName(w.name || ""); setWId(w.worker_id || ""); setWPhone(w.phone || ""); setWJob(w.job || "عامل"); setWProject(w.project || ""); setWDaily(w.daily || ""); setWDays(w.days || ""); setWAdvance(w.advance !== undefined && w.advance !== null ? w.advance : 0); setWStatus(w.status || "على رأس العمل"); setWNotes(w.notes || ""); setWorkerCompanyId(w.company_id || ""); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => { setEditWorkerId(w.id); setWName(w.name || ""); setWId(w.worker_id || ""); setWPhone(w.phone || ""); setWJob(w.job || "عامل"); setWProject(w.project || ""); setWDaily(w.daily || ""); setWDays(w.days || ""); setWAdvance(w.advance !== undefined && w.advance !== null ? w.advance : 0); setWStatus(w.status || "على رأس العمل"); setWRecipientName(w.recipient_name || ""); setWNotes(w.notes || ""); setWorkerCompanyId(w.company_id || ""); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
                           <button onClick={() => { if(confirm("مسح العامل من قوائم الحساب؟")) { sb.from("workers").delete().eq("id", w.id).then(() => loadEverything()); } }} className="p-1 text-rose-400 hover:text-rose-500"><Trash2 className="w-3.5 h-3.5" /></button>
                         </td>
                       </tr>
@@ -5762,23 +6031,47 @@ CREATE TABLE IF NOT EXISTS sessions (
                 <p className="text-xs text-slate-300 mt-2 leading-relaxed">
                   {confirmDialog.message}
                 </p>
+
+                {confirmDialog.requireReason && (
+                  <div className="space-y-1.5 text-right mt-4">
+                    <label className="text-[10px] font-black text-slate-400 block">
+                      مذكرة تسوية (سبب الحذف الإجباري للرقابة المالية)
+                    </label>
+                    <textarea
+                      required
+                      value={confirmReason}
+                      onChange={(e) => setConfirmReason(e.target.value)}
+                      placeholder={confirmDialog.reasonPlaceholder || "يرجى كتابة سبب الحذف بالتفصيل..."}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-rose-500 min-h-[85px] resize-none"
+                    />
+                  </div>
+                )}
               </div>
               
               <div className="flex gap-2 justify-end">
                 <button 
                   type="button"
-                  onClick={() => setConfirmDialog(null)}
+                  onClick={() => {
+                    setConfirmDialog(null);
+                    setConfirmReason("");
+                  }}
                   className="px-4 py-2 bg-slate-800 hover:bg-slate-750 text-xs font-bold rounded-xl transition-colors border border-slate-750 text-white"
                 >
                   تراجع
                 </button>
                 <button 
                   type="button"
+                  disabled={confirmDialog.requireReason && !confirmReason.trim()}
                   onClick={() => {
-                    confirmDialog.onConfirm();
+                    confirmDialog.onConfirm(confirmReason.trim());
                     setConfirmDialog(null);
+                    setConfirmReason("");
                   }}
-                  className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-xs font-black rounded-xl text-white transition-colors"
+                  className={`px-4 py-2 text-xs font-black rounded-xl text-white transition-colors ${
+                    confirmDialog.requireReason && !confirmReason.trim()
+                      ? "bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700"
+                      : "bg-rose-600 hover:bg-rose-500"
+                  }`}
                 >
                   تأكيد العملية
                 </button>
