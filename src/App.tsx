@@ -17,7 +17,7 @@ import {
   awExtractCapitalSource, awExtractCapitalCompany, awExtractCapitalCollection,
   awExtractWorkerContract, awExtractWorkerLeaves, awBuildWorkerNotes, awCleanWorkerNotes,
   getSupabaseCredentials, saveSupabaseCredentials, checkSupabaseHealth, isSupabaseHealthy,
-  awExtractExternalNo, awBuildNotesWithRegionAndTreasuryAndExternalNo, awExtractClassification, awExtractCycle
+  awExtractExternalNo, awBuildNotesWithRegionAndTreasuryAndExternalNo, awExtractClassification, awExtractCycle, awExtractReceiptType
 } from "./db";
 
 import { Toast, ToastItem, ToastType } from "./components/Shared/Toast";
@@ -153,6 +153,7 @@ export default function App() {
   const [rTreasury, setRTreasury] = useState("خزنة التحصيل");
   const [rExternalNo, setRExternalNo] = useState("");
   const [receiptCompanyId, setReceiptCompanyId] = useState("");
+  const [rType, setRType] = useState<"وارد" | "صادر">("وارد");
   const [paymentCompanyId, setPaymentCompanyId] = useState("");
   const [payWorkerId, setPayWorkerId] = useState("");
   const [expenseCompanyId, setExpenseCompanyId] = useState("");
@@ -872,7 +873,11 @@ export default function App() {
     const linked = installments.find((x) => x.id === installmentId);
     if (!linked) return;
 
-    const paidFromReceipts = (rows || []).reduce((sum, x) => sum + Number(x.amount || 0), 0);
+    const paidFromReceipts = (rows || []).reduce((sum, x) => {
+      const isOutgoing = awExtractReceiptType(x.notes || "") === "صادر";
+      const amt = Number(x.amount || 0);
+      return sum + (isOutgoing ? -amt : amt);
+    }, 0);
     const newRemaining = Math.max(0, Number(linked.amount || 0) - paidFromReceipts);
     const newStatus = newRemaining <= 0 ? "مكتمل" : "منتظم";
 
@@ -919,7 +924,8 @@ export default function App() {
 
       if (correctInstallment) {
         const beforeAmt = Number(correctInstallment.remaining || 0);
-        const afterAmt = Math.max(0, beforeAmt - Number(r.amount || 0));
+        const isOutgoing = awExtractReceiptType(r.notes || "") === "صادر";
+        const afterAmt = Math.max(0, beforeAmt + (isOutgoing ? Number(r.amount || 0) : -Number(r.amount || 0)));
         
         const updatedRow = {
           installment_id: correctInstallment.id,
@@ -1154,7 +1160,7 @@ td{border:1px solid #d8dee9;padding:8px;text-align:center;font-weight:600}
     <div class="box"><b>رقم السجل / الهوية</b><span>${x.identity}</span></div>
     <div class="box"><b>رقم الجوال الاتصالي</b><span>${x.phone}</span></div>
     <div class="box"><b>جنسية السجل</b><span>${x.nationality || "سعودي"}</span></div>
-    <div class="box"><b>تصنيف الحساب المالي</b><span style="color:${classificationVal === "دائن" ? "#10b981" : "#8b5cf6"}">${classificationTxt}</span></div>
+    <div class="box"><b>تصنيف الحساب المالي</b><span style="color:${classificationVal === "دائن" ? "#ef4444" : "#10b981"}">${classificationTxt}</span></div>
     <div class="box"><b>المشروع المرفق</b><span>${x.project || "عام"}</span></div>
     <div class="box"><b>مقر ووظيفة العمل</b><span>${x.workplace || "غير محدد"}</span></div>
     <div class="box"><b>تاريخ العقد وإيجاده</b><span>${x.start_date}</span></div>
@@ -1352,10 +1358,10 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
 
     const amt = Number(rAmount || 0);
     const beforeAmt = linked ? Number(linked.remaining || 0) : 0;
-    const afterAmt = linked ? Math.max(0, beforeAmt - amt) : 0;
+    const afterAmt = linked ? Math.max(0, beforeAmt + (rType === "صادر" ? amt : -amt)) : 0;
 
     const rRegion = linked ? (awExtractRegion(linked.notes || "") || userRegionFilter) : userRegionFilter;
-    const notesAppended = awBuildNotesWithRegionAndTreasuryAndExternalNo(rNotes, rRegion, rTreasury, rExternalNo);
+    const notesAppended = awBuildNotesWithRegionAndTreasuryAndExternalNo(rNotes, rRegion, rTreasury, rExternalNo, rType);
 
     const row: any = {
       from_name: rFrom,
@@ -1406,6 +1412,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       setRTreasury("خزنة التحصيل");
       setRExternalNo("");
       setReceiptCompanyId("");
+      setRType("وارد");
       await loadEverything();
       showToast("تم حفظ السند وتحديث العقد التابع بنجاح!");
     } catch (err: any) {
@@ -1779,25 +1786,29 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
     }
   };
 
-  const onDeleteCompany = async (id: string, name: string) => {
-    if (!window.confirm(`هل أنت متأكد من حذف الشركة "${name}" بالكامل؟ سيتم فك ارتباط أي مستندات تابعة.`)) return;
+  const onDeleteCompany = (id: string, name: string) => {
+    triggerConfirm(
+      "حذف الشركة",
+      `هل أنت متأكد من حذف الشركة "${name}" بالكامل؟ سيتم فك ارتباط أي مستندات تابعة.`,
+      async () => {
+        setIsLoading(true);
+        try {
+          const { error } = await sb.from("companies").delete().eq("id", id);
+          if (error) {
+            showToast(error.message, "error");
+            return;
+          }
 
-    setIsLoading(true);
-    try {
-      const { error } = await sb.from("companies").delete().eq("id", id);
-      if (error) {
-        showToast(error.message, "error");
-        return;
+          await logSession(currentUser!, `حذف ملف الشركة: ${name}`);
+          await loadEverything();
+          showToast("تم إزالة الشركة بنجاح.");
+        } catch {
+          showToast("تعذر استكمال بروتوكول الحذف", "error");
+        } finally {
+          setIsLoading(false);
+        }
       }
-
-      await logSession(currentUser!, `حذف ملف الشركة: ${name}`);
-      await loadEverything();
-      showToast("تم إزالة الشركة بنجاح.");
-    } catch {
-      showToast("تعذر استكمال بروتوكول الحذف", "error");
-    } finally {
-      setIsLoading(false);
-    }
+    );
   };
 
   const saveExtractLogic = async (e: React.FormEvent) => {
@@ -1846,25 +1857,29 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
     }
   };
 
-  const onDeleteExtract = async (id: string, title: string) => {
-    if (!window.confirm(`هل أنت متأكد من حذف المستخلص "${title}"؟`)) return;
+  const onDeleteExtract = (id: string, title: string) => {
+    triggerConfirm(
+      "حذف المستخلص",
+      `هل أنت متأكد من حذف المستخلص "${title}"؟`,
+      async () => {
+        setIsLoading(true);
+        try {
+          const { error } = await sb.from("extracts").delete().eq("id", id);
+          if (error) {
+            showToast(error.message, "error");
+            return;
+          }
 
-    setIsLoading(true);
-    try {
-      const { error } = await sb.from("extracts").delete().eq("id", id);
-      if (error) {
-        showToast(error.message, "error");
-        return;
+          await logSession(currentUser!, `حذف مستخلص رقم: ${title}`);
+          await loadEverything();
+          showToast("تم إزالة المستخلص المالي.");
+        } catch {
+          showToast("فشل إتمام عملية حذف المستخلص", "error");
+        } finally {
+          setIsLoading(false);
+        }
       }
-
-      await logSession(currentUser!, `حذف مستخلص رقم: ${title}`);
-      await loadEverything();
-      showToast("تم إزالة المستخلص المالي.");
-    } catch {
-      showToast("فشل إتمام عملية حذف المستخلص", "error");
-    } finally {
-      setIsLoading(false);
-    }
+    );
   };
 
   // HR & Worker Profile Operations
@@ -2966,7 +2981,9 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
             <div className="space-y-6" id="receipts-tab-view">
               <form onSubmit={saveReceiptLogic} className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl space-y-5">
                 <div className="border-b border-slate-850 pb-3">
-                  <h3 className="text-base font-black text-white flex items-center gap-2"><span>💰</span> تحرير سند قبض مالي وارد</h3>
+                  <h3 className="text-base font-black text-white flex items-center gap-2">
+                    <span>💰</span> تحرير سند قبض مالي ({rType === "صادر" ? "صادر/مسترد" : "وارد"})
+                  </h3>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div className="space-y-1 sm:col-span-2">
@@ -2987,17 +3004,33 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400">استلمنا من</label>
+                    <label className="text-[10px] font-black text-slate-400">استلمنا من / الجهة</label>
                     <input required placeholder="اسم الدافع العميل" value={rFrom} onChange={(e) => setRFrom(e.target.value)} className="w-full px-3 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none" />
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400">حجم المبلغ المستلم</label>
+                    <label className="text-[10px] font-black text-slate-400">حجم المبلغ</label>
                     <input type="number" required placeholder="قيمة السند" value={rAmount} onChange={(e) => setRAmount(e.target.value ? Number(e.target.value) : "")} className="w-full px-3 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none" />
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400">طريقة الاستلام</label>
+                    <label className="text-[10px] font-black text-slate-400">حركة السند</label>
+                    <select
+                      value={rType}
+                      onChange={(e) => setRType(e.target.value as "وارد" | "صادر")}
+                      className={`w-full px-3 py-2.5 bg-slate-950/40 border rounded-xl text-xs font-bold focus:outline-none transition-colors ${
+                        rType === "صادر"
+                          ? "border-rose-500 text-rose-400 focus:border-rose-500"
+                          : "border-emerald-500 text-emerald-400 focus:border-emerald-500"
+                      }`}
+                    >
+                      <option value="وارد" className="bg-slate-950 text-emerald-400 font-bold">وارد (قبض مالي من العميل)</option>
+                      <option value="صادر" className="bg-slate-950 text-rose-400 font-bold">صادر (استرجاع مالي للعميل)</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-400">طريقة الحركة</label>
                     <select value={rMethod} onChange={(e) => setRMethod(e.target.value)} className="w-full px-3 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none">
                       <option value="مدى">مدى</option>
                       <option value="تحويل بنكي">تحويل بنكي</option>
@@ -3006,7 +3039,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400">تاريخ القبض ماليًا</label>
+                    <label className="text-[10px] font-black text-slate-400">تاريخ السند ماليًا</label>
                     <input type="date" value={rDate} onChange={(e) => setRDate(e.target.value)} className="w-full px-3 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none" />
                   </div>
 
@@ -3104,7 +3137,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
 
                 <div className="flex gap-2 justify-end">
                   {editReceiptId && (
-                    <button type="button" onClick={() => { setEditReceiptId(null); setRContractQuery(""); setRSelectedInstallment(null); setRFrom(""); setRAmount(""); setRProject(""); setRNotes(""); setRTreasury("خزنة التحصيل"); setRExternalNo(""); setReceiptCompanyId(""); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
+                    <button type="button" onClick={() => { setEditReceiptId(null); setRContractQuery(""); setRSelectedInstallment(null); setRFrom(""); setRAmount(""); setRProject(""); setRNotes(""); setRTreasury("خزنة التحصيل"); setRExternalNo(""); setReceiptCompanyId(""); setRType("وارد"); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
                   )}
                   <button type="submit" className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black">{editReceiptId ? "استبدال السند" : "حفظ وقيد سند القبض ماليًا"}</button>
                 </div>

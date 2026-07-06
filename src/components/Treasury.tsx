@@ -111,6 +111,9 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
     setNewTreasuryName("");
     // Dispatch to keep Installments synced
     window.dispatchEvent(new Event("storage"));
+    if (onUpdate) {
+      onUpdate();
+    }
   };
 
   const updateNotesTreasury = (notes: string | undefined, oldT: string, newT: string, defaultT: string): string => {
@@ -234,6 +237,9 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
         setActiveTab(updated[0] || "خزنة الشركة");
       }
       window.dispatchEvent(new Event("storage"));
+      if (onUpdate) {
+        onUpdate();
+      }
     }
   };
 

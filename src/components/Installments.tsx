@@ -1126,8 +1126,8 @@ export const Installments: React.FC<InstallmentsProps> = ({
                           </span>
                           <span className={`text-[9px] px-1.5 py-0.5 rounded font-black font-sans ${
                             awExtractClassification(item.notes || "") === "دائن"
-                              ? "bg-emerald-500/10 border border-emerald-500/20 text-emerald-400"
-                              : "bg-purple-500/10 border border-purple-500/20 text-purple-400"
+                              ? "bg-rose-500/10 border border-rose-500/20 text-rose-400"
+                              : "bg-emerald-500/10 border border-emerald-500/20 text-emerald-400"
                           }`}>
                             {awExtractClassification(item.notes || "")}
                           </span>
@@ -1156,9 +1156,17 @@ export const Installments: React.FC<InstallmentsProps> = ({
                           <span className="text-slate-500 font-bold">0</span>
                         )}
                       </td>
-                      <td className="py-3.5 px-4 font-bold text-white font-mono">{Number(item.amount || 0).toLocaleString()}</td>
+                      <td className={`py-3.5 px-4 font-bold font-mono ${
+                        awExtractClassification(item.notes || "") === "دائن"
+                          ? "text-rose-400"
+                          : "text-emerald-400"
+                      }`}>{Number(item.amount || 0).toLocaleString()}</td>
                       <td className="py-3.5 px-4 font-bold text-emerald-400 font-mono">{Number(item.paid || 0).toLocaleString()}</td>
-                      <td className="py-3.5 px-4 font-bold text-slate-300 font-mono">{Number(item.remaining || 0).toLocaleString()}</td>
+                      <td className={`py-3.5 px-4 font-bold font-mono ${
+                        awExtractClassification(item.notes || "") === "دائن"
+                          ? "text-rose-400"
+                          : "text-emerald-400"
+                      }`}>{Number(item.remaining || 0).toLocaleString()}</td>
                       <td className="py-3.5 px-4">
                         <span
                           className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${
@@ -1265,8 +1273,8 @@ export const Installments: React.FC<InstallmentsProps> = ({
                   <span className="block text-[10px] font-bold text-slate-400 mb-1">تصنيف الحساب</span>
                   <span className={`font-black text-xs ${
                     awExtractClassification(selectedFileContract.notes || "") === "دائن"
-                      ? "text-emerald-400"
-                      : "text-purple-400"
+                      ? "text-rose-400"
+                      : "text-emerald-400"
                   }`}>
                     {awExtractClassification(selectedFileContract.notes || "")} ({
                       awExtractClassification(selectedFileContract.notes || "") === "دائن"
@@ -1277,7 +1285,11 @@ export const Installments: React.FC<InstallmentsProps> = ({
                 </div>
                 <div className="bg-slate-950/30 p-3.5 rounded-2xl border border-slate-850">
                   <span className="block text-[10px] font-bold text-slate-400 mb-1">مبلغ العقد الكلي</span>
-                  <span className="font-mono text-white font-black text-sm">{Number(selectedFileContract.amount).toLocaleString()} ريال</span>
+                  <span className={`font-mono font-black text-sm ${
+                    awExtractClassification(selectedFileContract.notes || "") === "دائن"
+                      ? "text-rose-400"
+                      : "text-emerald-400"
+                  }`}>{Number(selectedFileContract.amount).toLocaleString()} ريال</span>
                 </div>
                 <div className="bg-slate-950/30 p-3.5 rounded-2xl border border-slate-850">
                   <span className="block text-[10px] font-bold text-slate-400 mb-1">المدفوع مقدماً</span>
@@ -1316,7 +1328,11 @@ export const Installments: React.FC<InstallmentsProps> = ({
                 </div>
                 <div className="bg-slate-950/30 p-3.5 rounded-2xl border border-slate-850">
                   <span className="block text-[10px] font-bold text-slate-400 mb-1">المتبقي الكلي</span>
-                  <span className="font-mono text-rose-400 font-extrabold text-sm">{Number(selectedFileContract.remaining).toLocaleString()} ريال</span>
+                  <span className={`font-mono font-extrabold text-sm ${
+                    awExtractClassification(selectedFileContract.notes || "") === "دائن"
+                      ? "text-rose-400"
+                      : "text-emerald-400"
+                  }`}>{Number(selectedFileContract.remaining).toLocaleString()} ريال</span>
                 </div>
                 <div className="bg-slate-950/30 p-3.5 rounded-2xl border border-slate-850">
                   <span className="block text-[10px] font-bold text-slate-400 mb-1">

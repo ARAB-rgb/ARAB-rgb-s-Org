@@ -526,6 +526,16 @@ export function awExtractExternalNo(notes: string): string {
   return "";
 }
 
+export function awExtractReceiptType(notes: string): "وارد" | "صادر" {
+  const text = String(notes || "");
+  const m1 = text.match(/\[نوع_السند:\s*([^\]]+)\]/);
+  if (m1) {
+    const val = m1[1].trim();
+    if (val === "صادر" || val === "وارد") return val;
+  }
+  return "وارد";
+}
+
 export function awExtractCapital(notes: string): number {
   const text = String(notes || "");
   const m1 = text.match(/\[رأس_المال:\s*(\d+(\.\d+)?)\]/);
@@ -643,12 +653,13 @@ export function awBuildNotesWithRegionAndTreasury(notes: string, region: string,
   return extraArr.join(" ") + (clean ? "\n" : "") + clean;
 }
 
-export function awBuildNotesWithRegionAndTreasuryAndExternalNo(notes: string, region: string, treasury: string, externalNo: string): string {
+export function awBuildNotesWithRegionAndTreasuryAndExternalNo(notes: string, region: string, treasury: string, externalNo: string, type?: string): string {
   const clean = awCleanNotes(notes);
   let extraArr = [];
   if (region) extraArr.push(`[الإدارة: ${region}]`);
   if (treasury) extraArr.push(`[الخزنة: ${treasury}]`);
   if (externalNo && externalNo.trim()) extraArr.push(`[السند_الخارجي: ${externalNo.trim()}]`);
+  if (type) extraArr.push(`[نوع_السند: ${type}]`);
   
   if (extraArr.length === 0) return clean;
   return extraArr.join(" ") + (clean ? "\n" : "") + clean;
