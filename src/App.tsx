@@ -177,6 +177,8 @@ export default function App() {
 
   // Search/Sort filters for receipts
   const [rSearch, setRSearch] = useState("");
+  const [pSearch, setPSearch] = useState("");
+  const [wSearch, setWSearch] = useState("");
   const [rSort, setRSort] = useState("date_desc");
   const [rFromDate, setRFromDate] = useState("");
   const [rToDate, setRToDate] = useState("");
@@ -3856,46 +3858,73 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                 </div>
               </form>
 
-              <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl overflow-x-auto">
-                <table className="w-full text-right text-xs">
-                  <thead>
-                    <tr className="bg-slate-950 border-b border-slate-800 text-slate-300">
-                      <th className="py-2.5 px-3 font-bold">اسم المشروع والموقع</th>
-                      <th className="py-2.5 px-3 font-bold">المهندس المشرف</th>
-                      <th className="py-2.5 px-3 font-bold">الميزانية</th>
-                      <th className="py-2.5 px-3 font-bold">Progress</th>
-                      <th className="py-2.5 px-3 font-bold">الحالة</th>
-                      <th className="py-2.5 px-3 font-bold text-center">إجراء</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {getVisibleProjects().map((p, idx) => (
-                      <tr key={idx} className="border-b border-slate-850 hover:bg-slate-800/10 transition-colors">
-                        <td className="py-3 px-3">
-                          <span className="block font-black text-white">{p.name}</span>
-                          <span className="block text-[10px] text-slate-400 mt-0.5 flex items-center gap-1"><MapPin className="w-3 h-3 text-amber-500" /> {p.location || "غير محدد"}</span>
-                        </td>
-                        <td className="py-3 px-3 font-bold text-slate-200">{p.engineer || "بإشراف فرقا المقاول"}</td>
-                        <td className="py-3 px-3 font-mono text-white font-extrabold">{Number(p.budget || 0).toLocaleString()} ريال</td>
-                        <td className="py-3 px-3">
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono text-[11px] font-bold text-amber-400">{p.progress}%</span>
-                            <div className="w-20 h-1.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
-                              <div className="bg-amber-500 h-full" style={{ width: `${p.progress}%` }} />
-                            </div>
-                          </div>
-                        </td>
-                        <td className="py-3 px-3">
-                          <span className={`inline-block px-2.5 py-0.5 rounded text-[10px] font-black ${p.status === "نشط" ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"}`}>{p.status}</span>
-                        </td>
-                        <td className="py-3 px-3 text-center space-x-1">
-                          <button onClick={() => { setEditProjectId(p.id); setPName(p.name || ""); setPLocation(p.location || ""); setPEngineer(p.engineer || ""); setPBudget(p.budget || ""); setPProgress(p.progress !== undefined && p.progress !== null ? p.progress : 0); setPStatus(p.status || "نشط"); setPNotes(p.notes || ""); setProjectCompanyId(p.company_id || ""); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
-                          <button onClick={() => { if(confirm("حذف ملف المشروع بشكل نهائي؟")) { sb.from("projects").delete().eq("id", p.id).then(() => loadEverything()); } }} className="p-1 text-rose-400 hover:text-rose-500"><Trash2 className="w-3.5 h-3.5" /></button>
-                        </td>
+              <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-850 pb-4">
+                  <h4 className="text-sm font-black text-white flex items-center gap-2">
+                    <span>📋</span> جدول وقائمة المشاريع المسجلة
+                  </h4>
+                  <div className="relative w-full md:w-80">
+                    <input
+                      type="text"
+                      placeholder="البحث المباشر في المشاريع..."
+                      value={pSearch}
+                      onChange={(e) => setPSearch(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 transition-colors text-right"
+                    />
+                    <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-right text-xs">
+                    <thead>
+                      <tr className="bg-slate-950 border-b border-slate-800 text-slate-300">
+                        <th className="py-2.5 px-3 font-bold">اسم المشروع والموقع</th>
+                        <th className="py-2.5 px-3 font-bold">المهندس المشرف</th>
+                        <th className="py-2.5 px-3 font-bold">الميزانية</th>
+                        <th className="py-2.5 px-3 font-bold">Progress</th>
+                        <th className="py-2.5 px-3 font-bold">الحالة</th>
+                        <th className="py-2.5 px-3 font-bold text-center">إجراء</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {getVisibleProjects().filter(p => {
+                        if (!pSearch.trim()) return true;
+                        const q = pSearch.toLowerCase().trim();
+                        return (
+                          (p.name && p.name.toLowerCase().includes(q)) ||
+                          (p.location && p.location.toLowerCase().includes(q)) ||
+                          (p.engineer && p.engineer.toLowerCase().includes(q)) ||
+                          (p.notes && p.notes.toLowerCase().includes(q))
+                        );
+                      }).map((p, idx) => (
+                        <tr key={idx} className="border-b border-slate-850 hover:bg-slate-800/10 transition-colors">
+                          <td className="py-3 px-3">
+                            <span className="block font-black text-white">{p.name}</span>
+                            <span className="block text-[10px] text-slate-400 mt-0.5 flex items-center gap-1"><MapPin className="w-3 h-3 text-amber-500" /> {p.location || "غير محدد"}</span>
+                          </td>
+                          <td className="py-3 px-3 font-bold text-slate-200">{p.engineer || "بإشراف فرقا المقاول"}</td>
+                          <td className="py-3 px-3 font-mono text-white font-extrabold">{Number(p.budget || 0).toLocaleString()} ريال</td>
+                          <td className="py-3 px-3">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-[11px] font-bold text-amber-400">{p.progress}%</span>
+                              <div className="w-20 h-1.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+                                <div className="bg-amber-500 h-full" style={{ width: `${p.progress}%` }} />
+                              </div>
+                            </div>
+                          </td>
+                          <td className="py-3 px-3">
+                            <span className={`inline-block px-2.5 py-0.5 rounded text-[10px] font-black ${p.status === "نشط" ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"}`}>{p.status}</span>
+                          </td>
+                          <td className="py-3 px-3 text-center space-x-1">
+                            <button onClick={() => { setEditProjectId(p.id); setPName(p.name || ""); setPLocation(p.location || ""); setPEngineer(p.engineer || ""); setPBudget(p.budget || ""); setPProgress(p.progress !== undefined && p.progress !== null ? p.progress : 0); setPStatus(p.status || "نشط"); setPNotes(p.notes || ""); setProjectCompanyId(p.company_id || ""); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
+                            <button onClick={() => { if(confirm("حذف ملف المشروع بشكل نهائي؟")) { sb.from("projects").delete().eq("id", p.id).then(() => loadEverything()); } }} className="p-1 text-rose-400 hover:text-rose-500"><Trash2 className="w-3.5 h-3.5" /></button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}
@@ -3951,48 +3980,78 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                 </div>
               </form>
 
-              <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl overflow-x-auto">
-                <table className="w-full text-right text-xs">
-                  <thead>
-                    <tr className="bg-slate-950 border-b border-slate-800 text-slate-300">
-                      <th className="py-2.5 px-3 font-bold">الاسم والمهنة</th>
-                      <th className="py-2.5 px-3 font-bold">المشروع المعني</th>
-                      <th className="py-2.5 px-3 font-bold text-center">أيام العمل الجارية</th>
-                      <th className="py-2.5 px-3 font-bold">إجمالي المستحق اليومي</th>
-                      <th className="py-2.5 px-3 font-bold">سلفة مسحوبة</th>
-                      <th className="py-2.5 px-3 font-bold">المستلم في السند</th>
-                      <th className="py-2.5 px-3 font-bold">الصافي المعلق</th>
-                      <th className="py-2.5 px-3 font-bold">الوضعية</th>
-                      <th className="py-2.5 px-3 font-bold text-center">إجراء</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {getVisibleWorkers().map((w, idx) => (
-                      <tr key={idx} className="border-b border-slate-850 hover:bg-slate-800/10 transition-colors">
-                        <td className="py-3 px-3">
-                          <span className="block font-black text-white">{w.name}</span>
-                          <span className="block text-[10px] text-slate-400 mt-0.5">مهنة: {w.job} • {w.worker_id || "بدون هوية"}</span>
-                        </td>
-                        <td className="py-3 px-3 font-bold text-amber-500">{w.project}</td>
-                        <td className="py-3 px-3 font-mono font-bold text-center text-white">{w.days} يومًا</td>
-                        <td className="py-3 px-3 font-mono text-slate-200">{(w.daily * w.days).toLocaleString()} ريال</td>
-                        <td className="py-3 px-3 font-black text-rose-400 font-mono">-{Number(w.advance || 0).toLocaleString()} ريال</td>
-                        <td className="py-3 px-3 font-bold text-slate-300">
-                          {w.recipient_name || <span className="text-slate-500 text-[10px] italic">العامل نفسه</span>}
-                        </td>
-                        <td className="py-3 px-3 font-black text-emerald-400 font-mono">{(w.total - w.advance).toLocaleString()} ريال</td>
-                        <td className="py-3 px-3">
-                          <span className={`inline-block px-2.5 py-0.5 rounded text-[10px] font-black ${w.status === "على رأس العمل" ? "bg-emerald-500/10 text-emerald-400" : "bg-slate-850 text-slate-400"}`}>{w.status}</span>
-                        </td>
-                        <td className="py-3 px-3 text-center space-x-1">
-                          <button onClick={() => initHrWorker(w)} className="p-1 text-amber-400 hover:text-amber-300 hover:scale-110 duration-200 inline-block" title="الشؤون والملف الوظيفي"><Users className="w-3.5 h-3.5" /></button>
-                          <button onClick={() => { setEditWorkerId(w.id); setWName(w.name || ""); setWId(w.worker_id || ""); setWPhone(w.phone || ""); setWJob(w.job || "عامل"); setWProject(w.project || ""); setWDaily(w.daily || ""); setWDays(w.days || ""); setWAdvance(w.advance !== undefined && w.advance !== null ? w.advance : 0); setWStatus(w.status || "على رأس العمل"); setWRecipientName(w.recipient_name || ""); setWNotes(w.notes || ""); setWorkerCompanyId(w.company_id || ""); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
-                          <button onClick={() => { if(confirm("مسح العامل من قوائم الحساب؟")) { sb.from("workers").delete().eq("id", w.id).then(() => loadEverything()); } }} className="p-1 text-rose-400 hover:text-rose-500"><Trash2 className="w-3.5 h-3.5" /></button>
-                        </td>
+              <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-850 pb-4">
+                  <h4 className="text-sm font-black text-white flex items-center gap-2">
+                    <span>📋</span> جدول وقائمة العمال والشركاء المسجلين
+                  </h4>
+                  <div className="relative w-full md:w-80">
+                    <input
+                      type="text"
+                      placeholder="البحث المباشر في العمال..."
+                      value={wSearch}
+                      onChange={(e) => setWSearch(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 transition-colors text-right"
+                    />
+                    <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-right text-xs">
+                    <thead>
+                      <tr className="bg-slate-950 border-b border-slate-800 text-slate-300">
+                        <th className="py-2.5 px-3 font-bold">الاسم والمهنة</th>
+                        <th className="py-2.5 px-3 font-bold">المشروع المعني</th>
+                        <th className="py-2.5 px-3 font-bold text-center">أيام العمل الجارية</th>
+                        <th className="py-2.5 px-3 font-bold">إجمالي المستحق اليومي</th>
+                        <th className="py-2.5 px-3 font-bold">سلفة مسحوبة</th>
+                        <th className="py-2.5 px-3 font-bold">المستلم في السند</th>
+                        <th className="py-2.5 px-3 font-bold">الصافي المعلق</th>
+                        <th className="py-2.5 px-3 font-bold">الوضعية</th>
+                        <th className="py-2.5 px-3 font-bold text-center">إجراء</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {getVisibleWorkers().filter(w => {
+                        if (!wSearch.trim()) return true;
+                        const q = wSearch.toLowerCase().trim();
+                        return (
+                          (w.name && w.name.toLowerCase().includes(q)) ||
+                          (w.worker_id && w.worker_id.toLowerCase().includes(q)) ||
+                          (w.phone && w.phone.toLowerCase().includes(q)) ||
+                          (w.job && w.job.toLowerCase().includes(q)) ||
+                          (w.project && w.project.toLowerCase().includes(q)) ||
+                          (w.recipient_name && w.recipient_name.toLowerCase().includes(q)) ||
+                          (w.notes && w.notes.toLowerCase().includes(q))
+                        );
+                      }).map((w, idx) => (
+                        <tr key={idx} className="border-b border-slate-850 hover:bg-slate-800/10 transition-colors">
+                          <td className="py-3 px-3">
+                            <span className="block font-black text-white">{w.name}</span>
+                            <span className="block text-[10px] text-slate-400 mt-0.5">مهنة: {w.job} • {w.worker_id || "بدون هوية"}</span>
+                          </td>
+                          <td className="py-3 px-3 font-bold text-amber-500">{w.project}</td>
+                          <td className="py-3 px-3 font-mono font-bold text-center text-white">{w.days} يومًا</td>
+                          <td className="py-3 px-3 font-mono text-slate-200">{(w.daily * w.days).toLocaleString()} ريال</td>
+                          <td className="py-3 px-3 font-black text-rose-400 font-mono">-{Number(w.advance || 0).toLocaleString()} ريال</td>
+                          <td className="py-3 px-3 font-bold text-slate-300">
+                            {w.recipient_name || <span className="text-slate-500 text-[10px] italic">العامل نفسه</span>}
+                          </td>
+                          <td className="py-3 px-3 font-black text-emerald-400 font-mono">{(w.total - w.advance).toLocaleString()} ريال</td>
+                          <td className="py-3 px-3">
+                            <span className={`inline-block px-2.5 py-0.5 rounded text-[10px] font-black ${w.status === "على رأس العمل" ? "bg-emerald-500/10 text-emerald-400" : "bg-slate-850 text-slate-400"}`}>{w.status}</span>
+                          </td>
+                          <td className="py-3 px-3 text-center space-x-1">
+                            <button onClick={() => initHrWorker(w)} className="p-1 text-amber-400 hover:text-amber-300 hover:scale-110 duration-200 inline-block" title="الشؤون والملف الوظيفي"><Users className="w-3.5 h-3.5" /></button>
+                            <button onClick={() => { setEditWorkerId(w.id); setWName(w.name || ""); setWId(w.worker_id || ""); setWPhone(w.phone || ""); setWJob(w.job || "عامل"); setWProject(w.project || ""); setWDaily(w.daily || ""); setWDays(w.days || ""); setWAdvance(w.advance !== undefined && w.advance !== null ? w.advance : 0); setWStatus(w.status || "على رأس العمل"); setWRecipientName(w.recipient_name || ""); setWNotes(w.notes || ""); setWorkerCompanyId(w.company_id || ""); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
+                            <button onClick={() => { if(confirm("مسح العامل من قوائم الحساب؟")) { sb.from("workers").delete().eq("id", w.id).then(() => loadEverything()); } }} className="p-1 text-rose-400 hover:text-rose-500"><Trash2 className="w-3.5 h-3.5" /></button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
               {/* HR Profile Modal */}
