@@ -5002,7 +5002,9 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                         إذا قمت بإنشاء مشروع Supabase جديد، يمكنك تهيئة الجداول فوراً وبكبسة زر واحدة. تفضل بالذهاب إلى <b>SQL Editor</b> في لوحة تحكم Supabase الخاصة بك، والصق الكود التالي لإنشاء الجداول اللازمة لتهيئة النظام بشكل فوري:
                       </p>
                       <pre className="p-3 bg-slate-950 rounded-xl text-[9px] text-emerald-400/90 font-mono overflow-x-auto max-h-48 border border-white/5 select-all leading-normal" dir="ltr">
-{`-- SQL لإنشاء جداول النظام وتفعيلها فوراً في Supabase
+{`-- SQL لإنشاء وتحديث جداول النظام بالكامل لتتوافق 100% مع الإصدار المتقدم من التطبيق في Supabase
+
+-- 1. جدول المستخدمين والصلاحيات
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
   name TEXT,
@@ -5010,95 +5012,187 @@ CREATE TABLE IF NOT EXISTS users (
   password TEXT,
   role TEXT,
   perms JSONB,
+  branch TEXT,
+  hide_financial_data BOOLEAN DEFAULT false,
+  language TEXT DEFAULT 'ar',
+  branch_id TEXT,
+  status TEXT DEFAULT 'نشط',
+  company_id TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- 2. جدول عقود التقسيط
 CREATE TABLE IF NOT EXISTS installments (
   id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
-  buyer_name TEXT,
-  buyer_phone TEXT,
-  national_id TEXT,
-  guarantor_name TEXT,
-  guarantor_phone TEXT,
-  guarantor_national_id TEXT,
-  ref_no TEXT UNIQUE,
-  amount_with_interest NUMERIC,
-  amount_paid NUMERIC DEFAULT 0,
-  months INT,
-  is_approved BOOLEAN DEFAULT false,
+  client TEXT,
+  identity TEXT,
+  phone TEXT,
+  no TEXT UNIQUE,
+  amount NUMERIC,
+  paid NUMERIC DEFAULT 0,
+  remaining NUMERIC,
+  type TEXT,
+  start_date TEXT,
+  end_date TEXT,
+  next_due TEXT,
+  periods INT,
+  installment NUMERIC,
+  discount NUMERIC DEFAULT 0,
+  after_discount NUMERIC,
+  project TEXT,
+  guarantor TEXT,
+  status TEXT DEFAULT 'نشط',
   notes TEXT,
+  updated_at TEXT,
+  nationality TEXT,
+  workplace TEXT,
+  company_id TEXT,
+  branch_id TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- 3. جدول عروض الأسعار
 CREATE TABLE IF NOT EXISTS quotes (
   id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  no TEXT UNIQUE,
   client TEXT,
   phone TEXT,
   project TEXT,
   amount NUMERIC,
   vat NUMERIC DEFAULT 15,
-  status TEXT DEFAULT 'جديد',
+  total NUMERIC,
+  status TEXT DEFAULT 'مسودة',
   notes TEXT,
+  company_id TEXT,
+  branch_id TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- 4. جدول سندات القبض
 CREATE TABLE IF NOT EXISTS receipts (
   id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
-  installment_id TEXT,
-  ref_no TEXT,
-  buyer_name TEXT,
+  no TEXT,
+  from_name TEXT,
   amount NUMERIC,
   method TEXT,
+  date TEXT,
+  project TEXT,
   notes TEXT,
+  installment_id TEXT,
+  contract_no TEXT,
+  identity TEXT,
+  phone TEXT,
+  nationality TEXT,
+  remaining_before NUMERIC,
+  remaining_after NUMERIC,
+  company_id TEXT,
+  branch_id TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- 5. جدول سندات الصرف
 CREATE TABLE IF NOT EXISTS payments (
   id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
-  payment_to TEXT,
-  ref_no TEXT,
+  no TEXT,
+  to_name TEXT,
   amount NUMERIC,
   method TEXT,
+  date TEXT,
+  project TEXT,
   notes TEXT,
+  company_id TEXT,
+  branch_id TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- 6. جدول المصروفات التشغيلية
 CREATE TABLE IF NOT EXISTS expenses (
   id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  no TEXT,
+  name TEXT,
   category TEXT,
   amount NUMERIC,
+  date TEXT,
+  project TEXT,
+  supplier TEXT,
   notes TEXT,
-  receiver TEXT,
+  company_id TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- 7. جدول المشاريع الإنشائية
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
   name TEXT,
-  manager TEXT,
+  location TEXT,
+  engineer TEXT,
   budget NUMERIC,
+  start_date TEXT,
+  end_date TEXT,
+  progress NUMERIC DEFAULT 0,
   status TEXT DEFAULT 'تحت التنفيذ',
   notes TEXT,
+  nationality TEXT,
+  company_id TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- 8. جدول الموارد البشرية والعمال
 CREATE TABLE IF NOT EXISTS workers (
   id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
-  worker_id TEXT UNIQUE,
   name TEXT,
+  worker_id TEXT UNIQUE,
+  phone TEXT,
   job TEXT,
-  salary NUMERIC,
-  recipient_name TEXT,
+  project TEXT,
+  daily NUMERIC DEFAULT 0,
+  days INT DEFAULT 0,
+  advance NUMERIC DEFAULT 0,
+  total NUMERIC DEFAULT 0,
+  balance NUMERIC DEFAULT 0,
+  status TEXT DEFAULT 'نشط',
   notes TEXT,
+  recipient_name TEXT,
+  company_id TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- 9. جدول سجل الأنشطة والعمليات (Audit Logs)
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
-  user_id TEXT,
-  user_name TEXT,
-  event TEXT,
-  action_type TEXT,
+  name TEXT,
+  code TEXT,
+  role TEXT,
+  time TEXT,
+  action TEXT,
+  company_id TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 10. إعادة إنشاء جدول الشركات الفرعية ليطابق الهيكل الجديد المخصص
+DROP TABLE IF EXISTS companies CASCADE;
+CREATE TABLE companies (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  commercial_register TEXT,
+  tax_no TEXT,
+  capital NUMERIC DEFAULT 0,
+  phone TEXT,
+  address TEXT,
+  status TEXT DEFAULT 'نشط',
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 11. إنشاء جدول المستخلصات المالية للمشاريع (الذي لم يكن موجوداً)
+DROP TABLE IF EXISTS extracts CASCADE;
+CREATE TABLE extracts (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  company_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  amount NUMERIC DEFAULT 0,
+  paid_amount NUMERIC DEFAULT 0,
+  date TEXT,
+  status TEXT DEFAULT 'نشط',
   notes TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );`}

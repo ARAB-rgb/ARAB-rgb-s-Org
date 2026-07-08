@@ -41,7 +41,7 @@ const initialCreds = getSupabaseCredentials();
 export let supabase = createClient(initialCreds.url, initialCreds.key);
 
 // Track whether Supabase is healthy or quota restricted
-export let isSupabaseHealthy = initialCreds.isCustom;
+export let isSupabaseHealthy = true;
 
 export function setSupabaseHealthyState(state: boolean) {
   isSupabaseHealthy = state;
@@ -60,12 +60,6 @@ export function isQuotaError(error: any): boolean {
 }
 
 export async function checkSupabaseHealth(): Promise<boolean> {
-  const { isCustom } = getSupabaseCredentials();
-  if (!isCustom) {
-    console.log("ℹ️ Default Supabase credentials detected. Defaulting to local Firestore database.");
-    isSupabaseHealthy = false;
-    return false;
-  }
   try {
     const { data, error } = await supabase.from("users").select("id").limit(1);
     if (error) {
