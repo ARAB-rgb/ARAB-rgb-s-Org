@@ -388,13 +388,10 @@ export default function App() {
       setWorkers(w.data || []);
       setSessions(s.data || []);
       let compList = comp.data || [];
-      const hasArabWorld = compList.some((c) => c.id === "arab_world");
-      const hasDemoCompany = compList.some((c) => c.id === "demo_company");
       
-      if (!hasArabWorld || !hasDemoCompany) {
-        const toAdd = [];
-        if (!hasArabWorld) {
-          toAdd.push({
+      if (compList.length === 0) {
+        const toAdd = [
+          {
             id: "arab_world",
             name: "شركة عرب وورلد للمقاولات والعقود",
             commercial_register: "1010777555",
@@ -403,10 +400,8 @@ export default function App() {
             phone: "0556446888",
             address: "الرياض، المملكة العربية السعودية",
             created_at: new Date().toISOString()
-          });
-        }
-        if (!hasDemoCompany) {
-          toAdd.push({
+          },
+          {
             id: "demo_company",
             name: "شركة التجربة المستقلة (Demo)",
             commercial_register: "1010123456",
@@ -415,8 +410,8 @@ export default function App() {
             phone: "0500000001",
             address: "منطقة الدمام التجريبية",
             created_at: new Date().toISOString()
-          });
-        }
+          }
+        ];
         
         for (const item of toAdd) {
           try {
