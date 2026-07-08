@@ -632,6 +632,12 @@ export default function App() {
 
   const getTargetCompanyId = (formCompanyVal?: string) => {
     if (currentUser?.role !== "admin") {
+      if (formCompanyVal && isCompanyAuthorized(formCompanyVal)) {
+        return formCompanyVal;
+      }
+      if (selectedCompanyId !== "all" && isCompanyAuthorized(selectedCompanyId)) {
+        return selectedCompanyId;
+      }
       return currentUser?.company_id || null;
     }
     return formCompanyVal || (selectedCompanyId !== "all" ? selectedCompanyId : null) || null;
@@ -2836,7 +2842,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
               </div>
             </div>
 
-            {currentUser?.role === "admin" && companies.length > 0 && (
+            {currentUser && getAuthorizedCompanies().length > 0 && (
               <div className="flex items-center gap-2 bg-slate-900/60 border border-amber-500/20 rounded-xl px-3 py-1.5 shadow-lg shadow-amber-500/5 hover:border-amber-500/40 transition-all font-sans">
                 <span className="text-[10px] text-amber-500 font-extrabold whitespace-nowrap">🏢 الشركة النشطة:</span>
                 <select
@@ -2844,8 +2850,10 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                   onChange={(e) => setSelectedCompanyId(e.target.value)}
                   className="bg-transparent text-white font-extrabold text-xs focus:outline-none cursor-pointer text-slate-950 bg-white"
                 >
-                  <option value="all" className="text-slate-950 font-bold">✨ كل الشركات (لوحة تحكم كاملة)</option>
-                  {companies.map((c) => (
+                  {getAuthorizedCompanies().length > 1 && (
+                    <option value="all" className="text-slate-950 font-bold">✨ كل الشركات المصرحة</option>
+                  )}
+                  {getAuthorizedCompanies().map((c) => (
                     <option key={c.id} value={c.id} className="text-slate-950 font-bold">🏢 {c.name}</option>
                   ))}
                 </select>
@@ -2902,7 +2910,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
               expenses={getVisibleExpenses()}
               onNavigateToContracts={() => setActiveSection("installments")}
               sbStatus={sbStatus}
-              companies={companies}
+              companies={getAuthorizedCompanies()}
               selectedCompanyId={selectedCompanyId}
             />
           )}
@@ -2951,7 +2959,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                   
                   <select value={formCompanyId} onChange={(e) => setFormCompanyId(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none font-sans">
                     <option value="">🏢 تبعية شركة الشعار (تلقائي)</option>
-                    {companies.map((c) => (
+                    {getAuthorizedCompanies().map((c) => (
                       <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
                   </select>
@@ -3145,7 +3153,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                     <input placeholder="المشروع" value={rProject} onChange={(e) => setRProject(e.target.value)} className="w-full px-3 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none" />
                   </div>
 
-                  {currentUser?.role === "admin" && companies.length > 0 && (
+                  {getAuthorizedCompanies().length > 1 && (
                     <div className="space-y-1">
                       <label className="text-[10px] font-black text-amber-500">🏢 الشركة التابع لها السند</label>
                       <select
@@ -3154,7 +3162,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                         className="w-full px-3.5 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none cursor-pointer bg-slate-950"
                       >
                         <option value="">🏢 اختيار الشركة (تلقائي)</option>
-                        {companies.map((c) => (
+                        {getAuthorizedCompanies().map((c) => (
                           <option key={c.id} value={c.id}>{c.name}</option>
                         ))}
                       </select>
@@ -3470,7 +3478,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                       ))}
                     </select>
                   </div>
-                  {currentUser?.role === "admin" && companies.length > 0 && (
+                  {getAuthorizedCompanies().length > 1 && (
                     <div className="space-y-1">
                       <label className="text-[10px] font-black text-amber-500">🏢 الشركة التابع لها السند</label>
                       <select
@@ -3479,7 +3487,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                         className="w-full px-3.5 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none cursor-pointer bg-slate-950"
                       >
                         <option value="">🏢 اختيار الشركة (تلقائي)</option>
-                        {companies.map((c) => (
+                        {getAuthorizedCompanies().map((c) => (
                           <option key={c.id} value={c.id}>{c.name}</option>
                         ))}
                       </select>
@@ -3679,14 +3687,14 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                       ))}
                     </select>
                   </div>
-                  {currentUser?.role === "admin" && companies.length > 0 && (
+                  {getAuthorizedCompanies().length > 1 && (
                     <select
                       value={expenseCompanyId}
                       onChange={(e) => setExpenseCompanyId(e.target.value)}
                       className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none cursor-pointer bg-slate-950"
                     >
                       <option value="">🏢 اختيار الشركة (تلقائي)</option>
-                      {companies.map((c) => (
+                      {getAuthorizedCompanies().map((c) => (
                         <option key={c.id} value={c.id}>{c.name}</option>
                       ))}
                     </select>
@@ -3837,14 +3845,14 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                     <option value="متوقف">متوقف</option>
                     <option value="منتهي">منتهي</option>
                   </select>
-                  {currentUser?.role === "admin" && companies.length > 0 && (
+                  {getAuthorizedCompanies().length > 1 && (
                     <select
                       value={projectCompanyId}
                       onChange={(e) => setProjectCompanyId(e.target.value)}
                       className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none cursor-pointer bg-slate-950"
                     >
                       <option value="">🏢 اختيار الشركة (تلقائي)</option>
-                      {companies.map((c) => (
+                      {getAuthorizedCompanies().map((c) => (
                         <option key={c.id} value={c.id}>{c.name}</option>
                       ))}
                     </select>
@@ -3958,14 +3966,14 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                     <option value="موقوف">موقوف</option>
                   </select>
                   <input placeholder="المستلم من سند الصرف (إذا اختلف عن العامل)" value={wRecipientName} onChange={(e) => setWRecipientName(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none" />
-                  {currentUser?.role === "admin" && companies.length > 0 && (
+                  {getAuthorizedCompanies().length > 1 && (
                     <select
                       value={workerCompanyId}
                       onChange={(e) => setWorkerCompanyId(e.target.value)}
                       className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none cursor-pointer bg-slate-950"
                     >
                       <option value="">🏢 اختيار الشركة (تلقائي)</option>
-                      {companies.map((c) => (
+                      {getAuthorizedCompanies().map((c) => (
                         <option key={c.id} value={c.id}>{c.name}</option>
                       ))}
                     </select>
@@ -4538,7 +4546,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                       </div>
                     </div>
 
-                    {companies.length === 0 ? (
+                    {getAuthorizedCompanies().length === 0 ? (
                       <div className="text-center py-12 bg-slate-950/20 border border-dashed border-slate-805 rounded-2xl">
                         <span className="text-3xl block">🏛️</span>
                         <h4 className="text-xs font-black text-slate-400 mt-3">لا توجد شركات مدرجة حتى الآن</h4>
@@ -4546,7 +4554,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {companies.map((comp) => {
+                        {getAuthorizedCompanies().map((comp) => {
                           const compWorkers = workers.filter((w) => w.company_id === comp.id);
                           const compProjects = projects.filter((p) => p.company_id === comp.id);
                           const compInstallments = installments.filter((i) => i.company_id === comp.id);
@@ -4653,7 +4661,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                           className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 font-sans"
                         >
                           <option value="">-- اختر الشركة --</option>
-                          {companies.map((comp) => (
+                          {getAuthorizedCompanies().map((comp) => (
                             <option key={comp.id} value={comp.id}>🏢 {comp.name}</option>
                           ))}
                         </select>
@@ -5274,7 +5282,7 @@ CREATE TABLE IF NOT EXISTS sessions (
                             className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none text-slate-950 bg-white font-sans"
                           >
                             <option value="" className="text-slate-950">اختر الشركة...</option>
-                            {companies.map((c) => (
+                            {getAuthorizedCompanies().map((c) => (
                               <option key={c.id} value={c.id} className="text-slate-950 font-bold">🏢 {c.name}</option>
                             ))}
                           </select>

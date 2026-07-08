@@ -152,6 +152,114 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }));
   }, [receipts]);
 
+  // --- CALCULATE BRANCHES (REGIONS) ---
+  const branchStats = React.useMemo(() => {
+    const regions = ["الوسطى", "الشرقية", "الغربية", "الجنوب", "الشمال", "عام/غير محدد"];
+    const statsMap: Record<string, { contractsCount: number; contractsAmount: number; collected: number; outflow: number }> = {};
+    
+    regions.forEach(r => {
+      statsMap[r] = { contractsCount: 0, contractsAmount: 0, collected: 0, outflow: 0 };
+    });
+
+    const getRegionKey = (notesText: string) => {
+      const text = String(notesText || "");
+      const m1 = text.match(/\[الإدارة:\s*([^\]]+)\]/);
+      if (m1) return m1[1].trim();
+      
+      const m2 = text.match(/\[\[?AW_BRANCH:\s*([^\]\s]+)\]?\]/i);
+      if (m2) {
+        const code = m2[1].trim().toLowerCase();
+        const map: Record<string, string> = {
+          riyadh: "الوسطى", kharj: "الوسطى", dammam: "الشرقية",
+          central: "الوسطى", east: "الشرقية", west: "الغربية",
+          south: "الجنوب", north: "الشمال"
+        };
+        return map[code] || code;
+      }
+      return "";
+    };
+
+    // Process installments
+    installments.forEach(item => {
+      let r = getRegionKey(item.notes || "");
+      if (!r || !regions.includes(r)) {
+        r = "عام/غير محدد";
+      }
+      statsMap[r].contractsCount += 1;
+      statsMap[r].contractsAmount += Number(item.amount || 0);
+    });
+
+    // Process receipts
+    receipts.forEach(item => {
+      let r = getRegionKey(item.notes || "");
+      if (!r || !regions.includes(r)) {
+        r = "عام/غير محدد";
+      }
+      statsMap[r].collected += Number(item.amount || 0);
+    });
+
+    // Process payments
+    payments.forEach(item => {
+      let r = getRegionKey(item.notes || "");
+      if (!r || !regions.includes(r)) {
+        r = "عام/غير محدد";
+      }
+      statsMap[r].outflow += Number(item.amount || 0);
+    });
+
+    // Process expenses
+    expenses.forEach(item => {
+      let r = getRegionKey(item.notes || "");
+      if (!r || !regions.includes(r)) {
+        r = "عام/غير محدد";
+      }
+      statsMap[r].outflow += Number(item.amount || 0);
+    });
+
+    return Object.entries(statsMap)
+      .map(([name, data]) => ({
+        name,
+        ...data,
+        balance: data.collected - data.outflow
+      }))
+      .filter(item => item.contractsCount > 0 || item.collected > 0 || item.outflow > 0);
+  }, [installments, receipts, payments, expenses]);
+
+
+  // --- CALCULATE COMPANIES ---
+  const companyStats = React.useMemo(() => {
+    // Determine which companies should be processed (only authorized ones)
+    const visibleCompanies = selectedCompanyId === "all" 
+      ? companies 
+      : companies.filter(c => c.id === selectedCompanyId);
+
+    return visibleCompanies.map(comp => {
+      const compId = comp.id || "arab_world";
+      
+      const compInstallments = installments.filter(item => (item.company_id || "arab_world") === compId);
+      const compReceipts = receipts.filter(item => (item.company_id || "arab_world") === compId);
+      const compPayments = payments.filter(item => (item.company_id || "arab_world") === compId);
+      const compExpenses = expenses.filter(item => (item.company_id || "arab_world") === compId);
+
+      const contractsCount = compInstallments.length;
+      const contractsAmount = compInstallments.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+      const collected = compReceipts.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+      const outflow = compPayments.reduce((sum, item) => sum + Number(item.amount || 0), 0) + 
+                      compExpenses.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+
+      return {
+        id: compId,
+        name: comp.name,
+        capital: Number(comp.capital || 0),
+        contractsCount,
+        contractsAmount,
+        collected,
+        outflow,
+        balance: collected - outflow
+      };
+    });
+  }, [companies, selectedCompanyId, installments, receipts, payments, expenses]);
+
   // Upcoming collections based on start date and paid sums
   const upcomingPaymentsFeed = analyzedContracts
     .filter((o) => o.timing.lastPaid && o.timing.lastPaid !== "غير مسدد" && o.contract.status !== "مكتمل")
@@ -551,6 +659,119 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <p className="text-center py-10 text-slate-500 font-bold">لا توجد سجلات مستحقة قادمة.</p>
               )}
             </div>
+          </div>
+        </div>
+
+        {/* التحليل المالي حسب الفروع والمناطق */}
+        <div className="lg:col-span-12 bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-[28px] p-6 shadow-xl space-y-4">
+          <div className="border-b border-slate-800/80 pb-4 flex justify-between items-center">
+            <div>
+              <h3 className="text-base font-black text-white flex items-center gap-2 font-sans">
+                <span className="p-1.5 rounded-lg bg-indigo-600/20 border border-indigo-500/30 text-indigo-400">🇸🇦</span>
+                التحليل المالي والإحصائي للفروع والمناطق (الفروع)
+              </h3>
+              <p className="text-[11px] font-bold text-slate-400 mt-0.5 font-sans">الحسابات والتدفقات النقدية مفرزة حسب الفروع والربط الإقليمي التلقائي</p>
+            </div>
+          </div>
+          
+          <div className="overflow-x-auto">
+            <table className="w-full text-right text-xs">
+              <thead>
+                <tr className="bg-slate-950/20 border-b border-slate-850 text-slate-400">
+                  <th className="py-3 px-4 font-black">اسم الفرع / المنطقة</th>
+                  <th className="py-3 px-4 font-black text-center">عدد العقود الجارية</th>
+                  <th className="py-3 px-4 font-black">إجمالي قيمة العقود</th>
+                  <th className="py-3 px-4 font-black">المبالغ المحصلة</th>
+                  <th className="py-3 px-4 font-black">المصروفات والصرف</th>
+                  <th className="py-3 px-4 font-black">الرصيد الفعلي (خزنة الفرع)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-850/40">
+                {branchStats.length > 0 ? (
+                  branchStats.map((branch, idx) => (
+                    <tr key={idx} className="hover:bg-slate-800/10 transition-colors">
+                      <td className="py-3.5 px-4 font-bold text-white flex items-center gap-2 font-sans">
+                        <span className="w-2 h-2 rounded-full bg-indigo-500 shadow-[0_0_8px_#6366f1]" />
+                        📍 منطقة {branch.name}
+                      </td>
+                      <td className="py-3.5 px-4 text-center font-mono text-slate-300 font-bold">{branch.contractsCount}</td>
+                      <td className="py-3.5 px-4 font-extrabold text-slate-300 font-mono">{branch.contractsAmount.toLocaleString()} ريال</td>
+                      <td className="py-3.5 px-4 font-extrabold text-emerald-400 font-mono">+{branch.collected.toLocaleString()} ريال</td>
+                      <td className="py-3.5 px-4 font-extrabold text-rose-400 font-mono">-{branch.outflow.toLocaleString()} ريال</td>
+                      <td className={`py-3.5 px-4 font-extrabold font-mono ${branch.balance >= 0 ? "text-cyan-400" : "text-rose-400"}`}>
+                        {branch.balance.toLocaleString()} ريال
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={6} className="py-8 text-center text-slate-550 font-extrabold font-sans">
+                      لا توجد بيانات مرتبطة بالفروع حالياً.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* تحليل ومطابقة الشركات التابعة */}
+        <div className="lg:col-span-12 bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-[28px] p-6 shadow-xl space-y-4">
+          <div className="border-b border-slate-800/80 pb-4 flex justify-between items-center">
+            <div>
+              <h3 className="text-base font-black text-white flex items-center gap-2 font-sans">
+                <span className="p-1.5 rounded-lg bg-amber-600/20 border border-amber-500/30 text-amber-400">🏢</span>
+                ملاءة الحسابات ومطابقة الشركات المرخصة والنشطة
+              </h3>
+              <p className="text-[11px] font-bold text-slate-400 mt-0.5 font-sans">
+                {selectedCompanyId === "all" 
+                  ? "كشف مقارنة ومطابقة مالي شامل لجميع الكيانات والشركات التابعة النشطة تحت إدارتك"
+                  : "كشف المطابقة الحسابي المعتمد للشركة المحددة قانونًا والنشطة حاليًا"
+                }
+              </p>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-right text-xs">
+              <thead>
+                <tr className="bg-slate-950/20 border-b border-slate-850 text-slate-400">
+                  <th className="py-3 px-4 font-black">اسم الشركة</th>
+                  <th className="py-3 px-4 font-black">رأس المال التأسيسي</th>
+                  <th className="py-3 px-4 font-black text-center">عدد العقود الجارية</th>
+                  <th className="py-3 px-4 font-black">إجمالي قيمة العقود</th>
+                  <th className="py-3 px-4 font-black">المبالغ المحصلة (القبض)</th>
+                  <th className="py-3 px-4 font-black">الصرف والتدفق الخارج</th>
+                  <th className="py-3 px-4 font-black">رصيد الخزائن الحالي</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-850/40">
+                {companyStats.length > 0 ? (
+                  companyStats.map((comp, idx) => (
+                    <tr key={idx} className="hover:bg-slate-800/10 transition-colors">
+                      <td className="py-3.5 px-4 font-bold text-white flex items-center gap-2 font-sans">
+                        <span className="w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_8px_#f59e0b]" />
+                        🏢 {comp.name}
+                      </td>
+                      <td className="py-3.5 px-4 font-extrabold text-amber-400 font-mono">{comp.capital.toLocaleString()} ريال</td>
+                      <td className="py-3.5 px-4 text-center font-mono text-slate-300 font-bold">{comp.contractsCount}</td>
+                      <td className="py-3.5 px-4 font-extrabold text-slate-300 font-mono">{comp.contractsAmount.toLocaleString()} ريال</td>
+                      <td className="py-3.5 px-4 font-extrabold text-emerald-400 font-mono">+{comp.collected.toLocaleString()} ريال</td>
+                      <td className="py-3.5 px-4 font-extrabold text-rose-400 font-mono">-{comp.outflow.toLocaleString()} ريال</td>
+                      <td className={`py-3.5 px-4 font-extrabold font-mono ${comp.balance >= 0 ? "text-cyan-400" : "text-rose-400"}`}>
+                        {comp.balance.toLocaleString()} ريال
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={7} className="py-8 text-center text-slate-550 font-extrabold font-sans">
+                      لا توجد أي بيانات شركات تابعة نشطة لعرضها حاليًا.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
 
