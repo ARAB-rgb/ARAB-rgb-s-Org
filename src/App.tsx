@@ -661,6 +661,18 @@ export default function App() {
     });
   };
 
+  const getAuthorizedUsers = () => {
+    if (!currentUser) return [];
+    if (currentUser.role === "admin") return users;
+    const authComps = getAuthorizedCompanies();
+    const authCompIds = authComps.map((c) => c.id);
+    return users.filter((u) => {
+      if (u.role === "admin") return false;
+      const uComp = u.company_id || "arab_world";
+      return authCompIds.includes(uComp);
+    });
+  };
+
   const isCompanyAuthorized = (compId: string | undefined | null) => {
     if (!currentUser) return false;
     if (currentUser.role === "admin") return true;
@@ -2377,7 +2389,25 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
     e.preventDefault();
     if (!uName || !uCode || !uPass) return;
 
-    if (uRole !== "admin" && !uCompanyId) {
+    let finalRole = uRole;
+    let finalCompanyId = uCompanyId;
+
+    if (currentUser?.role !== "admin") {
+      // Prevent privilege escalation
+      if (uRole === "admin") {
+        finalRole = "employee";
+      }
+
+      // Prevent unauthorized company assignment
+      const authComps = getAuthorizedCompanies();
+      const authCompIds = authComps.map((c) => c.id);
+      if (!authCompIds.includes(uCompanyId)) {
+        showToast("⚠️ غير مصرح لك بتعيين موظف لهذه الشركة!", "error");
+        return;
+      }
+    }
+
+    if (finalRole !== "admin" && !finalCompanyId) {
       showToast("⚠️ يرجى اختيار الشركة التابع لها الموظف!", "error");
       return;
     }
@@ -2387,8 +2417,8 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       name: uName.trim(),
       code: uCode.trim(),
       password: uPass.trim(),
-      role: uRole,
-      company_id: uRole === "admin" ? null : uCompanyId,
+      role: finalRole,
+      company_id: finalRole === "admin" ? null : finalCompanyId,
       perms: {
         ...uPerms,
         region: uRegion,
@@ -4214,7 +4244,7 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                               className="w-full px-2 py-1.5 bg-slate-905 border border-slate-800 rounded-lg text-[11px] font-bold text-amber-400 focus:outline-none cursor-pointer text-slate-950 bg-white"
                             >
                               <option value="" className="text-slate-950">❌ غير مربوط بحساب مستخدم (اضغط لربط حساب مالي)</option>
-                              {users.map((u) => (
+                              {getAuthorizedUsers().map((u) => (
                                 <option key={u.id} value={u.id} className="text-slate-950">
                                   👤 {u.name} (كود: {u.code} • {u.role === "admin" ? "مدير" : (u.role === "supervisor" ? "مشرف" : "موظف")})
                                 </option>
@@ -5312,6 +5342,19 @@ CREATE TABLE IF NOT EXISTS sessions (
                 <div className="space-y-3">
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pb-2 border-b border-slate-850">
                     <span className="block text-xs font-extrabold text-amber-400">🚨 صلاحيات ومسؤوليات الموظف العامة والافتراضية</span>
+                    <div className="flex items-center gap-2 bg-slate-950/60 px-3 py-1.5 rounded-xl border border-slate-800">
+                      <span className="text-[10px] text-slate-400 font-bold">تعديل صلاحيات شركة:</span>
+                      <select
+                        value={selectedCompanyIdForPerms}
+                        onChange={(e) => setSelectedCompanyIdForPerms(e.target.value)}
+                        className="bg-transparent text-white font-extrabold text-xs focus:outline-none cursor-pointer text-slate-950 bg-white"
+                      >
+                        <option value="global" className="text-slate-950 font-bold">✨ الصلاحيات العامة الافتراضية</option>
+                        {getAuthorizedCompanies().map((c) => (
+                          <option key={c.id} value={c.id} className="text-slate-950 font-bold">🏢 {c.name}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
 
                   {selectedCompanyIdForPerms !== "global" && (
@@ -5562,7 +5605,7 @@ CREATE TABLE IF NOT EXISTS sessions (
                       </tr>
                   </thead>
                   <tbody>
-                    {users.map((u, idx) => {
+                    {getAuthorizedUsers().map((u, idx) => {
                       const permissionsObj = u.perms || {};
                       const names = Object.keys(permissionsObj).filter((k) => k !== "region" && k !== "worker_id" && permissionsObj[k]);
                       const effectiveWorkerId = permissionsObj.worker_id || u.worker_id;
