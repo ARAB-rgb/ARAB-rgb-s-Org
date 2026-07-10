@@ -17,7 +17,8 @@ import {
   awExtractCapitalSource, awExtractCapitalCompany, awExtractCapitalCollection,
   awExtractWorkerContract, awExtractWorkerLeaves, awBuildWorkerNotes, awCleanWorkerNotes,
   getSupabaseCredentials, saveSupabaseCredentials, checkSupabaseHealth, isSupabaseHealthy,
-  awExtractExternalNo, awBuildNotesWithRegionAndTreasuryAndExternalNo, awExtractClassification, awExtractCycle, awExtractReceiptType
+  awExtractExternalNo, awBuildNotesWithRegionAndTreasuryAndExternalNo, awExtractClassification, awExtractCycle, awExtractReceiptType,
+  serializeQuoteNotes, deserializeQuoteNotes
 } from "./db";
 
 import { Toast, ToastItem, ToastType } from "./components/Shared/Toast";
@@ -151,10 +152,13 @@ export default function App() {
   const [qClient, setQClient] = useState("");
   const [qPhone, setQPhone] = useState("");
   const [qProject, setQProject] = useState("");
-  const [qAmount, setQAmount] = useState<number | "">("");
+  const [qAmount, setQAmount] = useState<number | "">(0);
   const [qVat, setQVat] = useState<number | "">(15);
   const [qStatus, setQStatus] = useState<"جديد" | "مرسل" | "مقبول" | "مرفوض">("جديد");
   const [qNotes, setQNotes] = useState("");
+  const [qItems, setQItems] = useState<{ description: string; quantity: number; price: number; total: number; }[]>([
+    { description: "توريد وتركيب مواد وأعمال عامة", quantity: 1, price: 0, total: 0 }
+  ]);
 
   // 2. Receipts Forms
   const [rContractQuery, setRContractQuery] = useState("");
@@ -1312,22 +1316,187 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
     }
   };
 
+  const onPrintQuote = (q: Quote) => {
+    try {
+      const parsed = deserializeQuoteNotes(q.notes, q.amount);
+      const company = companies.find((c) => c.id === q.company_id) || companies[0];
+      const companyName = company ? company.name : "المؤسسة لخدمات المقاولات العامة";
+      const crNumber = company ? company.commercial_register || "لا يوجد" : "غير مسجل";
+      const taxNumber = company ? company.tax_no || "لا يوجد" : "غير مسجل";
+      const address = company ? company.address || "لا يوجد" : "غير مسجل";
+      const phone = company ? company.phone || "لا يوجد" : "غير مسجل";
+
+      const w = window.open("", "_blank");
+      if (!w) {
+        showToast("تنبيه: ملقم المتصفح حظر نافذة الطباعة التلقائية!", "info");
+        return;
+      }
+
+      const tableRows = parsed.items
+        .map(
+          (item: any, idx: number) => `
+        <tr>
+          <td>${idx + 1}</td>
+          <td style="text-align: right; padding-right: 15px;">${item.description || "بند توريد وتركيب مواد وأعمال عامة"}</td>
+          <td>${item.quantity || 1}</td>
+          <td>${Number(item.price || 0).toLocaleString()} ريال</td>
+          <td>${Number(item.total || 0).toLocaleString()} ريال</td>
+        </tr>
+      `
+        )
+        .join("");
+
+      const vatAmount = Math.round(Number(q.amount || 0) * (Number(q.vat || 0) / 100));
+
+      w.document.write(`
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>عرض سعر - ${q.client}</title>
+<style>
+*{box-sizing:border-box;font-family:Tahoma,Arial}
+body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
+.page{width:210mm;min-height:297mm;margin:auto;background:white;padding:20mm;box-shadow:0 10px 35px #0002;position:relative;border-radius:12px}
+.head{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #c9963f;padding-bottom:18px;margin-bottom:20px}
+.brand{text-align:right;}
+.brand h1{margin:0;font-size:24px;color:#07153a}
+.brand p{margin:4px 0 0;color:#555;font-size:12px}
+.quote-meta {text-align: left;}
+.quote-meta h2 {margin:0;font-size:22px;color:#c9963f;}
+.quote-meta p {margin:4px 0 0;color:#555;font-size:12px;font-family:monospace}
+.logo{width:54px;height:65px;position:relative;margin:auto}
+.logo:before,.logo:after{content:"";position:absolute;border:5px solid #1f2937;border-left:0;border-bottom:0;transform:skewY(-25deg)}
+.logo:before{width:30px;height:55px;right:18px;top:0}
+.logo:after{width:16px;height:45px;right:8px;top:10px;border-color:#c9963f}
+.title{background:linear-gradient(90deg,#07153a,#c9963f);color:white;text-align:center;padding:12px;border-radius:10px;font-size:18px;margin:20px 0;font-weight:bold}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+.box{border:1px solid #d9dee8;border-radius:10px;padding:9.5px;background:#fbfcff;min-height:54px}
+.box b{display:block;color:#8a642d;margin-bottom:4px;font-size:11px}
+.box span{font-size:13px;font-weight:bold}
+table{width:100%;border-collapse:collapse;margin-top:14px;font-size:12px}
+th{background:#07153a;color:white;padding:10px;font-weight:bold;font-size:11px}
+td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
+.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:18px 0}
+.sum{border-top:4px solid #c9963f;background:#f8fafc;border-radius:14px;text-align:center;padding:13px}
+.sum b{display:block;color:#07153a;margin-bottom:8px;font-size:12px}
+.sum span{font-size:18px;color:#07153a;font-weight:bold}
+.sum.grand-total {border-top-color: #10b981; background: #ecfdf5;}
+.sum.grand-total span {color: #10b981; font-size: 20px;}
+.signs{display:grid;grid-template-columns:1fr 1fr;gap:30px;margin-top:35px}
+.sign{height:90px;border-top:1px dashed #555;padding-top:10px;text-align:center;color:#333;font-weight:bold}
+.footer{position:absolute;bottom:12mm;left:20mm;right:20mm;text-align:center;color:#777;font-size:10px;border-top:1px solid #eee;padding-top:8px}
+.no-print{position:fixed;top:15px;left:15px;display:flex;gap:8px}
+.no-print button{border:0;border-radius:10px;padding:10px 15px;color:white;cursor:pointer;font-weight:bold}
+.print{background:#16a34a}.close{background:#64748b}
+@media print{body{background:white;padding:0}.page{box-shadow:none;margin:0;width:auto;min-height:auto}.no-print{display:none}}
+</style>
+</head>
+<body>
+<div class="no-print">
+<button class="print" onclick="window.print()">طباعة / حفظ PDF</button>
+<button class="close" onclick="window.close()">إغلاق الصفحة</button>
+</div>
+<div class="page">
+  <div class="head">
+    <div class="brand">
+      <h1>${companyName}</h1>
+      <p>السجل التجاري: ${crNumber} | الرقم الضريبي: ${taxNumber}</p>
+      <p>العنوان: ${address} | الجوال: ${phone}</p>
+    </div>
+    <div style="text-align: center;">
+      <div class="logo"></div>
+    </div>
+    <div class="quote-meta">
+      <h2>وثيقة عرض سعر</h2>
+      <p>رقم العرض: <b>${q.no}</b></p>
+      <p>التاريخ: <b>${q.date}</b></p>
+    </div>
+  </div>
+  
+  <div class="title">بيانات عميل عرض السعر</div>
+  <div class="grid">
+    <div class="box"><b>السادة / العميل الكريم</b><span>${q.client}</span></div>
+    <div class="box"><b>رقم الجوال</b><span>${q.phone || "غير مسجل"}</span></div>
+    <div class="box"><b>المشروع والموقع التابع</b><span>${q.project || "غير مسجل"}</span></div>
+  </div>
+
+  <div class="title">بنود وجدول كميات وأسعار العرض المالي والتشغيلي</div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 8%">م</th>
+        <th style="text-align: right; padding-right: 15px; width: 45%">البند والبيان الفني للمواد والأعمال</th>
+        <th style="width: 12%">الكمية</th>
+        <th style="width: 17%">سعر الوحدة</th>
+        <th style="width: 18%">الإجمالي الكلي</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${tableRows}
+    </tbody>
+  </table>
+
+  <div class="summary">
+    <div class="sum">
+      <b>إجمالي المبلغ الخاضع للضريبة</b>
+      <span>${Number(q.amount || 0).toLocaleString()} ريال</span>
+    </div>
+    <div class="sum">
+      <b>ضريبة القيمة المضافة (${q.vat || 15}%)</b>
+      <span>${vatAmount.toLocaleString()} ريال</span>
+    </div>
+    <div class="sum grand-total">
+      <b>الإجمالي الشامل والنهائي</b>
+      <span>${Number(q.total || 0).toLocaleString()} ريال</span>
+    </div>
+  </div>
+
+  ${
+    parsed.notes
+      ? `
+  <div class="title">الشروط والأحكام وملاحظات إضافية</div>
+  <div style="font-size: 11.5px; line-height: 1.7; border: 1px solid #d9dee8; padding: 15px; border-radius: 10px; background: #fafbfc; white-space: pre-wrap;">${parsed.notes}</div>
+  `
+      : ""
+  }
+
+  <div class="signs">
+    <div class="sign">الطرف الأول (مقدم عرض السعر)</div>
+    <div class="sign">الطرف الثاني (قبول واعتماد العميل)</div>
+  </div>
+
+  <div class="footer">
+    يعتبر هذا العرض صالحًا لمدة 15 يومًا من تاريخ إصداره، والاعتماد والقبول يعبّر عن البدء الفوري في صياغة العقود التنفيذية.
+  </div>
+</div>
+</body>
+</html>`);
+      w.document.close();
+    } catch (e) {
+      console.warn("Exception during Popups window.open printing:", e);
+    }
+  };
+
   // Quotes CRUD
   const saveQuoteLogic = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!qClient) return;
 
+    const serializedNotes = serializeQuoteNotes(qItems, qNotes);
+    const existingQuote = editQuoteId ? quotes.find((q) => q.id === editQuoteId) : null;
+
     const row = {
-      no: generateNextNo("AW-Q", quotes, "no"),
+      no: existingQuote ? existingQuote.no : generateNextNo("AW-Q", quotes, "no"),
       client: qClient.trim(),
       phone: qPhone.trim(),
       project: qProject.trim(),
       amount: Number(qAmount || 0),
       vat: Number(qVat || 0),
       total: Math.round(Number(qAmount || 0) * (1 + Number(qVat || 0) / 100)),
-      date: new Date().toISOString().slice(0, 10),
+      date: existingQuote ? existingQuote.date : new Date().toISOString().slice(0, 10),
       status: qStatus,
-      notes: qNotes,
+      notes: serializedNotes,
       company_id: getTargetCompanyId(formCompanyId),
     };
 
@@ -1348,8 +1517,9 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
       setQClient("");
       setQPhone("");
       setQProject("");
-      setQAmount("");
+      setQAmount(0);
       setQNotes("");
+      setQItems([{ description: "توريد وتركيب مواد وأعمال عامة", quantity: 1, price: 0, total: 0 }]);
       await loadEverything();
       showToast("تم حفظ عرض السعر بنجاح!");
     } catch {
@@ -2971,37 +3141,183 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
           {/* Core Quotes Tab Container */}
           {activeSection === "quotes" && (
             <div className="space-y-6">
-              <form onSubmit={saveQuoteLogic} className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl space-y-5">
-                <div className="border-b border-slate-850 pb-3">
+              <form onSubmit={saveQuoteLogic} className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl space-y-6">
+                <div className="border-b border-slate-850 pb-3 flex justify-between items-center">
                   <h3 className="text-base font-black text-white flex items-center gap-2"><span>📋</span> تحرير وثيقة عروض الأسعار</h3>
+                  {editQuoteId && (
+                    <span className="px-3 py-1 bg-amber-500/15 text-amber-400 rounded-lg text-[10px] font-black border border-amber-500/30">تعديل العرض النشط: {quotes.find(q => q.id === editQuoteId)?.no}</span>
+                  )}
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <input required placeholder="اسم العميل" value={qClient} onChange={(e) => setQClient(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-blue-500 font-sans" />
-                  <input placeholder="رقم الجوال" value={qPhone} onChange={(e) => setQPhone(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none font-sans" />
-                  <input placeholder="المشروع التابع" value={qProject} onChange={(e) => setQProject(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none font-sans" />
-                  <input type="number" required placeholder="قيمة العرض" value={qAmount} onChange={(e) => setQAmount(e.target.value ? Number(e.target.value) : "")} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none font-mono" />
-                  <input type="number" placeholder="الضريبة المقررة %" value={qVat} onChange={(e) => setQVat(e.target.value ? Number(e.target.value) : "")} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none font-mono" />
-                  
-                  <select value={formCompanyId} onChange={(e) => setFormCompanyId(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none font-sans">
-                    <option value="">🏢 تبعية شركة الشعار (تلقائي)</option>
-                    {getAuthorizedCompanies().map((c) => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
+                
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-400">اسم العميل الكريم *</label>
+                    <input required placeholder="اسم العميل" value={qClient} onChange={(e) => setQClient(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-blue-500 font-sans" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-400">رقم جوال العميل</label>
+                    <input placeholder="رقم الجوال" value={qPhone} onChange={(e) => setQPhone(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none font-sans" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-400">المشروع التابع</label>
+                    <input placeholder="المشروع التابع" value={qProject} onChange={(e) => setQProject(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none font-sans" />
+                  </div>
+                </div>
 
-                  <select value={qStatus} onChange={(e: any) => setQStatus(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none font-sans">
-                    <option value="جديد">جديد</option>
-                    <option value="مرسل">مرسل</option>
-                    <option value="مقبول">مقبول</option>
-                    <option value="مرفوض">مرفوض</option>
-                  </select>
-                  <textarea placeholder="شروط وملاحظات إضافية" value={qNotes} onChange={(e) => setQNotes(e.target.value)} className="w-full px-3 py-2 h-[41px] bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white sm:col-span-1 focus:outline-none font-sans" />
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-400">الضريبة المقررة %</label>
+                    <input type="number" placeholder="الضريبة المقررة %" value={qVat} onChange={(e) => setQVat(e.target.value ? Number(e.target.value) : "")} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none font-mono" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-400">تبعية شركة الشعار</label>
+                    <select value={formCompanyId} onChange={(e) => setFormCompanyId(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none font-sans">
+                      <option value="">🏢 تبعية شركة الشعار (تلقائي)</option>
+                      {getAuthorizedCompanies().map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-400">حالة العرض المبدئية</label>
+                    <select value={qStatus} onChange={(e: any) => setQStatus(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none font-sans">
+                      <option value="جديد">جديد</option>
+                      <option value="مرسل">مرسل</option>
+                      <option value="مقبول">مقبول</option>
+                      <option value="مرفوض">مرفوض</option>
+                    </select>
+                  </div>
                 </div>
+
+                {/* Items Table Builder */}
+                <div className="border-t border-slate-800/80 pt-5 space-y-3">
+                  <div className="flex justify-between items-center">
+                    <h4 className="text-xs font-black text-amber-500 flex items-center gap-1.5">
+                      <span>📊</span> بنود عرض السعر (جدول كميات ومواصفات وأسعار ومبالغ)
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => setQItems([...qItems, { description: "", quantity: 1, price: 0, total: 0 }])}
+                      className="px-3 py-1.5 bg-blue-600/20 text-blue-400 hover:bg-blue-600 hover:text-white rounded-xl text-[10px] font-black flex items-center gap-1 transition-all border border-blue-500/20"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> إضافة بند جديد لعرض السعر
+                    </button>
+                  </div>
+                  
+                  <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
+                    {qItems.map((item, index) => (
+                      <div key={index} className="grid grid-cols-1 md:grid-cols-12 gap-2 items-center bg-slate-950/40 p-3 rounded-2xl border border-slate-800/60 shadow-inner">
+                        <div className="md:col-span-1 text-center font-bold text-[10px] text-slate-500">البند {index + 1}</div>
+                        <div className="md:col-span-5">
+                          <input
+                            required
+                            placeholder="وصف وتفاصيل البند أو المادة أو الأعمال الفنية"
+                            value={item.description}
+                            onChange={(e) => {
+                              const updated = [...qItems];
+                              updated[index].description = e.target.value;
+                              setQItems(updated);
+                            }}
+                            className="w-full px-3 py-1.5 bg-slate-950/60 border border-slate-800 rounded-lg text-xs font-bold text-white focus:outline-none"
+                          />
+                        </div>
+                        <div className="md:col-span-2">
+                          <div className="relative">
+                            <input
+                              type="number"
+                              required
+                              min="1"
+                              placeholder="الكمية"
+                              value={item.quantity}
+                              onChange={(e) => {
+                                const val = Math.max(1, Number(e.target.value || 1));
+                                const updated = [...qItems];
+                                updated[index].quantity = val;
+                                updated[index].total = val * updated[index].price;
+                                setQItems(updated);
+                                const sum = updated.reduce((acc, curr) => acc + curr.total, 0);
+                                setQAmount(sum);
+                              }}
+                              className="w-full pl-7 pr-3 py-1.5 bg-slate-950/60 border border-slate-800 rounded-lg text-xs font-bold text-white text-center focus:outline-none font-mono"
+                            />
+                            <span className="absolute left-2 top-2 text-[8px] text-slate-500 font-black select-none">الكمية</span>
+                          </div>
+                        </div>
+                        <div className="md:col-span-2">
+                          <div className="relative">
+                            <input
+                              type="number"
+                              required
+                              min="0"
+                              step="0.01"
+                              placeholder="سعر الوحدة"
+                              value={item.price || ""}
+                              onChange={(e) => {
+                                const val = Math.max(0, Number(e.target.value || 0));
+                                const updated = [...qItems];
+                                updated[index].price = val;
+                                updated[index].total = updated[index].quantity * val;
+                                setQItems(updated);
+                                const sum = updated.reduce((acc, curr) => acc + curr.total, 0);
+                                setQAmount(sum);
+                              }}
+                              className="w-full pl-5 pr-3 py-1.5 bg-slate-950/60 border border-slate-800 rounded-lg text-xs font-bold text-white text-center focus:outline-none font-mono"
+                            />
+                            <span className="absolute left-2 top-2 text-[8px] text-slate-500 font-black select-none">ريال</span>
+                          </div>
+                        </div>
+                        <div className="md:col-span-1.5 text-center">
+                          <span className="text-xs font-black text-emerald-400 font-mono">
+                            {item.total.toLocaleString()} ريال
+                          </span>
+                        </div>
+                        <div className="md:col-span-0.5 text-center">
+                          <button
+                            type="button"
+                            disabled={qItems.length <= 1}
+                            onClick={() => {
+                              const updated = qItems.filter((_, i) => i !== index);
+                              setQItems(updated);
+                              const sum = updated.reduce((acc, curr) => acc + curr.total, 0);
+                              setQAmount(sum);
+                            }}
+                            className="p-1.5 text-rose-400 hover:text-rose-500 disabled:opacity-30 rounded-lg transition-colors"
+                            title="حذف هذا البند"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-slate-800/80 pt-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-400">الشروط والأحكام وملاحظات إضافية</label>
+                    <textarea placeholder="تكتب الشروط هنا مثل: مدة التوريد، شروط الدفع، الضمان..." value={qNotes} onChange={(e) => setQNotes(e.target.value)} className="w-full px-3 py-2 h-[75px] bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none font-sans" />
+                  </div>
+                  <div className="bg-slate-950/50 p-4 rounded-2xl border border-slate-800 flex flex-col justify-center space-y-2">
+                    <div className="flex justify-between items-center border-b border-slate-850 pb-1.5">
+                      <span className="text-xs text-slate-400 font-black">المجموع قبل الضريبة (قيمة العرض الكلية):</span>
+                      <span className="text-xs font-bold text-white font-mono">{Number(qAmount || 0).toLocaleString()} ريال</span>
+                    </div>
+                    <div className="flex justify-between items-center border-b border-slate-850 pb-1.5">
+                      <span className="text-xs text-slate-400 font-black">الضريبة المضافة ({qVat || 15}%):</span>
+                      <span className="text-xs font-bold text-slate-300 font-mono">{Math.round(Number(qAmount || 0) * (Number(qVat || 0) / 100)).toLocaleString()} ريال</span>
+                    </div>
+                    <div className="flex justify-between items-center pt-0.5">
+                      <span className="text-xs text-amber-500 font-black">الإجمالي الشامل للضريبة:</span>
+                      <span className="text-sm font-black text-emerald-400 font-mono">{Math.round(Number(qAmount || 0) * (1 + Number(qVat || 0) / 100)).toLocaleString()} ريال</span>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="flex gap-2 justify-end">
                   {editQuoteId && (
-                    <button type="button" onClick={() => { setEditQuoteId(null); setQClient(""); setQPhone(""); setQProject(""); setQAmount(""); setQNotes(""); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
+                    <button type="button" onClick={() => { setEditQuoteId(null); setQClient(""); setQPhone(""); setQProject(""); setQAmount(0); setQNotes(""); setQItems([{ description: "توريد وتركيب مواد وأعمال عامة", quantity: 1, price: 0, total: 0 }]); setFormCompanyId(""); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء التعديل</button>
                   )}
-                  <button type="submit" className="px-5 py-2.5 bg-amber-500 text-slate-950 rounded-xl text-xs font-black">{editQuoteId ? "تأكيد واستبدال" : "حفظ وحيازة أسعار"}</button>
+                  <button type="submit" className="px-5 py-2.5 bg-amber-500 text-slate-950 rounded-xl text-xs font-black">{editQuoteId ? "تأكيد وتحديث العرض الحالي" : "حفظ وحيازة أسعار"}</button>
                 </div>
               </form>
 
@@ -3012,29 +3328,53 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
                       <th className="py-2.5 px-3 font-bold">رقم العرض</th>
                       <th className="py-2.5 px-3 font-bold">العميل</th>
                       <th className="py-2.5 px-3 font-bold">المشروع</th>
+                      <th className="py-2.5 px-3 font-bold">عدد البنود</th>
                       <th className="py-2.5 px-3 font-bold">القيمة والضريبة</th>
                       <th className="py-2.5 px-3 font-bold">الإجمالي الشامل</th>
                       <th className="py-2.5 px-3 font-bold">الحالة</th>
-                      <th className="py-2.5 px-3 font-bold text-center">إجراء</th>
+                      <th className="py-2.5 px-3 font-bold text-center">إجراءات التحكم</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {getVisibleQuotes().map((q, idx) => (
-                      <tr key={idx} className="border-b border-slate-850 hover:bg-slate-800/10 transition-colors">
-                        <td className="py-3 px-3 font-mono font-bold text-slate-300">{q.no}</td>
-                        <td className="py-3 px-3 font-black text-white">{q.client}</td>
-                        <td className="py-3 px-3">{q.project}</td>
-                        <td className="py-3 px-3 font-mono">{q.amount.toLocaleString()} ريال (+{q.vat}%)</td>
-                        <td className="py-3 px-3 font-black text-emerald-400 font-mono">{q.total.toLocaleString()} ريال</td>
-                        <td className="py-3 px-3">
-                          <span className="px-2.5 py-0.5 rounded text-[11px] font-black bg-slate-800 text-slate-100">{q.status}</span>
-                        </td>
-                        <td className="py-3 px-3 text-center space-x-1">
-                          <button onClick={() => { setEditQuoteId(q.id); setQClient(q.client || ""); setQPhone(q.phone || ""); setQProject(q.project || ""); setQAmount(q.amount || ""); setQNotes(q.notes || ""); }} className="p-1 text-blue-400 hover:text-white inline-block"><Edit2 className="w-3.5 h-3.5" /></button>
-                          <button onClick={() => { if(confirm("حذف العرض بشكل نهائي؟")) { sb.from("quotes").delete().eq("id", q.id).then(() => loadEverything()); } }} className="p-1 text-rose-400 hover:text-rose-500 inline-block"><Trash2 className="w-3.5 h-3.5" /></button>
-                        </td>
-                      </tr>
-                    ))}
+                    {getVisibleQuotes().map((q, idx) => {
+                      const parsed = deserializeQuoteNotes(q.notes, q.amount);
+                      return (
+                        <tr key={idx} className="border-b border-slate-850 hover:bg-slate-800/10 transition-colors">
+                          <td className="py-3 px-3 font-mono font-bold text-slate-300">{q.no}</td>
+                          <td className="py-3 px-3 font-black text-white">{q.client}</td>
+                          <td className="py-3 px-3">{q.project}</td>
+                          <td className="py-3 px-3 font-bold text-slate-400">{parsed.items?.length || 1} بند</td>
+                          <td className="py-3 px-3 font-mono">{q.amount.toLocaleString()} ريال (+{q.vat}%)</td>
+                          <td className="py-3 px-3 font-black text-emerald-400 font-mono">{q.total.toLocaleString()} ريال</td>
+                          <td className="py-3 px-3">
+                            <span className="px-2.5 py-0.5 rounded text-[11px] font-black bg-slate-800 text-slate-100">{q.status}</span>
+                          </td>
+                          <td className="py-3 px-3 text-center space-x-2">
+                            <button onClick={() => onPrintQuote(q)} className="p-1 text-emerald-400 hover:text-white inline-block" title="طباعة عرض السعر"><Printer className="w-3.5 h-3.5" /></button>
+                            <button
+                              onClick={() => {
+                                const parsedNotes = deserializeQuoteNotes(q.notes, q.amount);
+                                setEditQuoteId(q.id);
+                                setQClient(q.client || "");
+                                setQPhone(q.phone || "");
+                                setQProject(q.project || "");
+                                setQAmount(q.amount || 0);
+                                setQNotes(parsedNotes.notes);
+                                setQItems(parsedNotes.items);
+                                if (q.company_id) {
+                                  setFormCompanyId(q.company_id);
+                                }
+                              }}
+                              className="p-1 text-blue-400 hover:text-white inline-block"
+                              title="تعديل عرض السعر"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button onClick={() => { if(confirm("حذف العرض بشكل نهائي؟")) { sb.from("quotes").delete().eq("id", q.id).then(() => loadEverything()); } }} className="p-1 text-rose-400 hover:text-rose-500 inline-block" title="حذف عرض السعر"><Trash2 className="w-3.5 h-3.5" /></button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

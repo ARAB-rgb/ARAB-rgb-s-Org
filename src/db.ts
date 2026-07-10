@@ -860,3 +860,31 @@ export function awBuildWorkerNotes(cleanText: string, contract: any, leaves: any
   if (tags.length === 0) return notesText;
   return tags.join(" ") + (notesText ? "\n" : "") + notesText;
 }
+
+export function serializeQuoteNotes(items: any[], notes: string): string {
+  return JSON.stringify({ items, notes });
+}
+
+export function deserializeQuoteNotes(notesStr: string | undefined, fallbackAmount: number): { items: any[]; notes: string } {
+  try {
+    const text = String(notesStr || "").trim();
+    if (text && (text.startsWith("{") || text.startsWith("["))) {
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed === "object") {
+        if (Array.isArray(parsed)) {
+          return { items: parsed, notes: "" };
+        }
+        if (parsed.items && Array.isArray(parsed.items)) {
+          return { items: parsed.items, notes: parsed.notes || "" };
+        }
+      }
+    }
+  } catch (e) {
+    // fallback on error
+  }
+  return {
+    items: [{ description: "بند توريد وتركيب مواد وأعمال عامة", quantity: 1, price: fallbackAmount || 0, total: fallbackAmount || 0 }],
+    notes: notesStr || ""
+  };
+}
+
