@@ -291,6 +291,7 @@ export default function App() {
   const [uRole, setURole] = useState<"admin" | "employee" | "supervisor">("employee");
   const [uCompanyId, setUCompanyId] = useState("");
   const [uRegion, setURegion] = useState("");
+  const [uStatus, setUStatus] = useState("نشط");
   const [selectedCompanyIdForPerms, setSelectedCompanyIdForPerms] = useState<string>("global");
   const [uCompanyPerms, setUCompanyPerms] = useState<Record<string, Record<string, boolean>>>({});
   const [uPerms, setUPerms] = useState<Record<string, boolean>>({
@@ -324,7 +325,7 @@ export default function App() {
     setIsLoading(true);
 
     try {
-      const { data, error } = await sb
+      let { data, error } = await sb
         .from("users")
         .select("*")
         .eq("code", loginCode.trim())
@@ -332,12 +333,60 @@ export default function App() {
         .maybeSingle();
 
       if (error || !data) {
-        showToast("بيانات تصريح الدخول غير صحيحة!", "error");
+        // Auto-seed requested admin credentials if they do not exist yet
+        if (loginCode.trim() === "1007363904" && loginPass.trim() === "139213") {
+          const defaultAdmin: AuthUser = {
+            id: "admin_1007363904",
+            name: "المدير العام (الأدمن)",
+            code: "1007363904",
+            password: "139213",
+            role: "admin",
+            company_id: null,
+            status: "نشط",
+            perms: {
+              installmentsView: true,
+              installmentsAdd: true,
+              installmentsEdit: true,
+              installmentsDelete: true,
+              quotes: true,
+              receipts: true,
+              payments: true,
+              expenses: true,
+              treasury: true,
+              projects: true,
+              workers: true,
+              companies: true,
+              users: true,
+              sessions: true,
+              print: true,
+              dashTopCards: true,
+              dashCollection: true,
+              dashPulse: true,
+              dashLateClients: true,
+              dashLastReceipts: true,
+              dashUpcomingPaid: true,
+              region: "",
+              worker_id: null
+            },
+            company_perms: {},
+            created_at: new Date().toISOString()
+          };
+          await sb.from("users").insert(defaultAdmin);
+          data = defaultAdmin;
+        } else {
+          showToast("بيانات تصريح الدخول غير صحيحة!", "error");
+          setIsLoading(false);
+          return;
+        }
+      }
+
+      const user: AuthUser = data as AuthUser;
+      if (user.status && user.status !== "نشط") {
+        showToast("⚠️ عذراً، هذا الحساب موقوف أو معطل حالياً من قبل الإدارة!", "error");
         setIsLoading(false);
         return;
       }
 
-      const user: AuthUser = data;
       setCurrentUser(user);
       localStorage.setItem("aw_current_user", JSON.stringify(user));
       showToast(`مرحباً بك مجدداً ${user.name}`);
@@ -436,10 +485,24 @@ export default function App() {
         // User logged out mid-flight or session was cleared, do not restore state
         return;
       }
-      const freshUser = uList.find((x) => x.id === currentUser?.id);
-      if (freshUser) {
-        setCurrentUser(freshUser);
-        localStorage.setItem("aw_current_user", JSON.stringify(freshUser));
+      if (currentUser) {
+        const freshUser = uList.find((x) => x.id === currentUser.id);
+        if (freshUser) {
+          if (freshUser.status && freshUser.status !== "نشط") {
+            setCurrentUser(null);
+            localStorage.removeItem("aw_current_user");
+            showToast("⚠️ تم إيقاف أو تعطيل هذا الحساب من قبل الإدارة. تم تسجيل الخروج تلقائياً.", "error");
+            return;
+          }
+          setCurrentUser(freshUser);
+          localStorage.setItem("aw_current_user", JSON.stringify(freshUser));
+        } else {
+          // The user was completely deleted from the database
+          setCurrentUser(null);
+          localStorage.removeItem("aw_current_user");
+          showToast("⚠️ عذراً، تم حذف حسابك أو إلغاء صلاحية دخولك بالكامل من النظام المالي.", "error");
+          return;
+        }
       }
     } catch {
       showToast("تنبيه: فشل في الاتصال بقاعدة البيانات", "error");
@@ -2584,6 +2647,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       password: uPass.trim(),
       role: finalRole,
       company_id: finalRole === "admin" ? null : finalCompanyId,
+      status: uStatus,
       perms: {
         ...uPerms,
         region: uRegion,
@@ -2613,6 +2677,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       setURegion("");
       setURole("employee");
       setUCompanyId("");
+      setUStatus("نشط");
       setSelectedCompanyIdForPerms("global");
       setUCompanyPerms({});
       setUPerms({
@@ -2657,8 +2722,13 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
         return;
       }
       await logSession(currentUser!, `حذف حساب الموظف: ${name}`);
-      await loadEverything();
-      showToast(`تم مسح حساب الموظف "${name}" بنجاح.`);
+      if (id === currentUser?.id) {
+        handleLogout();
+        showToast("لقد قمت بحذف حسابك الحالي. تم تسجيل الخروج.", "info");
+      } else {
+        await loadEverything();
+        showToast(`تم مسح حساب الموظف "${name}" بنجاح.`);
+      }
     } catch {
       showToast("فشل إتمام عملية حذف الموظف", "error");
     } finally {
@@ -5731,6 +5801,18 @@ CREATE TABLE extracts (
                         </select>
                       </div>
 
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-slate-400 font-black block">حالة الحساب والولوج</label>
+                        <select
+                          value={uStatus}
+                          onChange={(e) => setUStatus(e.target.value)}
+                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none text-slate-950 bg-white"
+                        >
+                          <option value="نشط" className="text-slate-950">🟢 نشط مصرح له بالدخول</option>
+                          <option value="موقف" className="text-slate-950">🔴 موقوف / معطل إدارياً</option>
+                        </select>
+                      </div>
+
                       {uRole !== "admin" && (
                         <div className="space-y-1">
                           <label className="text-[10px] text-slate-400 font-black block">🏢 الشركة التابع لها الموظف *</label>
@@ -6016,7 +6098,7 @@ CREATE TABLE extracts (
 
                 <div className="flex gap-2 justify-end">
                   {editUserId && (
-                    <button type="button" onClick={() => { setEditUserId(null); setUName(""); setUCode(""); setUPass(""); setUWorkerId(""); setURegion(""); setURole("employee"); setUCompanyId(""); setUCompanyPerms({}); setSelectedCompanyIdForPerms("global"); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
+                    <button type="button" onClick={() => { setEditUserId(null); setUName(""); setUCode(""); setUPass(""); setUWorkerId(""); setURegion(""); setURole("employee"); setUCompanyId(""); setUCompanyPerms({}); setUStatus("نشط"); setSelectedCompanyIdForPerms("global"); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
                   )}
                   <button type="submit" className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-black">حفظ وإرسال الصلاحية للموظف</button>
                 </div>
@@ -6052,7 +6134,12 @@ CREATE TABLE extracts (
                             </div>
                           </td>
                           <td className="py-3 px-3">
-                            <span className="px-2.5 py-0.5 rounded text-[10px] bg-slate-800 text-amber-400 font-bold border border-slate-700">{u.role === "admin" ? "أدمن مكتب عام" : (u.role === "supervisor" ? "مشرف مكتب عام / رئيسي" : "موظف فرع")}</span>
+                            <div className="flex flex-col gap-1 items-start">
+                              <span className="px-2.5 py-0.5 rounded text-[10px] bg-slate-800 text-amber-400 font-bold border border-slate-700">{u.role === "admin" ? "أدمن مكتب عام" : (u.role === "supervisor" ? "مشرف مكتب عام / رئيسي" : "موظف فرع")}</span>
+                              <span className={`px-2 py-0.5 rounded text-[9px] font-bold font-sans ${u.status === "نشط" || !u.status ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/25" : "bg-rose-500/10 text-rose-400 border border-rose-500/25"}`}>
+                                {u.status === "نشط" || !u.status ? "🟢 نشط" : "🔴 موقوف"}
+                              </span>
+                            </div>
                           </td>
                           <td className="py-3 px-3">
                             <span className="block font-black text-indigo-400">
@@ -6087,6 +6174,7 @@ CREATE TABLE extracts (
                             <button
                               onClick={() => {
                                 setEditUserId(u.id);
+                                setUStatus(u.status || "نشط");
                                 setUName(u.name || "");
                                 setUCode(u.code || "");
                                 setUPass(u.password || "");

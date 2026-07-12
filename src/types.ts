@@ -41,6 +41,7 @@ export interface User {
   company_perms?: Record<string, UserPerms>;
   worker_id?: string;
   company_id?: string | null;
+  status?: string;
   created_at?: string;
 }
 
