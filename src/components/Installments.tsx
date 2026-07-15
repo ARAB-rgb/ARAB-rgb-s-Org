@@ -22,6 +22,7 @@ interface InstallmentsProps {
   onSaveInstallment: (row: any, editId: string | null) => Promise<boolean>;
   onDeleteInstallment: (id: string) => void;
   onPrintContract: (id: string) => void;
+  onMigrateInstallment?: (installmentId: string, targetCompanyId: string, reason?: string) => Promise<boolean>;
   receipts: any[];
   companies?: Company[];
   selectedCompanyId?: string;
@@ -56,6 +57,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
   onSaveInstallment,
   onDeleteInstallment,
   onPrintContract,
+  onMigrateInstallment,
   receipts,
   companies,
   selectedCompanyId,
@@ -1488,6 +1490,82 @@ export const Installments: React.FC<InstallmentsProps> = ({
                   </table>
                 </div>
               </div>
+
+              {/* ترحيل العقد بين الشركات */}
+              {((finalPerms?.installmentsEdit) || currentUser?.role === "admin") && companies && companies.length > 1 && (
+                <div className="border border-amber-500/15 bg-amber-500/5 p-5 rounded-2xl space-y-3.5 mt-2">
+                  <h5 className="text-sm font-black text-amber-400 flex items-center gap-1.5">
+                    <span>🔄</span> ترحيل العقد والمستندات لشركة أخرى
+                  </h5>
+                  <p className="text-[11px] font-bold text-amber-200/80 leading-relaxed font-sans">
+                    سيؤدي هذا الإجراء لترحيل بطاقة العقد بكافة الأقساط والسجل، بالإضافة لنقل جميع سندات المقبوضات المرتبطة، وكافة المصروفات المسجلة تحت مشروع العقد الحالي إلى حسابات الشركة المستهدفة بشكل فوري وتحديث المركز المالي للشركتين.
+                  </p>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 mb-1">الشركة المستهدفة بالترحيل</label>
+                      <select
+                        id="migrate-target-company"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-extrabold focus:outline-none focus:border-amber-500 cursor-pointer"
+                        defaultValue=""
+                      >
+                        <option value="" disabled className="text-slate-500">اختر الشركة المستهدفة...</option>
+                        {companies
+                          .filter((c) => c.id !== selectedFileContract.company_id)
+                          .map((c) => (
+                            <option key={c.id} value={c.id} className="text-white font-bold">🏢 {c.name}</option>
+                          ))}
+                      </select>
+                    </div>
+                    
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 mb-1">السبب الرقابي والتدقيقي للترحيل</label>
+                      <input
+                        type="text"
+                        id="migrate-reason-input"
+                        placeholder="مثال: تسوية ميزانيات الفروع، تدوير عقود الحسابات..."
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 font-sans"
+                      />
+                    </div>
+                  </div>
+                  
+                  <div className="flex justify-end pt-1.5">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const targetSelect = document.getElementById("migrate-target-company") as HTMLSelectElement;
+                        const reasonInput = document.getElementById("migrate-reason-input") as HTMLInputElement;
+                        
+                        const targetId = targetSelect?.value;
+                        const reason = reasonInput?.value || "";
+                        
+                        if (!targetId) {
+                          alert("يرجى اختيار الشركة المستهدفة للترحيل أولاً!");
+                          return;
+                        }
+                        
+                        if (!reason.trim()) {
+                          alert("يرجى كتابة سبب الترحيل للأغراض التدقيقية والرقابية!");
+                          return;
+                        }
+                        
+                        const targetCompName = companies.find(c => c.id === targetId)?.name || targetId;
+                        if (confirm(`هل أنت متأكد من ترحيل العقد الحالي بكافة سنداته ومصروفاته إلى شركة "${targetCompName}"؟`)) {
+                          if (onMigrateInstallment) {
+                            const success = await onMigrateInstallment(selectedFileContract.id, targetId, reason);
+                            if (success) {
+                              setSelectedFileContract(null);
+                            }
+                          }
+                        }
+                      }}
+                      className="px-4 py-2 rounded-xl text-xs font-black bg-amber-500 hover:bg-amber-400 text-slate-950 flex items-center gap-1.5 transition-all shadow-lg shadow-amber-500/10 cursor-pointer"
+                    >
+                      <span>🚀</span> ترحيل العقد بالكامل الآن
+                    </button>
+                  </div>
+                </div>
+              )}
 
             </div>
 

@@ -7,7 +7,8 @@ import React, { useState, useEffect, useRef } from "react";
 import {
   Home, ClipboardList, FileText, Landmark, TrendingUp, TrendingDown, Briefcase, Users,
   Settings, LogOut, Calendar, MapPin, User, Phone, Shield, Search, Plus,
-  Edit2, Trash2, Download, AlertTriangle, Sparkles, Clock, RefreshCw, Key, Printer, Building, ChevronDown, ChevronUp
+  Edit2, Trash2, Download, AlertTriangle, Sparkles, Clock, RefreshCw, Key, Printer, Building, ChevronDown, ChevronUp,
+  PieChart, ShieldAlert, ShieldCheck
 } from "lucide-react";
 
 import { User as AuthUser, Installment, Quote, Receipt, Payment, Expense, Project, Worker, DbSession, Company, Extract } from "./types";
@@ -28,6 +29,7 @@ import { safeStorage } from "./safeStorage";
 
 const localStorage = safeStorage;
 import { Treasury } from "./components/Treasury";
+import { FinancialReports } from "./components/FinancialReports";
 
 const getStoredTreasuries = (companyId?: string | null): string[] => {
   const defaults = ["خزنة الشركة", "خزنة التحصيل", "خزنة التحويل", "نقاط البيع", "خزنة المقاولات"];
@@ -105,6 +107,14 @@ export default function App() {
   const [editUserId, setEditUserId] = useState<string | null>(null);
   const [selfSelectedWorkerId, setSelfSelectedWorkerId] = useState<string>("");
 
+  // Audit / Edit control states for Managers
+  const [showAuditModal, setShowAuditModal] = useState<boolean>(false);
+  const [auditReason, setAuditReason] = useState<string>("");
+  const [auditRefNo, setAuditRefNo] = useState<string>("");
+  const [auditPendingAction, setAuditPendingAction] = useState<{
+    type: "receipt" | "payment" | "expense";
+  } | null>(null);
+
   // In-app Popup states for Popups and safe Iframe Actions
   const [confirmDialog, setConfirmDialog] = useState<{
     open: boolean;
@@ -126,6 +136,37 @@ export default function App() {
   ) => {
     setConfirmReason("");
     setConfirmDialog({ open: true, title, message, onConfirm, requireReason, reasonPlaceholder });
+  };
+
+  const handleConfirmAuditSave = async () => {
+    if (!auditReason.trim() || !auditRefNo.trim()) {
+      showToast("يرجى إدخال سبب التعديل ورقم القيد المرجعي!", "error");
+      return;
+    }
+
+    const reason = auditReason.trim();
+    const refNo = auditRefNo.trim();
+
+    setShowAuditModal(false);
+    setAuditReason("");
+    setAuditRefNo("");
+
+    if (auditPendingAction?.type === "receipt") {
+      await saveReceiptLogic(undefined, reason, refNo);
+    } else if (auditPendingAction?.type === "payment") {
+      await savePaymentLogic(undefined, reason, refNo);
+    } else if (auditPendingAction?.type === "expense") {
+      await saveExpenseLogic(undefined, reason, refNo);
+    }
+
+    setAuditPendingAction(null);
+  };
+
+  const handleCancelAuditSave = () => {
+    setShowAuditModal(false);
+    setAuditReason("");
+    setAuditRefNo("");
+    setAuditPendingAction(null);
   };
 
   // Supabase Dynamic Integration Settings
@@ -692,6 +733,41 @@ export default function App() {
     }
   }, [currentUser]);
 
+  // Immediate session validation on mount
+  useEffect(() => {
+    const verifySessionOnMount = async () => {
+      if (currentUser) {
+        try {
+          const { data, error } = await sb
+            .from("users")
+            .select("id, status")
+            .eq("id", currentUser.id)
+            .maybeSingle();
+
+          if (error) {
+            console.warn("Could not verify session with Supabase:", error);
+            return;
+          }
+
+          if (!data) {
+            // User does not exist in the database (deleted)
+            setCurrentUser(null);
+            localStorage.removeItem("aw_current_user");
+            showToast("⚠️ تم حذف هذا الحساب من النظام المالي. لا يمكن الدخول.", "error");
+          } else if (data.status && data.status !== "نشط") {
+            // User is suspended
+            setCurrentUser(null);
+            localStorage.removeItem("aw_current_user");
+            showToast("⚠️ عذراً، هذا الحساب موقوف أو معطل حالياً من قبل الإدارة!", "error");
+          }
+        } catch (e) {
+          console.error("Session verification failed:", e);
+        }
+      }
+    };
+    verifySessionOnMount();
+  }, []);
+
   const getTargetCompanyId = (formCompanyVal?: string) => {
     if (currentUser?.role !== "admin") {
       if (formCompanyVal && isCompanyAuthorized(formCompanyVal)) {
@@ -934,6 +1010,14 @@ export default function App() {
   const getVisibleProjects = () => {
     return projects.filter((item) => {
       if (!isCompanyAuthorized(item.company_id)) return false;
+      if (currentUser && currentUser.role !== "admin" && userRegionFilter) {
+        const itemLocation = item.location || "";
+        const itemNotes = item.notes || "";
+        const hasRegionMatch = itemLocation.toLowerCase().includes(userRegionFilter.toLowerCase()) ||
+                             userRegionFilter.toLowerCase().includes(itemLocation.toLowerCase()) ||
+                             itemNotes.toLowerCase().includes(userRegionFilter.toLowerCase());
+        if (!hasRegionMatch) return false;
+      }
       const itemComp = item.company_id || "arab_world";
       return selectedCompanyId === "all" || itemComp === selectedCompanyId;
     });
@@ -1139,19 +1223,95 @@ export default function App() {
     }
   };
 
-  const onDeleteInstallment = async (id: string) => {
+  const onDeleteInstallment = (id: string) => {
+    const inst = installments.find(i => i.id === id);
+    const instName = inst ? `${inst.no} - ${inst.client || ""}` : id;
+    triggerConfirm(
+      "حذف ملف العقد والأقساط",
+      `هل أنت متأكد من حذف عقد العميل "${instName}" بشكل نهائي؟ سيؤدي هذا الإجراء لمسح كافة بيانات السجل والالتزامات المرتبطة. يتطلب هذا الإجراء توثيق سبب الحذف رقابياً.`,
+      async (reason) => {
+        setIsLoading(true);
+        try {
+          const { error } = await sb.from("installments").delete().eq("id", id);
+          if (error) {
+            showToast(error.message, "error");
+            return;
+          }
+          const logMsg = `حذف ملف عقد تقسيط: ${instName}` + (reason ? ` [السبب: ${reason}]` : "");
+          await logSession(currentUser!, logMsg);
+          await loadEverything();
+          showToast("تم مسح مستندات العقد كاملاً");
+        } catch {
+          showToast("فشل في استكمال حذف المستند", "error");
+        } finally {
+          setIsLoading(false);
+        }
+      },
+      true,
+      "اكتب هنا سبب حذف عقد التقسيط للأرشفة والرقابة التدقيقية..."
+    );
+  };
+
+  const onMigrateInstallment = async (installmentId: string, targetCompanyId: string, reason?: string): Promise<boolean> => {
     setIsLoading(true);
     try {
-      const { error } = await sb.from("installments").delete().eq("id", id);
-      if (error) {
-        showToast(error.message, "error");
-        return;
+      const inst = installments.find(i => i.id === installmentId);
+      if (!inst) {
+        showToast("لم يتم العثور على العقد المحدد", "error");
+        return false;
       }
-      await logSession(currentUser!, `حذف ملف عقد تقسيط ID: ${id}`);
+
+      const targetComp = companies.find(c => c.id === targetCompanyId);
+      const targetCompName = targetComp ? targetComp.name : targetCompanyId;
+
+      // 1. Update the installment's company_id
+      const { error: instError } = await sb
+        .from("installments")
+        .update({ company_id: targetCompanyId })
+        .eq("id", installmentId);
+
+      if (instError) {
+        showToast(instError.message, "error");
+        return false;
+      }
+
+      // 2. Update the receipts company_id
+      await sb
+        .from("receipts")
+        .update({ company_id: targetCompanyId })
+        .eq("installment_id", installmentId);
+
+      if (inst.no) {
+        await sb
+          .from("receipts")
+          .update({ company_id: targetCompanyId })
+          .eq("contract_no", inst.no);
+      }
+
+      // 3. Update expenses of this contract/project
+      if (inst.project) {
+        await sb
+          .from("expenses")
+          .update({ company_id: targetCompanyId })
+          .eq("project", inst.project);
+
+        // Also update any matching project's company_id if it exists
+        await sb
+          .from("projects")
+          .update({ company_id: targetCompanyId })
+          .eq("name", inst.project);
+      }
+
+      // Log this action
+      const logMsg = `ترحيل العقد (${inst.client} - رقم: ${inst.no}) إلى شركة [${targetCompName}] مع كافة السندات والمصروفات المرتبطة` + (reason ? ` [السبب: ${reason}]` : "");
+      await logSession(currentUser!, logMsg);
+
       await loadEverything();
-      showToast("تم مسح مستندات العقد كاملاً");
-    } catch {
-      showToast("فشل في استكمال حذف المستند", "error");
+      showToast(`تم ترحيل العقد بنجاح إلى شركة ${targetCompName}`);
+      return true;
+    } catch (err: any) {
+      showToast("حدث خطأ أثناء ترحيل العقد", "error");
+      return false;
     } finally {
       setIsLoading(false);
     }
@@ -1592,10 +1752,39 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
     }
   };
 
+  const deleteQuoteLogic = async (id: string, reason?: string) => {
+    setIsLoading(true);
+    try {
+      const q = quotes.find((item) => item.id === id);
+      if (!q) return;
+
+      const { error } = await sb.from("quotes").delete().eq("id", id);
+      if (error) {
+        showToast(error.message, "error");
+        return;
+      }
+
+      const logMsg = `حذف عرض السعر رقم: ${q.no} للعميل: ${q.client}` + (reason ? ` [السبب: ${reason}]` : "");
+      await logSession(currentUser!, logMsg);
+      await loadEverything();
+      showToast("تم حذف عرض السعر بنجاح!");
+    } catch {
+      showToast("حدث خلل أثناء حذف عرض السعر", "error");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Receipts CRUD with auto updating Linked Installments
-  const saveReceiptLogic = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const saveReceiptLogic = async (e?: React.FormEvent, auditReasonPassed?: string, auditRefNoPassed?: string) => {
+    if (e) e.preventDefault();
     if (!rFrom) return;
+
+    if (editReceiptId && (currentUser?.role === "admin" || currentUser?.role === "supervisor") && !auditReasonPassed) {
+      setAuditPendingAction({ type: "receipt" });
+      setShowAuditModal(true);
+      return;
+    }
 
     if (rExternalNo && rExternalNo.trim()) {
       const trimmedExt = rExternalNo.trim();
@@ -1626,7 +1815,10 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
     const afterAmt = linked ? Math.max(0, beforeAmt + (rType === "صادر" ? amt : -amt)) : 0;
 
     const rRegion = linked ? (awExtractRegion(linked.notes || "") || userRegionFilter) : userRegionFilter;
-    const notesAppended = awBuildNotesWithRegionAndTreasuryAndExternalNo(rNotes, rRegion, rTreasury, rExternalNo, rType);
+    let notesAppended = awBuildNotesWithRegionAndTreasuryAndExternalNo(rNotes, rRegion, rTreasury, rExternalNo, rType);
+    if (auditReasonPassed) {
+      notesAppended = `${notesAppended} | ⚠️ قيد تعديل رقابي: [السبب: ${auditReasonPassed}] [مرجع: ${auditRefNoPassed}]`;
+    }
 
     const row: any = {
       from_name: rFrom,
@@ -1665,7 +1857,14 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
         await recalcLinkedContractFromReceipts(linked.id);
       }
 
-      await logSession(currentUser!, editReceiptId ? `تعديل سند قبض مالي رقم: ${row.no}` : `تحرير سند قبض وراد مالي رقم: ${row.no}`);
+      await logSession(
+        currentUser!,
+        editReceiptId
+          ? (auditReasonPassed
+              ? `تعديل رقابي لسند قبض مالي رقم: ${row.no} [السبب: ${auditReasonPassed}] [مرجع: ${auditRefNoPassed}]`
+              : `تعديل سند قبض مالي رقم: ${row.no}`)
+          : `تحرير سند قبض وراد مالي رقم: ${row.no}`
+      );
       
       setEditReceiptId(null);
       setRSelectedInstallment(null);
@@ -1726,13 +1925,24 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
   };
 
   // Payments CRUD
-  const savePaymentLogic = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const savePaymentLogic = async (e?: React.FormEvent, auditReasonPassed?: string, auditRefNoPassed?: string) => {
+    if (e) e.preventDefault();
     if (!payTo || !payAmount) return;
+
+    if (editPaymentId && (currentUser?.role === "admin" || currentUser?.role === "supervisor") && !auditReasonPassed) {
+      setAuditPendingAction({ type: "payment" });
+      setShowAuditModal(true);
+      return;
+    }
 
     const targetNo = editPaymentId
       ? (payments.find(p => p.id === editPaymentId)?.no || generateNextNo("AW-PAY", payments, "no"))
       : generateNextNo("AW-PAY", payments, "no");
+
+    let notesAppended = awBuildNotesWithRegionAndTreasury(payNotes, userRegionFilter, payTreasury);
+    if (auditReasonPassed) {
+      notesAppended = `${notesAppended} | ⚠️ قيد تعديل رقابي: [السبب: ${auditReasonPassed}] [مرجع: ${auditRefNoPassed}]`;
+    }
 
     const row = {
       no: targetNo,
@@ -1741,7 +1951,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       method: payMethod,
       date: payDate,
       project: payProject.trim(),
-      notes: awBuildNotesWithRegionAndTreasury(payNotes, userRegionFilter, payTreasury),
+      notes: notesAppended,
       company_id: getTargetCompanyId(paymentCompanyId),
       worker_id: payWorkerId || null,
     };
@@ -1810,7 +2020,14 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
         return;
       }
 
-      await logSession(currentUser!, editPaymentId ? `تعديل سند الصرف رقم: ${row.no}` : `تحرير سند صرف صادر مالي رقم: ${row.no}`);
+      await logSession(
+        currentUser!,
+        editPaymentId
+          ? (auditReasonPassed
+              ? `تعديل رقابي لسند الصرف رقم: ${row.no} [السبب: ${auditReasonPassed}] [مرجع: ${auditRefNoPassed}]`
+              : `تعديل سند الصرف رقم: ${row.no}`)
+          : `تحرير سند صرف صادر مالي رقم: ${row.no}`
+      );
       setEditPaymentId(null);
       setPayTo("");
       setPayAmount("");
@@ -1865,19 +2082,34 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
   };
 
   // Expenses CRUD
-  const saveExpenseLogic = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const saveExpenseLogic = async (e?: React.FormEvent, auditReasonPassed?: string, auditRefNoPassed?: string) => {
+    if (e) e.preventDefault();
     if (!eName || !eAmount) return;
 
+    if (editExpenseId && (currentUser?.role === "admin" || currentUser?.role === "supervisor") && !auditReasonPassed) {
+      setAuditPendingAction({ type: "expense" });
+      setShowAuditModal(true);
+      return;
+    }
+
+    const targetNo = editExpenseId
+      ? (expenses.find(e => e.id === editExpenseId)?.no || generateNextNo("AW-EXP", expenses, "no"))
+      : generateNextNo("AW-EXP", expenses, "no");
+
+    let notesAppended = awBuildNotesWithRegionAndTreasury(eNotes, userRegionFilter, eTreasury);
+    if (auditReasonPassed) {
+      notesAppended = `${notesAppended} | ⚠️ قيد تعديل رقابي: [السبب: ${auditReasonPassed}] [مرجع: ${auditRefNoPassed}]`;
+    }
+
     const row = {
-      no: generateNextNo("AW-EXP", expenses, "no"),
+      no: targetNo,
       name: eName.trim(),
       category: eCategory,
       amount: Number(eAmount),
       date: eDate,
       project: eProject.trim(),
       supplier: eSupplier.trim(),
-      notes: awBuildNotesWithRegionAndTreasury(eNotes, userRegionFilter, eTreasury),
+      notes: notesAppended,
       company_id: getTargetCompanyId(expenseCompanyId),
     };
 
@@ -1893,7 +2125,14 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
         return;
       }
 
-      await logSession(currentUser!, editExpenseId ? `تعديل بند المصروف رقم: ${row.no}` : `تحرير بند مصروفات فرعي رقم: ${row.no}`);
+      await logSession(
+        currentUser!,
+        editExpenseId
+          ? (auditReasonPassed
+              ? `تعديل رقابي لبند المصروف رقم: ${row.no} [السبب: ${auditReasonPassed}] [مرجع: ${auditRefNoPassed}]`
+              : `تعديل بند المصروف رقم: ${row.no}`)
+          : `تحرير بند مصروفات فرعي رقم: ${row.no}`
+      );
       setEditExpenseId(null);
       setEName("");
       setEAmount("");
@@ -1906,6 +2145,29 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       showToast("تم توثيق المصروف في الدفتر المالي!");
     } catch {
       showToast("فشل ترحيل قيد المصروف", "error");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const deleteExpenseLogic = async (id: string, reason?: string) => {
+    setIsLoading(true);
+    try {
+      const e = expenses.find((item) => item.id === id);
+      if (!e) return;
+
+      const { error } = await sb.from("expenses").delete().eq("id", id);
+      if (error) {
+        showToast(error.message, "error");
+        return;
+      }
+
+      const logMsg = `حذف بند المصروف رقم: ${e.no} بقيمة: ${e.amount} ريال` + (reason ? ` [السبب: ${reason}]` : "");
+      await logSession(currentUser!, logMsg);
+      await loadEverything();
+      showToast("تم حذف بند المصروف بنجاح!");
+    } catch {
+      showToast("حدث خلل أثناء حذف المصروف", "error");
     } finally {
       setIsLoading(false);
     }
@@ -1954,6 +2216,29 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       showToast("تم حفظ بطاقة المشروع بنجاح!");
     } catch {
       showToast("حدث خلل في ملقم ملفات المشاريع", "error");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const deleteProjectLogic = async (projectId: string, reason?: string) => {
+    setIsLoading(true);
+    try {
+      const p = projects.find((item) => item.id === projectId);
+      if (!p) return;
+
+      const { error } = await sb.from("projects").delete().eq("id", projectId);
+      if (error) {
+        showToast(error.message, "error");
+        return;
+      }
+
+      const logMsg = `حذف ملف المشروع: ${p.name}` + (reason ? ` [السبب: ${reason}]` : "");
+      await logSession(currentUser!, logMsg);
+      await loadEverything();
+      showToast("تم حذف بطاقة المشروع من النظام!");
+    } catch {
+      showToast("حدث خلل أثناء حذف المشروع", "error");
     } finally {
       setIsLoading(false);
     }
@@ -2010,6 +2295,29 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       showToast("تم تحديث سلف مستحقات العمال.");
     } catch {
       showToast("خلل في مستند مجمع السلف عمال", "error");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const deleteWorkerLogic = async (id: string, reason?: string) => {
+    setIsLoading(true);
+    try {
+      const w = workers.find((item) => item.id === id);
+      if (!w) return;
+
+      const { error } = await sb.from("workers").delete().eq("id", id);
+      if (error) {
+        showToast(error.message, "error");
+        return;
+      }
+
+      const logMsg = `حذف ملف العامل/الفني: ${w.name}` + (reason ? ` [السبب: ${reason}]` : "");
+      await logSession(currentUser!, logMsg);
+      await loadEverything();
+      showToast("تم مسح العامل من قوائم الحساب بنجاح!");
+    } catch {
+      showToast("حدث خلل أثناء حذف ملف العامل", "error");
     } finally {
       setIsLoading(false);
     }
@@ -2854,6 +3162,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
     { key: "payments", label: "سند صرف", icon: TrendingUp, visible: true },
     { key: "expenses", label: "المصروفات", icon: TrendingDown, visible: true },
     { key: "treasury", label: "الخزنة الفرعية", icon: Shield, visible: true },
+    { key: "financial_reports", label: "التقارير والقوائم المالية", icon: PieChart, visible: true },
     { key: "projects", label: "المشاريع الجارية", icon: Briefcase, visible: true },
     { key: "workers", label: "العمال والسلفيات", icon: Users, visible: true },
     { key: "companies", label: "دليل الشركات والمستخلصات", icon: Building, visible: currentUser?.role === "admin" || can("companies") },
@@ -3189,6 +3498,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
               onSaveInstallment={onSaveInstallment}
               onDeleteInstallment={onDeleteInstallment}
               onPrintContract={onPrintContract}
+              onMigrateInstallment={onMigrateInstallment}
               receipts={getVisibleReceipts()}
               companies={getAuthorizedCompanies()}
               selectedCompanyId={selectedCompanyId}
@@ -3440,7 +3750,25 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                             >
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>
-                            <button onClick={() => { if(confirm("حذف العرض بشكل نهائي؟")) { sb.from("quotes").delete().eq("id", q.id).then(() => loadEverything()); } }} className="p-1 text-rose-400 hover:text-rose-500 inline-block" title="حذف عرض السعر"><Trash2 className="w-3.5 h-3.5" /></button>
+                            <button
+                              onClick={() => {
+                                if (currentUser?.role !== "admin" && currentUser?.role !== "supervisor" && !can("quotes")) {
+                                  showToast("عذراً، لا تمتلك صلاحية حذف عروض الأسعار!", "error");
+                                  return;
+                                }
+                                triggerConfirm(
+                                  "حذف عرض السعر",
+                                  `هل أنت متأكد من حذف عرض السعر رقم "${q.no}" للعميل "${q.client}" بشكل نهائي؟ يتطلب هذا الإجراء توثيق سبب رقابي.`,
+                                  (reason) => deleteQuoteLogic(q.id, reason),
+                                  true,
+                                  "اكتب هنا سبب حذف عرض السعر للأرشفة والمراجعة..."
+                                );
+                              }}
+                              className="p-1 text-rose-400 hover:text-rose-500 inline-block"
+                              title="حذف عرض السعر"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </td>
                         </tr>
                       );
@@ -4193,7 +4521,25 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                           </td>
                           <td className="py-3 px-3 text-center space-x-1">
                             <button onClick={() => { setEditExpenseId(e.id); setEName(e.name || ""); setECategory(e.category || ""); setEAmount(e.amount || ""); setEDate(e.date || ""); setEProject(e.project || ""); setESupplier(e.supplier || ""); setENotes(awCleanNotes(e.notes || "")); setETreasury(awExtractTreasury(e.notes || "") || "خزنة الشركة"); setExpenseCompanyId(e.company_id || ""); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
-                            <button onClick={() => { if(confirm("تأكيد الحذف؟")) { sb.from("expenses").delete().eq("id", e.id).then(() => loadEverything()); } }} className="p-1 text-rose-400 hover:text-rose-500"><Trash2 className="w-3.5 h-3.5" /></button>
+                            <button
+                              onClick={() => {
+                                if (currentUser?.role !== "admin" && currentUser?.role !== "supervisor" && !can("expenses")) {
+                                  showToast("عذراً، لا تمتلك صلاحية حذف المصاريف!", "error");
+                                  return;
+                                }
+                                triggerConfirm(
+                                  "حذف سند المصروف",
+                                  `هل أنت متأكد من حذف سند المصروف "${e.name}" بقيمة ${e.amount} ريال بشكل نهائي؟ يتطلب هذا الإجراء توثيق سبب رقابي.`,
+                                  (reason) => deleteExpenseLogic(e.id, reason),
+                                  true,
+                                  "اكتب هنا سبب حذف قيد المصروف للأرشيف والرقابة..."
+                                );
+                              }}
+                              className="p-1 text-rose-400 hover:text-rose-500"
+                              title="حذف المصروف"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </td>
                         </tr>
                         {expandedExpenses[e.id] && (
@@ -4262,7 +4608,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
 
           {/* Active Projects Tab Container */}
           {activeSection === "projects" && (
-            <div className="space-y-6">
+            <div id="projects-tab-view" className="space-y-6">
               <form onSubmit={saveProjectLogic} className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl space-y-5">
                 <div className="border-b border-slate-850 pb-3">
                   <h3 className="text-base font-black text-white flex items-center gap-2"><span>🏗️</span> تسجيل مشروع جديد وبطاقة الموقع</h3>
@@ -4360,8 +4706,47 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                             <span className={`inline-block px-2.5 py-0.5 rounded text-[10px] font-black ${p.status === "نشط" ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"}`}>{p.status}</span>
                           </td>
                           <td className="py-3 px-3 text-center space-x-1">
-                            <button onClick={() => { setEditProjectId(p.id); setPName(p.name || ""); setPLocation(p.location || ""); setPEngineer(p.engineer || ""); setPBudget(p.budget || ""); setPProgress(p.progress !== undefined && p.progress !== null ? p.progress : 0); setPStatus(p.status || "نشط"); setPNotes(p.notes || ""); setProjectCompanyId(p.company_id || ""); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
-                            <button onClick={() => { if(confirm("حذف ملف المشروع بشكل نهائي؟")) { sb.from("projects").delete().eq("id", p.id).then(() => loadEverything()); } }} className="p-1 text-rose-400 hover:text-rose-500"><Trash2 className="w-3.5 h-3.5" /></button>
+                            <button
+                              onClick={() => {
+                                if (currentUser?.role !== "admin" && currentUser?.role !== "supervisor" && !can("projects")) {
+                                  showToast("عذراً، لا تمتلك صلاحية تعديل المشاريع!", "error");
+                                  return;
+                                }
+                                setEditProjectId(p.id);
+                                setPName(p.name || "");
+                                setPLocation(p.location || "");
+                                setPEngineer(p.engineer || "");
+                                setPBudget(p.budget || "");
+                                setPProgress(p.progress !== undefined && p.progress !== null ? p.progress : 0);
+                                setPStatus(p.status || "نشط");
+                                setPNotes(p.notes || "");
+                                setProjectCompanyId(p.company_id || "");
+                                document.getElementById("projects-tab-view")?.scrollIntoView({ behavior: "smooth" });
+                              }}
+                              className="p-1 text-blue-400 hover:text-white"
+                              title="تعديل المشروع"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (currentUser?.role !== "admin" && currentUser?.role !== "supervisor" && !can("projects")) {
+                                  showToast("عذراً، لا تمتلك صلاحية حذف المشاريع!", "error");
+                                  return;
+                                }
+                                triggerConfirm(
+                                  "حذف بطاقة المشروع",
+                                  `هل أنت متأكد من حذف مشروع "${p.name}" بشكل نهائي من النظام؟ يتطلب هذا الإجراء توثيق سبب رقابي للأغراض التدقيقية.`,
+                                  (reason) => deleteProjectLogic(p.id, reason),
+                                  true,
+                                  "اكتب هنا سبب حذف المشروع للأرشيف والمراجعة..."
+                                );
+                              }}
+                              className="p-1 text-rose-400 hover:text-rose-500"
+                              title="حذف المشروع"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </td>
                         </tr>
                       ))}
@@ -4488,7 +4873,25 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                           <td className="py-3 px-3 text-center space-x-1">
                             <button onClick={() => initHrWorker(w)} className="p-1 text-amber-400 hover:text-amber-300 hover:scale-110 duration-200 inline-block" title="الشؤون والملف الوظيفي"><Users className="w-3.5 h-3.5" /></button>
                             <button onClick={() => { setEditWorkerId(w.id); setWName(w.name || ""); setWId(w.worker_id || ""); setWPhone(w.phone || ""); setWJob(w.job || "عامل"); setWProject(w.project || ""); setWDaily(w.daily || ""); setWDays(w.days || ""); setWAdvance(w.advance !== undefined && w.advance !== null ? w.advance : 0); setWStatus(w.status || "على رأس العمل"); setWRecipientName(w.recipient_name || ""); setWNotes(w.notes || ""); setWorkerCompanyId(w.company_id || ""); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
-                            <button onClick={() => { if(confirm("مسح العامل من قوائم الحساب؟")) { sb.from("workers").delete().eq("id", w.id).then(() => loadEverything()); } }} className="p-1 text-rose-400 hover:text-rose-500"><Trash2 className="w-3.5 h-3.5" /></button>
+                            <button
+                              onClick={() => {
+                                if (currentUser?.role !== "admin" && currentUser?.role !== "supervisor" && !can("workers")) {
+                                  showToast("عذراً، لا تمتلك صلاحية حذف العمال!", "error");
+                                  return;
+                                }
+                                triggerConfirm(
+                                  "حذف ملف العامل",
+                                  `هل أنت متأكد من مسح ملف العامل "${w.name}" بشكل نهائي؟ سيؤدي ذلك لإلغاء قيود تتبع سلفياته وحساباته. يتطلب هذا الإجراء توثيق سبب رقابي.`,
+                                  (reason) => deleteWorkerLogic(w.id, reason),
+                                  true,
+                                  "اكتب هنا سبب حذف ملف العامل للأرشيف والتدقيق والمراجعة..."
+                                );
+                              }}
+                              className="p-1 text-rose-400 hover:text-rose-500"
+                              title="حذف ملف العامل"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </td>
                         </tr>
                       ))}
@@ -4844,6 +5247,20 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                 </div>
               )}
             </div>
+          )}
+
+          {/* Financial Reports Section */}
+          {activeSection === "financial_reports" && (
+            <FinancialReports
+              receipts={receipts}
+              payments={payments}
+              expenses={expenses}
+              installments={installments}
+              projects={projects}
+              companies={companies}
+              extracts={extracts}
+              currentUser={currentUser}
+            />
           )}
 
           {/* Companies and Extracts Section */}
@@ -6646,6 +7063,83 @@ CREATE TABLE extracts (
           )}
 
         </main>
+
+        {/* Manager Financial Edit Audit Control Modal */}
+        {showAuditModal && (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-[110]" dir="rtl">
+            <div className="bg-slate-900 border border-amber-500/20 rounded-3xl w-full max-w-md p-6 space-y-6 text-right shadow-2xl relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 rounded-full blur-2xl pointer-events-none"></div>
+              
+              <div>
+                <div className="flex items-center gap-3 border-b border-white/5 pb-4 mb-4">
+                  <div className="p-2 bg-amber-500/10 rounded-xl">
+                    <ShieldAlert className="w-5 h-5 text-amber-500" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-white">إجراء رقابي مطلوب (تعديل مالي سابق)</h3>
+                    <p className="text-[10px] text-slate-400 mt-0.5">تتطلب الصلاحيات الإدارية تبرير وتوثيق أي تعديل مالي</p>
+                  </div>
+                </div>
+
+                <p className="text-xs text-slate-300 leading-relaxed mb-4">
+                  عزيزي المدير المالي، أنت تقوم حالياً بتعديل قيد أو سند مالي مدون مسبقاً في الدفاتر المحاسبية. يرجى توثيق مبررات هذا التعديل وإرفاق قيد مرجعي كأثر تدقيق للأغراض الرقابية.
+                </p>
+
+                <div className="space-y-4">
+                  <div className="space-y-1.5 text-right">
+                    <label className="text-[10px] font-black text-slate-400 block">
+                      سبب وتبرير التعديل المالي <span className="text-rose-500">*</span>
+                    </label>
+                    <textarea
+                      required
+                      value={auditReason}
+                      onChange={(e) => setAuditReason(e.target.value)}
+                      placeholder="على سبيل المثال: تصحيح خطأ إملائي في اسم العميل، تعديل قيمة الدفعة المتبقية..."
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 min-h-[85px] resize-none focus:ring-1 focus:ring-amber-500/20"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5 text-right">
+                    <label className="text-[10px] font-black text-slate-400 block">
+                      رقم القيد/المستند المرجعي <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={auditRefNo}
+                      onChange={(e) => setAuditRefNo(e.target.value)}
+                      placeholder="أدخل رقم المعاملة المرجعية أو إيصال البنك أو مرجع التدقيق..."
+                      className="w-full px-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/20"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-2 justify-end border-t border-white/5 pt-4">
+                <button 
+                  type="button"
+                  onClick={handleCancelAuditSave}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-750 text-xs font-bold rounded-xl transition-colors border border-slate-750 text-white"
+                >
+                  إلغاء التعديل
+                </button>
+                <button 
+                  type="button"
+                  disabled={!auditReason.trim() || !auditRefNo.trim()}
+                  onClick={handleConfirmAuditSave}
+                  className={`px-5 py-2 text-xs font-black rounded-xl text-white transition-all flex items-center gap-1.5 ${
+                    !auditReason.trim() || !auditRefNo.trim()
+                      ? "bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700"
+                      : "bg-amber-600 hover:bg-amber-500 active:scale-95 shadow-lg shadow-amber-600/10"
+                  }`}
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>تأكيد واعتماد التعديل</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Dynamic Unified custom confirm dialog */}
         {confirmDialog && confirmDialog.open && (
