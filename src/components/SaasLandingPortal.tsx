@@ -507,7 +507,7 @@ export function SaasLandingPortal({
                       className="w-full h-10 px-3 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono font-bold text-amber-400 placeholder-slate-600 focus:outline-none focus:border-amber-500 text-left"
                       dir="ltr"
                     />
-                    <span className="text-[9px] text-slate-500 block mt-0.5">سيكون الرابط المباشر للشركة: domain.com/{slug || "your-slug"}</span>
+                    <span className="text-[9px] text-slate-500 block mt-0.5">سيكون الرابط المباشر للشركة: arab1000.online/{slug || "your-slug"}</span>
                   </div>
                 </div>
 
