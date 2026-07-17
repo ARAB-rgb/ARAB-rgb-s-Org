@@ -11,7 +11,7 @@ import {
   PieChart, ShieldAlert, ShieldCheck
 } from "lucide-react";
 
-import { User as AuthUser, Installment, Quote, Receipt, Payment, Expense, Project, Worker, DbSession, Company, Extract } from "./types";
+import { User as AuthUser, Installment, Quote, Receipt, Payment, Expense, Project, Worker, DbSession, Company, Extract, AttendanceRecord } from "./types";
 import {
   sb, logSession, getContractTiming, awExtractRegion, awCleanNotes,
   awBuildNotesWithRegion, awBuildNotesWithRegionAndTreasury, awBuildNotesWithRegionAndTreasuryAndCapital, awExtractTreasury, awExtractCapital, generateNextNo,
@@ -30,6 +30,7 @@ import { safeStorage } from "./safeStorage";
 const localStorage = safeStorage;
 import { Treasury } from "./components/Treasury";
 import { FinancialReports } from "./components/FinancialReports";
+import { Attendance } from "./components/Attendance";
 
 const getStoredTreasuries = (companyId?: string | null): string[] => {
   const defaults = ["خزنة الشركة", "خزنة التحصيل", "خزنة التحويل", "نقاط البيع", "خزنة المقاولات"];
@@ -266,6 +267,11 @@ export default function App() {
   const [pProgress, setPProgress] = useState<number | "">(0);
   const [pStatus, setPStatus] = useState<"نشط" | "متوقف" | "منتهي">("نشط");
   const [pNotes, setPNotes] = useState("");
+  const [pLatitude, setPLatitude] = useState<number | "">("");
+  const [pLongitude, setPLongitude] = useState<number | "">("");
+  const [pAllowedRadius, setPAllowedRadius] = useState<number | "">(200);
+
+  const [attendances, setAttendances] = useState<AttendanceRecord[]>([]);
 
   // 6. Workers Forms
   const [wName, setWName] = useState("");
@@ -336,7 +342,9 @@ export default function App() {
   const [selectedCompanyIdForPerms, setSelectedCompanyIdForPerms] = useState<string>("global");
   const [uCompanyPerms, setUCompanyPerms] = useState<Record<string, Record<string, boolean>>>({});
   const [uPerms, setUPerms] = useState<Record<string, boolean>>({
-    installmentsView: true,
+    attendance: true,
+    dashboard: false,
+    installmentsView: false,
     installmentsAdd: false,
     installmentsEdit: false,
     installmentsDelete: false,
@@ -345,18 +353,19 @@ export default function App() {
     payments: false,
     expenses: false,
     treasury: false,
+    financial_reports: false,
     projects: false,
     workers: false,
     companies: false,
     users: false,
     sessions: false,
     print: false,
-    dashTopCards: true,
-    dashCollection: true,
-    dashPulse: true,
-    dashLateClients: true,
-    dashLastReceipts: true,
-    dashUpcomingPaid: true,
+    dashTopCards: false,
+    dashCollection: false,
+    dashPulse: false,
+    dashLateClients: false,
+    dashLastReceipts: false,
+    dashUpcomingPaid: false,
   });
 
   // Auth checker logic
@@ -519,6 +528,15 @@ export default function App() {
       }
       setCompanies(compList);
       setExtracts(ext.data || []);
+
+      let attData: any[] = [];
+      try {
+        const attRes = await sb.from("attendance").select("*").order("created_at", { ascending: false });
+        attData = attRes.data || [];
+      } catch (e) {
+        console.warn("Could not load attendance from DB:", e);
+      }
+      setAttendances(attData);
 
       // Autoresolve/refresh current user details to update links/permissions dynamically
       const savedUserStr = localStorage.getItem("aw_current_user");
@@ -847,8 +865,14 @@ export default function App() {
     
     const activePerms = getActivePerms();
     if (activePerms) {
-      return !!activePerms[perm as keyof typeof activePerms];
+      if (activePerms[perm as keyof typeof activePerms] !== undefined) {
+        return !!activePerms[perm as keyof typeof activePerms];
+      }
     }
+    // Fallback for missing keys (existing users/employees)
+    if (perm === "attendance") return true;
+    if (perm === "dashboard") return true;
+    if (perm === "financial_reports") return true;
     return false;
   };
 
@@ -910,9 +934,81 @@ export default function App() {
         if (!authComps.some((c) => c.id === selectedCompanyId)) {
           setSelectedCompanyId(currentUser.company_id || "arab_world");
         }
+        
+        // Auto redirect active section if current section is unauthorized for non-admin
+        const hasAccess = (perm: string) => {
+          const activePerms = getActivePerms();
+          if (activePerms) {
+            if (activePerms[perm as keyof typeof activePerms] !== undefined) {
+              return !!activePerms[perm as keyof typeof activePerms];
+            }
+          }
+          if (perm === "attendance") return true;
+          if (perm === "dashboard") return true;
+          if (perm === "financial_reports") return true;
+          return false;
+        };
+
+        let isAllowed = false;
+        if (activeSection === "my_profile") isAllowed = true;
+        else if (activeSection === "dashboard") isAllowed = hasAccess("dashboard");
+        else if (activeSection === "attendance") isAllowed = hasAccess("attendance");
+        else if (activeSection === "installments") isAllowed = hasAccess("installmentsView");
+        else if (activeSection === "quotes") isAllowed = hasAccess("quotes");
+        else if (activeSection === "receipts") isAllowed = hasAccess("receipts");
+        else if (activeSection === "payments") isAllowed = hasAccess("payments");
+        else if (activeSection === "expenses") isAllowed = hasAccess("expenses");
+        else if (activeSection === "treasury") isAllowed = hasAccess("treasury");
+        else if (activeSection === "financial_reports") isAllowed = hasAccess("financial_reports");
+        else if (activeSection === "projects") isAllowed = hasAccess("projects");
+        else if (activeSection === "workers") isAllowed = hasAccess("workers");
+        else if (activeSection === "companies") isAllowed = hasAccess("companies");
+        else if (activeSection === "users") isAllowed = hasAccess("users");
+        else if (activeSection === "sessions") isAllowed = hasAccess("sessions");
+
+        if (!isAllowed) {
+          const sectionsOrdered = [
+            "dashboard",
+            "my_profile",
+            "attendance",
+            "installments",
+            "quotes",
+            "receipts",
+            "payments",
+            "expenses",
+            "treasury",
+            "financial_reports",
+            "projects",
+            "workers",
+            "companies",
+            "users",
+            "sessions"
+          ];
+          const allowedSection = sectionsOrdered.find(sec => {
+            if (sec === "my_profile") return true;
+            if (sec === "dashboard") return hasAccess("dashboard");
+            if (sec === "attendance") return hasAccess("attendance");
+            if (sec === "installments") return hasAccess("installmentsView");
+            if (sec === "quotes") return hasAccess("quotes");
+            if (sec === "receipts") return hasAccess("receipts");
+            if (sec === "payments") return hasAccess("payments");
+            if (sec === "expenses") return hasAccess("expenses");
+            if (sec === "treasury") return hasAccess("treasury");
+            if (sec === "financial_reports") return hasAccess("financial_reports");
+            if (sec === "projects") return hasAccess("projects");
+            if (sec === "workers") return hasAccess("workers");
+            if (sec === "companies") return hasAccess("companies");
+            if (sec === "users") return hasAccess("users");
+            if (sec === "sessions") return hasAccess("sessions");
+            return false;
+          });
+          if (allowedSection && allowedSection !== activeSection) {
+            setActiveSection(allowedSection);
+          }
+        }
       }
     }
-  }, [currentUser, companies]);
+  }, [currentUser, companies, selectedCompanyId, activeSection]);
 
   const getVisibleReceipts = () => {
     return receipts.filter((item) => {
@@ -2174,6 +2270,25 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
   };
 
   // Projects CRUD
+  const handleGetCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      showToast("عذراً، المتصفح أو بيئة التشغيل لا تدعم تحديد الموقع الجغرافي!", "error");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setPLatitude(Number(position.coords.latitude.toFixed(7)));
+        setPLongitude(Number(position.coords.longitude.toFixed(7)));
+        showToast("تم تحديد وإدخال إحداثيات موقعك الحالي بنجاح!", "success");
+      },
+      (error) => {
+        console.warn("Geolocation error:", error);
+        showToast("فشل تحديد الموقع. يرجى السماح بالوصول لموقعك الجغرافي في المتصفح.", "error");
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
   const saveProjectLogic = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!pName) return;
@@ -2189,6 +2304,9 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       status: pStatus,
       notes: pNotes,
       company_id: getTargetCompanyId(projectCompanyId),
+      latitude: pLatitude !== "" ? Number(pLatitude) : null,
+      longitude: pLongitude !== "" ? Number(pLongitude) : null,
+      allowed_radius: pAllowedRadius !== "" ? Number(pAllowedRadius) : null,
     };
 
     setIsLoading(true);
@@ -2212,6 +2330,9 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       setPProgress(0);
       setPNotes("");
       setProjectCompanyId("");
+      setPLatitude("");
+      setPLongitude("");
+      setPAllowedRadius(200);
       await loadEverything();
       showToast("تم حفظ بطاقة المشروع بنجاح!");
     } catch {
@@ -2989,7 +3110,9 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       setSelectedCompanyIdForPerms("global");
       setUCompanyPerms({});
       setUPerms({
-        installmentsView: true,
+        attendance: true,
+        dashboard: false,
+        installmentsView: false,
         installmentsAdd: false,
         installmentsEdit: false,
         installmentsDelete: false,
@@ -2998,18 +3121,19 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
         payments: false,
         expenses: false,
         treasury: false,
+        financial_reports: false,
         projects: false,
         workers: false,
         companies: false,
         users: false,
         sessions: false,
         print: false,
-        dashTopCards: true,
-        dashCollection: true,
-        dashPulse: true,
-        dashLateClients: true,
-        dashLastReceipts: true,
-        dashUpcomingPaid: true,
+        dashTopCards: false,
+        dashCollection: false,
+        dashPulse: false,
+        dashLateClients: false,
+        dashLastReceipts: false,
+        dashUpcomingPaid: false,
       });
 
       await loadEverything();
@@ -3156,6 +3280,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
   const navigationItems = [
     { key: "dashboard", label: "الرئيسية", icon: Home, visible: true },
     { key: "my_profile", label: "ملفي الوظيفي والخدمات الذاتية", icon: User, visible: true },
+    { key: "attendance", label: "بصمة الحضور والانصراف (GPS)", icon: MapPin, visible: true },
     { key: "installments", label: "التقسيط والعقود", icon: ClipboardList, visible: true },
     { key: "quotes", label: "عروض الأسعار", icon: FileText, visible: true },
     { key: "receipts", label: "سند قبض", icon: Landmark, visible: true },
@@ -4606,6 +4731,19 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
             </div>
           )}
 
+          {activeSection === "attendance" && (
+            <Attendance
+              currentUser={currentUser}
+              workers={workers}
+              projects={projects}
+              attendances={attendances}
+              companies={companies}
+              selectedCompanyId={selectedCompanyId}
+              onUpdate={loadEverything}
+              showToast={showToast}
+            />
+          )}
+
           {/* Active Projects Tab Container */}
           {activeSection === "projects" && (
             <div id="projects-tab-view" className="space-y-6">
@@ -4638,12 +4776,64 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                       ))}
                     </select>
                   )}
+
+                  <div className="md:col-span-4 border-t border-slate-800/60 pt-4 mt-2 space-y-3">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
+                      <span className="text-xs font-black text-amber-400 flex items-center gap-1.5">
+                        <span>📍</span> تحديد النطاق الجغرافي للبصمة (بصمة موقع محدد)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleGetCurrentLocation}
+                        className="px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/25 border border-amber-500/20 rounded-lg text-[10px] font-black text-amber-300 flex items-center gap-1 transition-all cursor-pointer"
+                      >
+                        <span>🧭</span> التقاط إحداثيات موقعي الحالي لإدخالها
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div className="space-y-1">
+                        <label className="block text-[10px] font-black text-slate-400">خط العرض (Latitude)</label>
+                        <input
+                          type="number"
+                          step="any"
+                          placeholder="مثال: 24.774265"
+                          value={pLatitude}
+                          onChange={(e) => setPLatitude(e.target.value ? Number(e.target.value) : "")}
+                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 font-sans"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="block text-[10px] font-black text-slate-400">خط الطول (Longitude)</label>
+                        <input
+                          type="number"
+                          step="any"
+                          placeholder="مثال: 46.738586"
+                          value={pLongitude}
+                          onChange={(e) => setPLongitude(e.target.value ? Number(e.target.value) : "")}
+                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 font-sans"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="block text-[10px] font-black text-slate-400">مسافة القبول القصوى (بالمتر)</label>
+                        <input
+                          type="number"
+                          placeholder="مثال: 200 متر"
+                          value={pAllowedRadius}
+                          onChange={(e) => setPAllowedRadius(e.target.value ? Number(e.target.value) : "")}
+                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 font-sans"
+                        />
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-slate-500 font-bold leading-normal font-sans">
+                      * في حال تحديد خط العرض وخط الطول والمسافة، لن يُسمح لأي موظف بتسجيل الحضور أو الانصراف إلا إذا كان في النطاق الجغرافي الفعلي للمشروع. اترك خط العرض والطول فارغاً لتعطيل قيد المسافة وجعل البصمة مفتوحة من أي مكان.
+                    </p>
+                  </div>
                 </div>
                 <div className="flex gap-2 justify-end">
                   {editProjectId && (
-                    <button type="button" onClick={() => { setEditProjectId(null); setPName(""); setPLocation(""); setPEngineer(""); setPBudget(""); setPProgress(0); setPNotes(""); setProjectCompanyId(""); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
+                    <button type="button" onClick={() => { setEditProjectId(null); setPName(""); setPLocation(""); setPEngineer(""); setPBudget(""); setPProgress(0); setPNotes(""); setProjectCompanyId(""); setPLatitude(""); setPLongitude(""); setPAllowedRadius(200); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black cursor-pointer hover:bg-slate-700 text-white transition-colors">إلغاء</button>
                   )}
-                  <button type="submit" className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-black">{editProjectId ? "حفظ التحديث" : "إنشاء بطاقة المشروع"}</button>
+                  <button type="submit" className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-black transition-colors cursor-pointer">{editProjectId ? "حفظ التحديث" : "إنشاء بطاقة المشروع"}</button>
                 </div>
               </form>
 
@@ -4721,6 +4911,9 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                                 setPStatus(p.status || "نشط");
                                 setPNotes(p.notes || "");
                                 setProjectCompanyId(p.company_id || "");
+                                setPLatitude(p.latitude !== undefined && p.latitude !== null ? p.latitude : "");
+                                setPLongitude(p.longitude !== undefined && p.longitude !== null ? p.longitude : "");
+                                setPAllowedRadius(p.allowed_radius !== undefined && p.allowed_radius !== null ? p.allowed_radius : 200);
                                 document.getElementById("projects-tab-view")?.scrollIntoView({ behavior: "smooth" });
                               }}
                               className="p-1 text-blue-400 hover:text-white"
@@ -6209,7 +6402,65 @@ CREATE TABLE extracts (
                         <label className="text-[10px] text-slate-400 font-black block">تصنيف الصلاحيات العام</label>
                         <select
                           value={uRole}
-                          onChange={(e: any) => setURole(e.target.value)}
+                          onChange={(e: any) => {
+                            const newRole = e.target.value;
+                            setURole(newRole);
+                            if (newRole === "employee") {
+                              setUPerms({
+                                attendance: true,
+                                dashboard: false,
+                                installmentsView: false,
+                                installmentsAdd: false,
+                                installmentsEdit: false,
+                                installmentsDelete: false,
+                                quotes: false,
+                                receipts: false,
+                                payments: false,
+                                expenses: false,
+                                treasury: false,
+                                financial_reports: false,
+                                projects: false,
+                                workers: false,
+                                companies: false,
+                                users: false,
+                                sessions: false,
+                                print: false,
+                                dashTopCards: false,
+                                dashCollection: false,
+                                dashPulse: false,
+                                dashLateClients: false,
+                                dashLastReceipts: false,
+                                dashUpcomingPaid: false,
+                              });
+                            } else if (newRole === "supervisor") {
+                              setUPerms({
+                                attendance: true,
+                                dashboard: true,
+                                installmentsView: true,
+                                installmentsAdd: true,
+                                installmentsEdit: true,
+                                installmentsDelete: false,
+                                quotes: true,
+                                receipts: true,
+                                payments: true,
+                                expenses: true,
+                                treasury: false,
+                                financial_reports: false,
+                                projects: true,
+                                workers: true,
+                                companies: false,
+                                users: false,
+                                sessions: false,
+                                print: true,
+                                dashTopCards: true,
+                                dashCollection: true,
+                                dashPulse: true,
+                                dashLateClients: true,
+                                dashLastReceipts: true,
+                                dashUpcomingPaid: true,
+                              });
+                            }
+                          }}
                           className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none text-slate-950 bg-white"
                         >
                           <option value="employee" className="text-slate-950">👨‍💼 موظف فرع محدود</option>
@@ -6426,6 +6677,9 @@ CREATE TABLE extracts (
                               className="accent-amber-500 w-4 h-4 cursor-pointer disabled:cursor-not-allowed"
                             />
                             <span>
+                              {k === "attendance" && "📍 بصمة الحضور والانصراف (GPS)"}
+                              {k === "dashboard" && "📊 الرئيسية (لوحة التحكم العامة)"}
+                              {k === "financial_reports" && "📈 التقارير والقوائم المالية"}
                               {k === "installmentsView" && "👁️ التقسيط والعقود"}
                               {k === "installmentsAdd" && "➕ إضافة عقد يومي"}
                               {k === "installmentsEdit" && "📝 تعديل عقود فرعية"}
@@ -6515,7 +6769,7 @@ CREATE TABLE extracts (
 
                 <div className="flex gap-2 justify-end">
                   {editUserId && (
-                    <button type="button" onClick={() => { setEditUserId(null); setUName(""); setUCode(""); setUPass(""); setUWorkerId(""); setURegion(""); setURole("employee"); setUCompanyId(""); setUCompanyPerms({}); setUStatus("نشط"); setSelectedCompanyIdForPerms("global"); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
+                    <button type="button" onClick={() => { setEditUserId(null); setUName(""); setUCode(""); setUPass(""); setUWorkerId(""); setURegion(""); setURole("employee"); setUCompanyId(""); setUCompanyPerms({}); setUStatus("نشط"); setSelectedCompanyIdForPerms("global"); setUPerms({ attendance: true, dashboard: false, installmentsView: false, installmentsAdd: false, installmentsEdit: false, installmentsDelete: false, quotes: false, receipts: false, payments: false, expenses: false, treasury: false, financial_reports: false, projects: false, workers: false, companies: false, users: false, sessions: false, print: false, dashTopCards: false, dashCollection: false, dashPulse: false, dashLateClients: false, dashLastReceipts: false, dashUpcomingPaid: false }); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
                   )}
                   <button type="submit" className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-black">حفظ وإرسال الصلاحية للموظف</button>
                 </div>

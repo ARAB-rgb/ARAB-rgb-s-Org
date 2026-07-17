@@ -149,6 +149,29 @@ export interface Project {
   progress: number;
   status: "نشط" | "متوقف" | "منتهي";
   notes?: string;
+  latitude?: number;
+  longitude?: number;
+  allowed_radius?: number; // In meters
+  created_at?: string;
+}
+
+export interface AttendanceRecord {
+  id: string;
+  worker_id: string;
+  worker_name: string;
+  project_id: string;
+  project_name: string;
+  date: string; // YYYY-MM-DD
+  check_in_time?: string; // HH:MM:SS
+  check_out_time?: string; // HH:MM:SS
+  check_in_lat?: number;
+  check_in_lng?: number;
+  check_out_lat?: number;
+  check_out_lng?: number;
+  distance_in_meters?: number;
+  status: "حاضر" | "حاضر (خارج النطاق)" | "متأخر" | "غائب" | string;
+  notes?: string;
+  company_id?: string;
   created_at?: string;
 }
 

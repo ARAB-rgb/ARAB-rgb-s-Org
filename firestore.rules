@@ -126,6 +126,27 @@ service cloud.firestore {
         && data.status is string && (data.status == 'نشط' || data.status == 'مدفوع' || data.status == 'متأخر');
     }
 
+    function isValidAttendance(data) {
+      return data.keys().hasAll(['id', 'worker_id', 'worker_name', 'project_id', 'project_name', 'date', 'status'])
+        && data.id is string && data.id.size() <= 128
+        && data.worker_id is string && data.worker_id.size() <= 128
+        && data.worker_name is string && data.worker_name.size() <= 200
+        && data.project_id is string && data.project_id.size() <= 128
+        && data.project_name is string && data.project_name.size() <= 200
+        && data.date is string && data.date.size() <= 50
+        && data.status is string && data.status.size() <= 100
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 2000))
+        && (!('company_id' in data) || (data.company_id is string && data.company_id.size() <= 128))
+        && (!('check_in_time' in data) || (data.check_in_time is string && data.check_in_time.size() <= 50))
+        && (!('check_out_time' in data) || (data.check_out_time is string && data.check_out_time.size() <= 50))
+        && (!('check_in_lat' in data) || (data.check_in_lat is number))
+        && (!('check_in_lng' in data) || (data.check_in_lng is number))
+        && (!('check_out_lat' in data) || (data.check_out_lat is number))
+        && (!('check_out_lng' in data) || (data.check_out_lng is number))
+        && (!('distance_in_meters' in data) || (data.distance_in_meters is number))
+        && (!('created_at' in data) || (data.created_at is string && data.created_at.size() <= 100));
+    }
+
     // --- Collections Configurations ---
 
     match /users/{userId} {
@@ -193,6 +214,12 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow create, update: if isSignedIn() && isValidExtract(incoming()) && isValidId(extractId);
       allow delete: if isSignedIn() && isValidId(extractId);
+    }
+
+    match /attendance/{attendanceId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidAttendance(incoming()) && isValidId(attendanceId);
+      allow delete: if isSignedIn() && isValidId(attendanceId);
     }
   }
 }

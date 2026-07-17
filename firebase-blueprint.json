@@ -243,6 +243,31 @@
         "created_at": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "no", "company_id", "project_id", "client_name", "total_amount", "net_amount", "date", "status"]
+    },
+    "Attendance": {
+      "title": "Attendance",
+      "description": "Worker check-in and check-out logs with coordinates",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "worker_id": { "type": "string" },
+        "worker_name": { "type": "string" },
+        "project_id": { "type": "string" },
+        "project_name": { "type": "string" },
+        "date": { "type": "string" },
+        "check_in_time": { "type": "string" },
+        "check_out_time": { "type": "string" },
+        "check_in_lat": { "type": "number" },
+        "check_in_lng": { "type": "number" },
+        "check_out_lat": { "type": "number" },
+        "check_out_lng": { "type": "number" },
+        "distance_in_meters": { "type": "number" },
+        "status": { "type": "string" },
+        "notes": { "type": "string" },
+        "company_id": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "worker_id", "worker_name", "project_id", "project_name", "date", "status"]
     }
   },
   "firestore": {
@@ -289,6 +314,10 @@
     "extracts": {
       "schema": "Extract",
       "description": "Project progress and payment extracts"
+    },
+    "attendance": {
+      "schema": "Attendance",
+      "description": "Attendance tracking check-in/out records"
     }
   }
 }
