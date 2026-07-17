@@ -31,6 +31,7 @@ const localStorage = safeStorage;
 import { Treasury } from "./components/Treasury";
 import { FinancialReports } from "./components/FinancialReports";
 import { Attendance } from "./components/Attendance";
+import { SaasLandingPortal } from "./components/SaasLandingPortal";
 
 const getStoredTreasuries = (companyId?: string | null): string[] => {
   const defaults = ["خزنة الشركة", "خزنة التحصيل", "خزنة التحويل", "نقاط البيع", "خزنة المقاولات"];
@@ -53,6 +54,123 @@ const getStoredTreasuries = (companyId?: string | null): string[] => {
 export default function App() {
   const [activeSection, setActiveSection] = useState<string>("dashboard");
   const [isLoading, setIsLoading] = useState(false);
+
+  // SaaS Multi-tenant Path Routing State
+  const [activeSlug, setActiveSlug] = useState<string | null>(() => {
+    const path = window.location.pathname;
+    const segments = path.split("/").filter(Boolean);
+    return segments[0] || null;
+  });
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const path = window.location.pathname;
+      const segments = path.split("/").filter(Boolean);
+      setActiveSlug(segments[0] || null);
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  const navigateToSlug = (slug: string | null) => {
+    if (slug) {
+      window.history.pushState({}, "", `/${slug}`);
+    } else {
+      window.history.pushState({}, "", `/`);
+    }
+    setActiveSlug(slug);
+    if (!slug) {
+      setCurrentUser(null);
+      localStorage.removeItem("aw_current_user");
+    }
+  };
+
+  const handleRegisterCompany = async (companyData: {
+    name: string;
+    slug: string;
+    manager: string;
+    phone: string;
+    address: string;
+    record_no: string;
+    tax_no: string;
+    capital: number;
+    adminCode: string;
+    adminPass: string;
+  }) => {
+    try {
+      const newCompanyId = `company_${companyData.slug}`;
+      const companyPayload = {
+        id: newCompanyId,
+        slug: companyData.slug,
+        name: companyData.name,
+        record_no: companyData.record_no,
+        manager: companyData.manager,
+        phone: companyData.phone,
+        address: companyData.address,
+        notes: `الرقم الضريبي: ${companyData.tax_no} | رأس المال بالعقود: ${companyData.capital}`,
+        created_at: new Date().toISOString()
+      };
+
+      // 1. Insert Company
+      const { error: compError } = await sb.from("companies").insert(companyPayload);
+      if (compError) {
+        showToast("فشل في تسجيل الشركة بقاعدة البيانات!", "error");
+        return false;
+      }
+
+      // 2. Insert Default Admin for this Company
+      const defaultAdmin: AuthUser = {
+        id: `admin_${companyData.slug}`,
+        name: `مدير ${companyData.name}`,
+        code: companyData.adminCode,
+        password: companyData.adminPass,
+        role: "admin",
+        company_id: newCompanyId,
+        status: "نشط",
+        perms: {
+          installmentsView: true,
+          installmentsAdd: true,
+          installmentsEdit: true,
+          installmentsDelete: true,
+          quotes: true,
+          receipts: true,
+          payments: true,
+          expenses: true,
+          treasury: true,
+          projects: true,
+          workers: true,
+          companies: true,
+          users: true,
+          sessions: true,
+          print: true,
+          dashTopCards: true,
+          dashCollection: true,
+          dashPulse: true,
+          dashLateClients: true,
+          dashLastReceipts: true,
+          dashUpcomingPaid: true,
+          region: "",
+          worker_id: null
+        },
+        company_perms: {},
+        created_at: new Date().toISOString()
+      };
+
+      const { error: userError } = await sb.from("users").insert(defaultAdmin);
+      if (userError) {
+        showToast("فشل في إنشاء مستخدم المدير للمنشأة!", "error");
+        return false;
+      }
+
+      showToast(`تم تأسيس وتسجيل ${companyData.name} بنجاح!`, "success");
+      setCompanies(prev => [companyPayload, ...prev]);
+      navigateToSlug(companyData.slug);
+      return true;
+    } catch (err: any) {
+      showToast(`فشل في تسجيل الشركة: ${err.message || err}`, "error");
+      return false;
+    }
+  };
 
   // Auth State
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
@@ -316,7 +434,10 @@ export default function App() {
   const [cPassport, setCPassport] = useState("");
   const [cProbation, setCProbation] = useState("90 يوم");
   const [cVacation, setCVacation] = useState<number | "">(30);
+  const [cShiftStart, setCShiftStart] = useState("08:00");
+  const [cDelayRate, setCDelayRate] = useState<number | "">("");
   const [cUserId, setCUserId] = useState<string>("");
+  const [selectedSalaryMonth, setSelectedSalaryMonth] = useState(new Date().toISOString().slice(0, 7));
 
   // Leave Form
   const [lhStart, setLhStart] = useState(new Date().toISOString().slice(0, 10));
@@ -435,6 +556,22 @@ export default function App() {
         showToast("⚠️ عذراً، هذا الحساب موقوف أو معطل حالياً من قبل الإدارة!", "error");
         setIsLoading(false);
         return;
+      }
+
+      // Enforce SaaS multi-tenant isolation on login
+      if (activeSlug) {
+        const activeComp = companies.find(
+          (c) => (c.slug || "").toLowerCase() === activeSlug.toLowerCase() || c.id.toLowerCase() === activeSlug.toLowerCase()
+        );
+        if (activeComp) {
+          const isGlobalAdmin = user.role === "admin" && (!user.company_id || user.company_id === "all");
+          const belongsToActiveCompany = user.company_id === activeComp.id;
+          if (!isGlobalAdmin && !belongsToActiveCompany) {
+            showToast("⚠️ عذراً، هذا الحساب ليس مسجلاً ضمن صلاحيات هذه المنشأة السحابية!", "error");
+            setIsLoading(false);
+            return;
+          }
+        }
       }
 
       setCurrentUser(user);
@@ -786,6 +923,59 @@ export default function App() {
     verifySessionOnMount();
   }, []);
 
+  // Load companies unconditionally on mount for SaaS routing
+  useEffect(() => {
+    const loadInitialCompaniesForSaaS = async () => {
+      try {
+        const comp = await sb.from("companies").select("*").order("created_at", { ascending: false });
+        let compList = comp.data || [];
+        if (compList.length === 0) {
+          const toAdd = [
+            {
+              id: "arab_world",
+              slug: "arab-world",
+              name: "شركة عرب وورلد للمقاولات والعقود",
+              record_no: "1010777555",
+              phone: "0556446888",
+              address: "الرياض، المملكة العربية السعودية",
+              created_at: new Date().toISOString()
+            },
+            {
+              id: "demo_company",
+              slug: "demo-company",
+              name: "شركة التجربة المستقلة (Demo)",
+              record_no: "1010123456",
+              phone: "0500000001",
+              address: "منطقة الدمام التجريبية",
+              created_at: new Date().toISOString()
+            }
+          ];
+          for (const item of toAdd) {
+            await sb.from("companies").insert(item);
+          }
+          const freshComp = await sb.from("companies").select("*").order("created_at", { ascending: false });
+          compList = freshComp.data || [];
+        }
+        setCompanies(compList);
+      } catch (err) {
+        console.error("Failed to fetch initial companies for SaaS:", err);
+      }
+    };
+    loadInitialCompaniesForSaaS();
+  }, []);
+
+  // Auto-set and lock company state based on active URL slug
+  useEffect(() => {
+    if (activeSlug && companies.length > 0) {
+      const activeComp = companies.find(
+        (c) => (c.slug || "").toLowerCase() === activeSlug.toLowerCase() || c.id.toLowerCase() === activeSlug.toLowerCase()
+      );
+      if (activeComp) {
+        setSelectedCompanyId(activeComp.id);
+      }
+    }
+  }, [activeSlug, companies]);
+
   const getTargetCompanyId = (formCompanyVal?: string) => {
     if (currentUser?.role !== "admin") {
       if (formCompanyVal && isCompanyAuthorized(formCompanyVal)) {
@@ -876,6 +1066,22 @@ export default function App() {
     return false;
   };
 
+  const isAttendanceOnly = !!currentUser && currentUser.role !== "admin" &&
+    can("attendance") &&
+    !can("dashboard") &&
+    !can("installmentsView") &&
+    !can("quotes") &&
+    !can("receipts") &&
+    !can("payments") &&
+    !can("expenses") &&
+    !can("treasury") &&
+    !can("financial_reports") &&
+    !can("projects") &&
+    !can("workers") &&
+    !can("companies") &&
+    !can("users") &&
+    !can("sessions");
+
   const getActivePermsForCompany = (user: AuthUser | null, compId: string | undefined) => {
     if (!user) return null;
     return user.perms;
@@ -950,7 +1156,7 @@ export default function App() {
         };
 
         let isAllowed = false;
-        if (activeSection === "my_profile") isAllowed = true;
+        if (activeSection === "my_profile") isAllowed = !isAttendanceOnly;
         else if (activeSection === "dashboard") isAllowed = hasAccess("dashboard");
         else if (activeSection === "attendance") isAllowed = hasAccess("attendance");
         else if (activeSection === "installments") isAllowed = hasAccess("installmentsView");
@@ -985,7 +1191,7 @@ export default function App() {
             "sessions"
           ];
           const allowedSection = sectionsOrdered.find(sec => {
-            if (sec === "my_profile") return true;
+            if (sec === "my_profile") return !isAttendanceOnly;
             if (sec === "dashboard") return hasAccess("dashboard");
             if (sec === "attendance") return hasAccess("attendance");
             if (sec === "installments") return hasAccess("installmentsView");
@@ -2587,6 +2793,94 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
     );
   };
 
+  const parseTimeToMinutes = (timeStr: string): number => {
+    if (!timeStr) return 0;
+    const parts = timeStr.split(":");
+    const hours = Number(parts[0] || 0);
+    const minutes = Number(parts[1] || 0);
+    return hours * 60 + minutes;
+  };
+
+  const calculateWorkerSalaryForMonth = (worker: Worker, monthStr: string) => {
+    const contract = awExtractWorkerContract(worker.notes || "");
+    const basicSalary = Number(contract.salary || 0);
+    const housing = Number(contract.housing || 0);
+    const transport = Number(contract.transport || 0);
+    const other = Number(contract.other || 0);
+    const totalMonthlySalary = basicSalary + housing + transport + other;
+    
+    const dailyWage = Number(worker.daily || 0);
+
+    const monthRecords = attendances.filter(
+      (a) => a.worker_id === worker.id && a.date.startsWith(monthStr)
+    );
+
+    const monthAdvances = payments.filter((p) => {
+      const isMatchedWorker = p.worker_id === worker.id || (p.to_name && p.to_name.includes(worker.name));
+      return isMatchedWorker && p.date.startsWith(monthStr);
+    });
+    const totalAdvancesInMonth = monthAdvances.reduce((sum, p) => sum + p.amount, 0);
+
+    const shiftStartMins = parseTimeToMinutes(contract.shiftStart || "08:00");
+    let totalDelayMinutes = 0;
+    let delayDaysCount = 0;
+    const delayDetailsList: { date: string; checkIn: string; delayMins: number }[] = [];
+
+    monthRecords.forEach((rec) => {
+      if (rec.check_in_time) {
+        const checkInMins = parseTimeToMinutes(rec.check_in_time);
+        const diff = checkInMins - shiftStartMins;
+        if (diff > 0) {
+          totalDelayMinutes += diff;
+          delayDaysCount++;
+          delayDetailsList.push({
+            date: rec.date,
+            checkIn: rec.check_in_time,
+            delayMins: diff,
+          });
+        }
+      }
+    });
+
+    let hourlyRate = Number(contract.delayRate || 0);
+    if (hourlyRate <= 0) {
+      if (basicSalary > 0) {
+        hourlyRate = Number((basicSalary / 30 / 8).toFixed(2));
+      } else if (dailyWage > 0) {
+        hourlyRate = Number((dailyWage / 8).toFixed(2));
+      } else {
+        hourlyRate = 15;
+      }
+    }
+
+    const delayDeduction = Number(((totalDelayMinutes / 60) * hourlyRate).toFixed(2));
+    const isMonthly = basicSalary > 0;
+    const presentDays = monthRecords.filter((a) => a.check_in_time).length;
+    const expectedGross = isMonthly ? totalMonthlySalary : (dailyWage * presentDays);
+    const netSalary = Math.max(0, expectedGross - delayDeduction - totalAdvancesInMonth);
+
+    return {
+      isMonthly,
+      basicSalary,
+      housing,
+      transport,
+      other,
+      totalMonthlySalary,
+      dailyWage,
+      presentDays,
+      monthRecordsCount: monthRecords.length,
+      totalDelayMinutes,
+      delayDaysCount,
+      delayDetailsList,
+      hourlyRate,
+      delayDeduction,
+      totalAdvancesInMonth,
+      monthAdvances,
+      expectedGross,
+      netSalary,
+    };
+  };
+
   // HR & Worker Profile Operations
   const initHrWorker = (w: Worker) => {
     setSelectedWorkerForHr(w);
@@ -2600,6 +2894,8 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
     setCPassport(contract.passport || "");
     setCProbation(contract.probation || "90 يوم");
     setCVacation(contract.vacation || 30);
+    setCShiftStart(contract.shiftStart || "08:00");
+    setCDelayRate(contract.delayRate || "");
 
     // Scan for linked user account checking both custom worker_id and physical database id
     const linkedUser = users.find(u => 
@@ -2633,6 +2929,8 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
         passport: cPassport.trim(),
         probation: cProbation.trim(),
         vacation: Number(cVacation || 30),
+        shiftStart: cShiftStart || "08:00",
+        delayRate: Number(cDelayRate || 0),
       };
       const existingLeaves = awExtractWorkerLeaves(selectedWorkerForHr.notes || "");
       const rawNotes = awCleanWorkerNotes(selectedWorkerForHr.notes || "");
@@ -3278,24 +3576,68 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
 
   // Nav categories helpers
   const navigationItems = [
-    { key: "dashboard", label: "الرئيسية", icon: Home, visible: true },
-    { key: "my_profile", label: "ملفي الوظيفي والخدمات الذاتية", icon: User, visible: true },
-    { key: "attendance", label: "بصمة الحضور والانصراف (GPS)", icon: MapPin, visible: true },
-    { key: "installments", label: "التقسيط والعقود", icon: ClipboardList, visible: true },
-    { key: "quotes", label: "عروض الأسعار", icon: FileText, visible: true },
-    { key: "receipts", label: "سند قبض", icon: Landmark, visible: true },
-    { key: "payments", label: "سند صرف", icon: TrendingUp, visible: true },
-    { key: "expenses", label: "المصروفات", icon: TrendingDown, visible: true },
-    { key: "treasury", label: "الخزنة الفرعية", icon: Shield, visible: true },
-    { key: "financial_reports", label: "التقارير والقوائم المالية", icon: PieChart, visible: true },
-    { key: "projects", label: "المشاريع الجارية", icon: Briefcase, visible: true },
-    { key: "workers", label: "العمال والسلفيات", icon: Users, visible: true },
-    { key: "companies", label: "دليل الشركات والمستخلصات", icon: Building, visible: currentUser?.role === "admin" || can("companies") },
-    { key: "users", label: "الموظفين والصلاحية", icon: Settings, visible: true },
-    { key: "sessions", label: "سجل حركات النظام", icon: Clock, visible: true },
+    { key: "dashboard", label: "الرئيسية", icon: Home, visible: !isAttendanceOnly && can("dashboard") },
+    { key: "my_profile", label: "ملفي الوظيفي والخدمات الذاتية", icon: User, visible: !isAttendanceOnly },
+    { key: "attendance", label: "بصمة الحضور والانصراف (GPS)", icon: MapPin, visible: can("attendance") },
+    { key: "installments", label: "التقسيط والعقود", icon: ClipboardList, visible: !isAttendanceOnly && can("installmentsView") },
+    { key: "quotes", label: "عروض الأسعار", icon: FileText, visible: !isAttendanceOnly && can("quotes") },
+    { key: "receipts", label: "سند قبض", icon: Landmark, visible: !isAttendanceOnly && can("receipts") },
+    { key: "payments", label: "سند صرف", icon: TrendingUp, visible: !isAttendanceOnly && can("payments") },
+    { key: "expenses", label: "المصروفات", icon: TrendingDown, visible: !isAttendanceOnly && can("expenses") },
+    { key: "treasury", label: "الخزنة الفرعية", icon: Shield, visible: !isAttendanceOnly && can("treasury") },
+    { key: "financial_reports", label: "التقارير والقوائم المالية", icon: PieChart, visible: !isAttendanceOnly && can("financial_reports") },
+    { key: "projects", label: "المشاريع الجارية", icon: Briefcase, visible: !isAttendanceOnly && can("projects") },
+    { key: "workers", label: "العمال والسلفيات", icon: Users, visible: !isAttendanceOnly && can("workers") },
+    { key: "companies", label: "دليل الشركات والمستخلصات", icon: Building, visible: !isAttendanceOnly && (currentUser?.role === "admin" || can("companies")) },
+    { key: "users", label: "الموظفين والصلاحية", icon: Settings, visible: !isAttendanceOnly && (currentUser?.role === "admin" || can("users")) },
+    { key: "sessions", label: "سجل حركات النظام", icon: Clock, visible: !isAttendanceOnly && (currentUser?.role === "admin" || can("sessions")) },
   ];
 
-  // Auth Layout rendering check
+  // SaaS Multi-tenant URL Path Routing and isolation
+  const activeCompany = companies.find(
+    (c) => (c.slug || "").toLowerCase() === (activeSlug || "").toLowerCase() || c.id.toLowerCase() === (activeSlug || "").toLowerCase()
+  );
+
+  // 1. If on the main domain/portal (no active slug):
+  if (!activeSlug) {
+    return (
+      <SaasLandingPortal
+        companies={companies}
+        onRegisterCompany={handleRegisterCompany}
+        onNavigateToSlug={navigateToSlug}
+        showToast={showToast}
+      />
+    );
+  }
+
+  // 2. If there is a slug but no matching company in DB:
+  if (!activeCompany) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4 text-right" dir="rtl">
+        <Toast toasts={toasts} removeToast={removeToast} />
+        <div className="w-full max-w-md bg-slate-900 border border-slate-800 p-8 rounded-3xl text-center space-y-6 shadow-2xl relative overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-tr from-amber-500/5 to-transparent pointer-events-none"></div>
+          <div className="w-16 h-16 bg-rose-500/10 border border-rose-500/30 text-rose-500 rounded-2xl mx-auto flex items-center justify-center text-2xl font-bold">
+            ⚠️
+          </div>
+          <div className="space-y-2">
+            <h1 className="text-xl font-black text-white">مساحة العمل غير موجودة!</h1>
+            <p className="text-xs text-slate-400">عذراً، الرابط المخصص <span className="text-amber-400 font-mono font-bold">/{activeSlug}</span> غير مسجل في نظامنا السحابي حالياً.</p>
+          </div>
+          <div className="pt-2 flex flex-col gap-3">
+            <button
+              onClick={() => navigateToSlug(null)}
+              className="w-full py-2.5 bg-gradient-to-l from-amber-500 to-amber-600 text-slate-950 font-black rounded-xl text-xs hover:from-amber-400 hover:to-amber-500 transition-all cursor-pointer shadow-lg"
+            >
+              العودة للبوابة المركزية وتأسيس مساحة عمل
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 3. If there is an active company but no logged-in session:
   if (!currentUser) {
     return (
       <div className="min-h-screen flex items-center justify-center mesh-gradient p-4 text-right selection:bg-amber-500/30 select-none overflow-hidden relative" dir="rtl">
@@ -3308,6 +3650,14 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
         {/* Core Luxury Card */}
         <div className="w-full max-w-md bg-slate-950/40 backdrop-blur-2xl border border-amber-500/25 p-10 rounded-[32px] space-y-8 relative shadow-[0_0_50px_-5px_rgba(245,158,11,0.15)] overflow-hidden before:absolute before:inset-0 before:bg-gradient-to-b before:from-amber-500/5 before:to-transparent before:pointer-events-none">
           
+          {/* Back to main portal button */}
+          <button
+            onClick={() => navigateToSlug(null)}
+            className="absolute left-6 top-6 px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-[9px] font-bold text-slate-400 hover:text-white transition-all cursor-pointer"
+          >
+            ← البوابة المركزية
+          </button>
+
           {/* Subtle Corner Golden Aesthetics */}
           <div className="absolute top-0 right-0 w-16 h-16 border-t-2 border-r-2 border-amber-500/30 rounded-tr-[32px] pointer-events-none"></div>
           <div className="absolute bottom-0 left-0 w-16 h-16 border-b-2 border-l-2 border-amber-500/30 rounded-bl-[32px] pointer-events-none"></div>
@@ -3326,19 +3676,19 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
             </div>
 
             <div className="space-y-1.5">
-              <h2 className="text-[10px] tracking-[0.25em] font-black text-amber-500/80 uppercase font-sans">ARAB WORLD GROUP</h2>
-              <h1 className="text-3xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-b from-white via-slate-100 to-slate-300">
-                عرب وورلد المالي
+              <h2 className="text-[10px] tracking-[0.25em] font-black text-amber-500/80 uppercase font-sans">{activeCompany.name}</h2>
+              <h1 className="text-xl sm:text-2xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-b from-white via-slate-100 to-slate-300">
+                مساحة عمل {activeCompany.name}
               </h1>
               <p className="text-[11px] font-medium text-slate-400 max-w-xs mx-auto leading-relaxed">
-                الإدارة الذاتية المتكاملة والمصادقة الأمنية الموحدة للمقاولات والتقسيط
+                الإدارة المالية المتكاملة والمصادقة الأمنية الموحدة للمقاولات والتقسيط
               </p>
             </div>
 
             {/* Glowing Status Badge */}
             <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-500/10 border border-amber-500/20 rounded-full">
               <span className="w-1.5 h-1.5 bg-amber-400 rounded-full animate-ping"></span>
-              <span className="text-[9px] font-bold text-amber-400 font-mono tracking-wider">SECURE SHIELD v27.4</span>
+              <span className="text-[9px] font-bold text-amber-400 font-mono tracking-wider">WORKSPACE SECURED</span>
             </div>
           </div>
 
@@ -3413,7 +3763,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
               <span>مراجعة الآليات التشغيلية نشطة</span>
             </div>
             <p className="text-[9px] font-medium text-slate-600 leading-relaxed max-w-xs mx-auto">
-              بموجب أنظمة هيئة المقاولات واللوائح والائتمان الموحدة لشركة عرب وورلد للمقاولات العامة والتقسيط.
+              بموجب أنظمة هيئة المقاولات واللوائح والائتمان الموحدة لشركة {activeCompany.name}.
             </p>
           </div>
         </div>
@@ -3513,6 +3863,16 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
             <LogOut className="w-4 h-4" />
             🚪 خروج آمن من النظام
           </button>
+
+          {activeSlug && (
+            <button
+              type="button"
+              onClick={() => navigateToSlug(null)}
+              className="w-full py-2.5 bg-slate-900/60 hover:bg-slate-850 text-slate-400 hover:text-amber-400 border border-white/5 hover:border-amber-500/25 text-[10px] font-black rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5"
+            >
+              🏢 العودة للبوابة المركزية
+            </button>
+          )}
         </div>
       </div>
 
@@ -3544,18 +3904,37 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
             {currentUser && getAuthorizedCompanies().length > 0 && (
               <div className="flex items-center gap-2 bg-slate-900/60 border border-amber-500/20 rounded-xl px-3 py-1.5 shadow-lg shadow-amber-500/5 hover:border-amber-500/40 transition-all font-sans">
                 <span className="text-[10px] text-amber-500 font-extrabold whitespace-nowrap">🏢 الشركة النشطة:</span>
-                <select
-                  value={selectedCompanyId}
-                  onChange={(e) => setSelectedCompanyId(e.target.value)}
-                  className="bg-transparent text-white font-extrabold text-xs focus:outline-none cursor-pointer text-slate-950 bg-white"
-                >
-                  {getAuthorizedCompanies().length > 1 && (
-                    <option value="all" className="text-slate-950 font-bold">✨ كل الشركات المصرحة</option>
-                  )}
-                  {getAuthorizedCompanies().map((c) => (
-                    <option key={c.id} value={c.id} className="text-slate-950 font-bold">🏢 {c.name}</option>
-                  ))}
-                </select>
+                {activeSlug && currentUser.role !== "admin" ? (
+                  <span className="text-xs font-black text-amber-300">
+                    {companies.find((c) => c.id === selectedCompanyId)?.name || "عرب وورلد"}
+                  </span>
+                ) : (
+                  <select
+                    value={selectedCompanyId}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSelectedCompanyId(val);
+                      if (currentUser?.role === "admin") {
+                        if (val === "all") {
+                          navigateToSlug(null);
+                        } else {
+                          const matched = companies.find((c) => c.id === val);
+                          if (matched) {
+                            navigateToSlug(matched.slug || matched.id);
+                          }
+                        }
+                      }
+                    }}
+                    className="bg-transparent text-white font-extrabold text-xs focus:outline-none cursor-pointer text-slate-950 bg-white"
+                  >
+                    {getAuthorizedCompanies().length > 1 && (
+                      <option value="all" className="text-slate-950 font-bold">✨ كل الشركات المصرحة</option>
+                    )}
+                    {getAuthorizedCompanies().map((c) => (
+                      <option key={c.id} value={c.id} className="text-slate-950 font-bold">🏢 {c.name}</option>
+                    ))}
+                  </select>
+                )}
               </div>
             )}
           </div>
@@ -4741,6 +5120,8 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
               selectedCompanyId={selectedCompanyId}
               onUpdate={loadEverything}
               showToast={showToast}
+              onAutoLogout={handleLogout}
+              isAttendanceOnly={isAttendanceOnly}
             />
           )}
 
@@ -5237,6 +5618,28 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                             </div>
                           </div>
 
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-1">
+                              <label className="text-[10px] text-slate-400 font-bold block">⏰ وقت بداية الدوام (الوردية)</label>
+                              <input 
+                                type="time" 
+                                value={cShiftStart} 
+                                onChange={(e) => setCShiftStart(e.target.value)} 
+                                className="w-full px-2.5 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white focus:outline-none font-sans" 
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[10px] text-slate-400 font-bold block">💸 خصم ساعة التأخير (ريال)</label>
+                              <input 
+                                type="number" 
+                                placeholder="تلقائي (الراتب / ٢٤٠)" 
+                                value={cDelayRate} 
+                                onChange={(e) => setCDelayRate(e.target.value ? Number(e.target.value) : "")} 
+                                className="w-full px-2.5 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white focus:outline-none font-sans" 
+                              />
+                            </div>
+                          </div>
+
                           <div className="space-y-1 bg-amber-500/5 p-2 rounded-xl border border-amber-500/10">
                             <label className="text-[10px] text-slate-300 font-bold block">🔐 ربط ملف العقد والخدمة الذاتية بحساب مستخدم جاري</label>
                             <select 
@@ -5436,6 +5839,126 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                       </div>
 
                     </div>
+
+                    {/* 4. Delay & Net Monthly Salary Calculator (Full Width Panel) */}
+                    <div className="bg-slate-950/40 p-6 rounded-2xl border border-slate-800 space-y-4">
+                      <div className="border-b border-slate-800 pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div>
+                          <h4 className="text-sm font-black text-amber-400 flex items-center gap-1.5 font-sans">
+                            <span>📊</span>
+                            <span>حاسبة التأخير وصافي راتب نهاية الشهر للموظف</span>
+                          </h4>
+                          <p className="text-[11px] text-slate-400 mt-1 font-sans">تحديد الشهر واحتساب تلقائي للغياب والتأخير وقيمة الخصومات المقابلة ومستحقات الرواتب والبدلات.</p>
+                        </div>
+                        <div className="flex items-center gap-2 font-sans">
+                          <span className="text-xs text-slate-400 font-bold">تحديد شهر الاحتساب:</span>
+                          <input 
+                            type="month" 
+                            value={selectedSalaryMonth}
+                            onChange={(e) => setSelectedSalaryMonth(e.target.value)}
+                            className="px-2 py-1 bg-slate-900 border border-slate-800 rounded-lg text-xs font-bold text-amber-400 focus:outline-none cursor-pointer font-sans"
+                          />
+                        </div>
+                      </div>
+
+                      {(() => {
+                        const stats = calculateWorkerSalaryForMonth(selectedWorkerForHr, selectedSalaryMonth);
+                        return (
+                          <div className="space-y-5">
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                              <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-800/80">
+                                <span className="text-[11px] text-slate-400 block font-bold">الراتب الأساسي والبدلات المعتمدة</span>
+                                <span className="text-sm font-black text-white block mt-1 font-mono">{(stats.basicSalary + stats.housing + stats.transport + stats.other).toLocaleString()} ريال</span>
+                                <span className="text-[10px] text-slate-500 block mt-0.5 font-sans">أساسي: {stats.basicSalary} | بدلات: {stats.housing + stats.transport + stats.other}</span>
+                              </div>
+                              <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-800/80">
+                                <span className="text-[11px] text-slate-400 block font-bold">أيام حضور هذا الشهر</span>
+                                <span className="text-sm font-black text-amber-400 block mt-1 font-mono">{stats.presentDays} يوم عمل</span>
+                                <span className="text-[10px] text-slate-500 block mt-0.5 font-sans">من إجمالي بصمات الشهر: {stats.monthRecordsCount}</span>
+                              </div>
+                              <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-800/80">
+                                <span className="text-[11px] text-slate-400 block font-bold">إجمالي التأخيرات المسجلة</span>
+                                <span className="text-sm font-black text-rose-400 block mt-1 font-mono">{stats.totalDelayMinutes} دقيقة ({Math.floor(stats.totalDelayMinutes / 60)} س و {stats.totalDelayMinutes % 60} د)</span>
+                                <span className="text-[10px] text-slate-500 block mt-0.5 font-sans">تأخر في {stats.delayDaysCount} أيام • معدل خصم الساعة: {stats.hourlyRate} ريال</span>
+                              </div>
+                              <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-800/80">
+                                <span className="text-[11px] text-slate-400 block font-bold">سلف ومسحوبات الشهر الجاري</span>
+                                <span className="text-sm font-black text-cyan-400 block mt-1 font-mono">-{stats.totalAdvancesInMonth.toLocaleString()} ريال</span>
+                                <span className="text-[10px] text-slate-500 block mt-0.5 font-sans">عدد حركات السلف: {stats.monthAdvances.length}</span>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                              {/* Left Column: Delay details list table */}
+                              <div className="lg:col-span-2 bg-slate-950/30 rounded-xl p-4 border border-slate-800 space-y-2">
+                                <h5 className="text-xs font-black text-slate-300 font-sans">📋 تفاصيل التأخيرات اليومية لشهر ({selectedSalaryMonth})</h5>
+                                {stats.delayDetailsList.length === 0 ? (
+                                  <div className="p-8 text-center text-xs text-slate-500 font-sans">لا توجد أي تأخيرات مسجلة للموظف في هذا الشهر! الحضور ملتزم بالكامل.</div>
+                                ) : (
+                                  <div className="overflow-y-auto max-h-40">
+                                    <table className="w-full text-right text-xs">
+                                      <thead>
+                                        <tr className="border-b border-slate-800 text-slate-400 font-sans">
+                                          <th className="py-2 px-2">تاريخ الدوام</th>
+                                          <th className="py-2 px-2">بصمة الحضور</th>
+                                          <th className="py-2 px-2">مدة التأخير</th>
+                                          <th className="py-2 px-2">الخصم المقدر</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {stats.delayDetailsList.map((d, dIdx) => (
+                                          <tr key={dIdx} className="border-b border-slate-800/60 text-slate-300 hover:bg-slate-900/50 font-sans">
+                                            <td className="py-2 px-2 font-sans">{d.date}</td>
+                                            <td className="py-2 px-2 text-emerald-400 font-mono font-bold">{d.checkIn}</td>
+                                            <td className="py-2 px-2 text-rose-400 font-mono font-bold">{d.delayMins} دقيقة</td>
+                                            <td className="py-2 px-2 font-mono text-rose-400">-{((d.delayMins / 60) * stats.hourlyRate).toFixed(1)} ريال</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Right Column: Gross -> Deductions -> Net Salary receipt */}
+                              <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-4 flex flex-col justify-between font-sans">
+                                <div className="space-y-3 text-xs font-sans">
+                                  <h5 className="text-xs font-black text-amber-400 text-center border-b border-slate-800 pb-2 font-sans">🧾 بيان استحقاق نهاية الشهر</h5>
+                                  
+                                  <div className="flex justify-between">
+                                    <span className="text-slate-400 font-bold">الراتب الشهري الأساسي:</span>
+                                    <span className="text-slate-200 font-mono">{stats.basicSalary.toLocaleString()} ريال</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-slate-400 font-bold">البدلات والمزايا:</span>
+                                    <span className="text-slate-200 font-mono">{(stats.housing + stats.transport + stats.other).toLocaleString()} ريال</span>
+                                  </div>
+                                  <div className="flex justify-between text-amber-300 font-bold pt-1 border-t border-slate-800">
+                                    <span>إجمالي الاستحقاق (Gross):</span>
+                                    <span className="font-mono">{stats.expectedGross.toLocaleString()} ريال</span>
+                                  </div>
+
+                                  <div className="flex justify-between text-rose-400 pt-1">
+                                    <span>خصم غياب وتأخيرات:</span>
+                                    <span className="font-mono">-{stats.delayDeduction.toLocaleString()} ريال</span>
+                                  </div>
+                                  <div className="flex justify-between text-rose-400">
+                                    <span>خصم سلف الشهر:</span>
+                                    <span className="font-mono">-{stats.totalAdvancesInMonth.toLocaleString()} ريال</span>
+                                  </div>
+                                </div>
+
+                                <div className="mt-4 pt-3 border-t border-slate-800 flex justify-between items-center font-sans">
+                                  <span className="text-xs font-black text-emerald-400 font-sans">الصافي الجاري للراتب (Net):</span>
+                                  <span className="text-base font-black text-emerald-400 font-mono bg-emerald-500/10 px-2.5 py-1 rounded border border-emerald-500/20">{stats.netSalary.toLocaleString()} ريال</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+
                   </div>
                 </div>
               )}
@@ -6959,7 +7482,8 @@ CREATE TABLE extracts (
                   const netSalaryBalance = profileWorker.balance;
 
                   return (
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <>
+                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                       
                       {/* Column 1: Contract & Career Profile */}
                       <div className="lg:col-span-1 space-y-6">
@@ -7248,8 +7772,128 @@ CREATE TABLE extracts (
                       </div>
 
                     </div>
-                  );
-                })()}
+
+                    {/* Row 2: Delay and Net Monthly Salary Calculator (Full Width Panel) */}
+                    <div className="bg-slate-950/40 p-6 rounded-2xl border border-slate-800 space-y-4 text-right mt-6">
+                      <div className="border-b border-slate-800 pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div>
+                          <h4 className="text-sm font-black text-amber-400 flex items-center gap-1.5 font-sans">
+                            <span>📊</span>
+                            <span>تقرير حضورك وحاسبة الراتب الصافي الجاري للمستحقات</span>
+                          </h4>
+                          <p className="text-[11px] text-slate-400 mt-1 font-sans">تحديد الشهر الجاري واحتساب فوري للغياب، ساعات التأخير، المزايا المستحقة، السلف، وصافي الراتب المستحق في نهاية الشهر.</p>
+                        </div>
+                        <div className="flex items-center gap-2 font-sans">
+                          <span className="text-xs text-slate-400 font-bold font-sans">تحديد شهر الاحتساب:</span>
+                          <input 
+                            type="month" 
+                            value={selectedSalaryMonth}
+                            onChange={(e) => setSelectedSalaryMonth(e.target.value)}
+                            className="px-2 py-1 bg-slate-900 border border-slate-800 rounded-lg text-xs font-bold text-amber-400 focus:outline-none cursor-pointer font-sans"
+                          />
+                        </div>
+                      </div>
+
+                      {(() => {
+                        const stats = calculateWorkerSalaryForMonth(profileWorker, selectedSalaryMonth);
+                        return (
+                          <div className="space-y-5">
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                              <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-800/80">
+                                <span className="text-[11px] text-slate-400 block font-bold font-sans">الراتب الأساسي والبدلات المعتمدة</span>
+                                <span className="text-sm font-black text-white block mt-1 font-mono">{(stats.basicSalary + stats.housing + stats.transport + stats.other).toLocaleString()} ريال</span>
+                                <span className="text-[10px] text-slate-500 block mt-0.5 font-sans">أساسي: {stats.basicSalary} | بدلات: {stats.housing + stats.transport + stats.other}</span>
+                              </div>
+                              <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-800/80">
+                                <span className="text-[11px] text-slate-400 block font-bold font-sans">أيام حضورك هذا الشهر</span>
+                                <span className="text-sm font-black text-amber-400 block mt-1 font-mono">{stats.presentDays} يوم عمل</span>
+                                <span className="text-[10px] text-slate-500 block mt-0.5 font-sans">من إجمالي البصمات المقيدة: {stats.monthRecordsCount}</span>
+                              </div>
+                              <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-800/80">
+                                <span className="text-[11px] text-slate-400 block font-bold font-sans">إجمالي تأخيراتك المسجلة</span>
+                                <span className="text-sm font-black text-rose-400 block mt-1 font-mono">{stats.totalDelayMinutes} دقيقة ({Math.floor(stats.totalDelayMinutes / 60)} س و {stats.totalDelayMinutes % 60} د)</span>
+                                <span className="text-[10px] text-slate-500 block mt-0.5 font-sans">تأخر في {stats.delayDaysCount} أيام • معدل خصم الساعة: {stats.hourlyRate} ريال</span>
+                              </div>
+                              <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-800/80">
+                                <span className="text-[11px] text-slate-400 block font-bold font-sans">السلف والمسحوبات للشهر</span>
+                                <span className="text-sm font-black text-cyan-400 block mt-1 font-mono">-{stats.totalAdvancesInMonth.toLocaleString()} ريال</span>
+                                <span className="text-[10px] text-slate-500 block mt-0.5 font-sans">عدد حركات السلف: {stats.monthAdvances.length}</span>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                              {/* Left Column: Delay details list table */}
+                              <div className="lg:col-span-2 bg-slate-950/30 rounded-xl p-4 border border-slate-800 space-y-2">
+                                <h5 className="text-xs font-black text-slate-300 font-sans font-sans">📋 سجل وساعات تأخير الحضور اليومية في شهر ({selectedSalaryMonth})</h5>
+                                {stats.delayDetailsList.length === 0 ? (
+                                  <div className="p-8 text-center text-xs text-slate-500 font-sans">لا توجد أي تأخيرات مقيدة لك في هذا الشهر! شكرًا لالتزامك الممتاز.</div>
+                                ) : (
+                                  <div className="overflow-y-auto max-h-40">
+                                    <table className="w-full text-right text-xs">
+                                      <thead>
+                                        <tr className="border-b border-slate-800 text-slate-400 font-sans">
+                                          <th className="py-2 px-2 font-sans">تاريخ اليوم</th>
+                                          <th className="py-2 px-2 font-sans">وقت بصمة الحضور</th>
+                                          <th className="py-2 px-2 font-sans">فترة التأخير عن الدوام</th>
+                                          <th className="py-2 px-2 font-sans">الخصم المترتب</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {stats.delayDetailsList.map((d, dIdx) => (
+                                          <tr key={dIdx} className="border-b border-slate-800/60 text-slate-300 hover:bg-slate-900/50 font-sans">
+                                            <td className="py-2 px-2 font-sans font-sans">{d.date}</td>
+                                            <td className="py-2 px-2 text-emerald-400 font-mono font-bold font-sans">{d.checkIn}</td>
+                                            <td className="py-2 px-2 text-rose-400 font-mono font-bold font-sans">{d.delayMins} دقيقة</td>
+                                            <td className="py-2 px-2 font-mono text-rose-400 font-sans">-{((d.delayMins / 60) * stats.hourlyRate).toFixed(1)} ريال</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Right Column: Gross -> Deductions -> Net Salary receipt */}
+                              <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-4 flex flex-col justify-between font-sans">
+                                <div className="space-y-3 text-xs font-sans">
+                                  <h5 className="text-xs font-black text-amber-400 text-center border-b border-slate-800 pb-2 font-sans font-sans">🧾 كشف استحقاق راتب نهاية الشهر</h5>
+                                  
+                                  <div className="flex justify-between font-sans">
+                                    <span className="text-slate-400 font-bold font-sans">الراتب الأساسي:</span>
+                                    <span className="text-slate-200 font-mono">{stats.basicSalary.toLocaleString()} ريال</span>
+                                  </div>
+                                  <div className="flex justify-between font-sans">
+                                    <span className="text-slate-400 font-bold font-sans">البدلات والمزايا:</span>
+                                    <span className="text-slate-200 font-mono">{(stats.housing + stats.transport + stats.other).toLocaleString()} ريال</span>
+                                  </div>
+                                  <div className="flex justify-between text-amber-300 font-bold pt-1 border-t border-slate-800 font-sans">
+                                    <span className="font-sans">إجمالي الاستحقاق الشامل (Gross):</span>
+                                    <span className="font-mono">{stats.expectedGross.toLocaleString()} ريال</span>
+                                  </div>
+
+                                  <div className="flex justify-between text-rose-400 pt-1 font-sans">
+                                    <span className="font-sans font-bold text-rose-400">خصم غياب وتأخيرات:</span>
+                                    <span className="font-mono">-{stats.delayDeduction.toLocaleString()} ريال</span>
+                                  </div>
+                                  <div className="flex justify-between text-rose-400 font-sans">
+                                    <span className="font-sans font-bold text-rose-400">خصم السلف المستلمة:</span>
+                                    <span className="font-mono">-{stats.totalAdvancesInMonth.toLocaleString()} ريال</span>
+                                  </div>
+                                </div>
+
+                                <div className="mt-4 pt-3 border-t border-slate-800 flex justify-between items-center font-sans">
+                                  <span className="text-xs font-black text-emerald-400 font-sans font-black">الصافي الجاري للراتب (Net):</span>
+                                  <span className="text-base font-black text-emerald-400 font-mono bg-emerald-500/10 px-2.5 py-1 rounded border border-emerald-500/20">{stats.netSalary.toLocaleString()} ريال</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </>
+                );
+              })()}
               </div>
             </div>
           )}

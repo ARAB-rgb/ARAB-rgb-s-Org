@@ -21,6 +21,8 @@ interface AttendanceProps {
   selectedCompanyId?: string;
   onUpdate?: () => void;
   showToast: (msg: string, type?: "success" | "error" | "info" | "warning") => void;
+  onAutoLogout?: () => void;
+  isAttendanceOnly?: boolean;
 }
 
 // Haversine formula to compute distance in meters between two coordinates
@@ -66,7 +68,9 @@ export const Attendance: React.FC<AttendanceProps> = ({
   companies,
   selectedCompanyId = "all",
   onUpdate,
-  showToast
+  showToast,
+  onAutoLogout,
+  isAttendanceOnly = false
 }) => {
   // Live Clock states
   const [liveTime, setLiveTime] = useState<string>("");
@@ -437,6 +441,13 @@ export const Attendance: React.FC<AttendanceProps> = ({
 
       showToast(`تم تسجيل بصمة انصراف الموظف وتأكيد نهاية شيفت اليوم!`, "success");
       if (onUpdate) await onUpdate();
+
+      if (isAttendanceOnly && onAutoLogout) {
+        showToast("جاري تسجيل الخروج التلقائي وتأمين الوردية...", "info");
+        setTimeout(() => {
+          onAutoLogout();
+        }, 2000);
+      }
     } catch (err) {
       showToast("حدث خطأ أثناء معالجة بصمة الانصراف", "error");
     } finally {

@@ -815,6 +815,8 @@ export function awExtractWorkerContract(notes: string): any {
     passport: getVal("عقد_جواز", ""),
     probation: getVal("عقد_التجربة", "90 يوم"),
     vacation: getNum("عقد_الإجازة", 30),
+    shiftStart: getVal("عقد_الوردية", "08:00"),
+    delayRate: getNum("عقد_خصم_التأخير", 0),
   };
 }
 
@@ -850,6 +852,8 @@ export function awBuildWorkerNotes(cleanText: string, contract: any, leaves: any
     if (contract.passport) tags.push(`[عقد_جواز: ${contract.passport}]`);
     if (contract.probation) tags.push(`[عقد_التجربة: ${contract.probation}]`);
     if (contract.vacation) tags.push(`[عقد_الإجازة: ${contract.vacation}]`);
+    if (contract.shiftStart) tags.push(`[عقد_الوردية: ${contract.shiftStart}]`);
+    if (contract.delayRate) tags.push(`[عقد_خصم_التأخير: ${contract.delayRate}]`);
   }
   if (leaves && leaves.length > 0) {
     leaves.forEach(l => {

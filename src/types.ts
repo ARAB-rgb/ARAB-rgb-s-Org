@@ -206,6 +206,7 @@ export interface DbSession {
 
 export interface Company {
   id: string;
+  slug?: string;
   name: string;
   record_no?: string; // Commercial Registration / السجل التجاري
   manager?: string;   // مدير الشركة للتعميدات والتوقيع
