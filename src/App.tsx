@@ -34,6 +34,8 @@ import { FinancialReports } from "./components/FinancialReports";
 import { Attendance } from "./components/Attendance";
 import { SaasLandingPortal } from "./components/SaasLandingPortal";
 import { ProjectMap } from "./components/ProjectMap";
+import { HRModule } from "./components/HRModule";
+import { CompanyAssets } from "./components/CompanyAssets";
 
 const getStoredTreasuries = (companyId?: string | null): string[] => {
   const defaults = ["خزنة الشركة", "خزنة التحصيل", "خزنة التحويل", "نقاط البيع", "خزنة المقاولات"];
@@ -1229,17 +1231,7 @@ export default function App() {
     if (!currentUser) return [];
     if (currentUser.role === "admin") return companies;
     const userCompany = currentUser.company_id || "arab_world";
-    return companies.filter((c) => {
-      const compId = c.id;
-      if (currentUser.company_perms && Object.keys(currentUser.company_perms).length > 0) {
-        const permObj = currentUser.company_perms[compId];
-        if (permObj) {
-          return !!permObj.is_authorized;
-        }
-        return compId === userCompany;
-      }
-      return compId === userCompany;
-    });
+    return companies.filter((c) => c.id === userCompany);
   };
 
   const getAuthorizedUsers = () => {
@@ -1259,12 +1251,7 @@ export default function App() {
     if (currentUser.role === "admin") return true;
     const userCompany = currentUser.company_id || "arab_world";
     const itemCompany = compId || "arab_world";
-    
-    if (itemCompany === userCompany) return true;
-    if (currentUser.company_perms && currentUser.company_perms[itemCompany]) {
-      return !!currentUser.company_perms[itemCompany].is_authorized;
-    }
-    return false;
+    return itemCompany === userCompany;
   };
 
   const getActivePerms = () => {
@@ -1403,7 +1390,8 @@ export default function App() {
         else if (activeSection === "financial_reports") isAllowed = hasAccess("financial_reports");
         else if (activeSection === "projects") isAllowed = hasAccess("projects");
         else if (activeSection === "workers") isAllowed = hasAccess("workers");
-        else if (activeSection === "companies") isAllowed = hasAccess("companies");
+        else if (activeSection === "companies") isAllowed = hasAccess("companies") || currentUser?.role === "admin";
+        else if (activeSection === "company_assets") isAllowed = hasAccess("companies") || currentUser?.role === "admin";
         else if (activeSection === "users") isAllowed = hasAccess("users");
         else if (activeSection === "sessions") isAllowed = hasAccess("sessions");
 
@@ -1421,6 +1409,7 @@ export default function App() {
             "financial_reports",
             "projects",
             "workers",
+            "company_assets",
             "companies",
             "users",
             "sessions"
@@ -1438,7 +1427,8 @@ export default function App() {
             if (sec === "financial_reports") return hasAccess("financial_reports");
             if (sec === "projects") return hasAccess("projects");
             if (sec === "workers") return hasAccess("workers");
-            if (sec === "companies") return hasAccess("companies");
+            if (sec === "company_assets") return hasAccess("companies") || currentUser?.role === "admin";
+            if (sec === "companies") return hasAccess("companies") || currentUser?.role === "admin";
             if (sec === "users") return hasAccess("users");
             if (sec === "sessions") return hasAccess("sessions");
             return false;
@@ -3823,6 +3813,8 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
     { key: "financial_reports", label: "التقارير والقوائم المالية", icon: PieChart, visible: !isAttendanceOnly && can("financial_reports") },
     { key: "projects", label: "المشاريع الجارية", icon: Briefcase, visible: !isAttendanceOnly && can("projects") },
     { key: "workers", label: "العمال والسلفيات", icon: Users, visible: !isAttendanceOnly && can("workers") },
+    { key: "hr", label: "شؤون الموظفين", icon: Users, visible: !isAttendanceOnly && can("workers") },
+    { key: "company_assets", label: "أصول وممتلكات الشركات", icon: Building, visible: !isAttendanceOnly && (currentUser?.role === "admin" || can("companies")) },
     { key: "companies", label: "دليل الشركات والمستخلصات", icon: Building, visible: !isAttendanceOnly && (currentUser?.role === "admin" || can("companies")) },
     { key: "users", label: "الموظفين والصلاحية", icon: Settings, visible: !isAttendanceOnly && (currentUser?.role === "admin" || can("users")) },
     { key: "sessions", label: "سجل حركات النظام", icon: Clock, visible: !isAttendanceOnly && (currentUser?.role === "admin" || can("sessions")) },
@@ -6246,6 +6238,27 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                 </div>
               )}
             </div>
+          )}
+
+          {/* HR Module Section */}
+          {activeSection === "hr" && (
+            <HRModule
+              currentUser={currentUser}
+              projects={projects}
+              companies={companies}
+              selectedCompanyId={selectedCompanyId}
+              showToast={showToast}
+            />
+          )}
+
+          {/* Company Assets Section */}
+          {activeSection === "company_assets" && (
+            <CompanyAssets
+              currentUser={currentUser}
+              companies={companies}
+              selectedCompanyId={selectedCompanyId}
+              showToast={showToast}
+            />
           )}
 
           {/* Financial Reports Section */}

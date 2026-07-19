@@ -268,6 +268,164 @@
         "created_at": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "worker_id", "worker_name", "project_id", "project_name", "date", "status"]
+    },
+    "HrEmployee": {
+      "title": "HrEmployee",
+      "description": "HR Employee Profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "company_id": { "type": "string" },
+        "name": { "type": "string" },
+        "employee_no": { "type": "string" },
+        "id_iqama": { "type": "string" },
+        "nationality": { "type": "string" },
+        "phone": { "type": "string" },
+        "job_title": { "type": "string" },
+        "department": { "type": "string" },
+        "project": { "type": "string" },
+        "branch": { "type": "string" },
+        "start_date": { "type": "string" },
+        "basic_salary": { "type": "number" },
+        "allowances": { "type": "number" },
+        "payment_method": { "type": "string" },
+        "daily_rate": { "type": "number" },
+        "bank_account": { "type": "string" },
+        "iban": { "type": "string" },
+        "status": { "type": "string" },
+        "image_url": { "type": "string" },
+        "attachments": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "company_id", "name", "employee_no"]
+    },
+    "HrContract": {
+      "title": "HrContract",
+      "description": "HR Employee Contract",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "company_id": { "type": "string" },
+        "employee_id": { "type": "string" },
+        "employee_name": { "type": "string" },
+        "type": { "type": "string" },
+        "start_date": { "type": "string" },
+        "end_date": { "type": "string" },
+        "probation": { "type": "string" },
+        "basic_salary": { "type": "number" },
+        "housing_allowance": { "type": "number" },
+        "transport_allowance": { "type": "number" },
+        "other_allowances": { "type": "number" },
+        "work_hours": { "type": "number" },
+        "work_days": { "type": "number" },
+        "daily_rate": { "type": "number" },
+        "project_branch": { "type": "string" },
+        "conditions": { "type": "string" },
+        "status": { "type": "string" },
+        "attachments": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "company_id", "employee_id", "type", "start_date"]
+    },
+    "HrCustody": {
+      "title": "HrCustody",
+      "description": "HR Employee Custody Item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "company_id": { "type": "string" },
+        "employee_id": { "type": "string" },
+        "employee_name": { "type": "string" },
+        "type": { "type": "string" },
+        "description": { "type": "string" },
+        "serial_no": { "type": "string" },
+        "value": { "type": "number" },
+        "delivery_date": { "type": "string" },
+        "delivery_condition": { "type": "string" },
+        "project_branch": { "type": "string" },
+        "image_url": { "type": "string" },
+        "delivered_by": { "type": "string" },
+        "signature_url": { "type": "string" },
+        "status": { "type": "string" },
+        "return_date": { "type": "string" },
+        "return_condition": { "type": "string" },
+        "notes": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "company_id", "employee_id", "type", "delivery_date"]
+    },
+    "HrJournal": {
+      "title": "HrJournal",
+      "description": "HR Worker/Employee Daily Journal",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "company_id": { "type": "string" },
+        "date": { "type": "string" },
+        "employee_id": { "type": "string" },
+        "employee_name": { "type": "string" },
+        "project": { "type": "string" },
+        "branch": { "type": "string" },
+        "work_days": { "type": "number" },
+        "work_hours": { "type": "number" },
+        "overtime_hours": { "type": "number" },
+        "daily_rate": { "type": "number" },
+        "overtime_rate": { "type": "number" },
+        "total_entitled": { "type": "number" },
+        "paid_amount": { "type": "number" },
+        "remaining_amount": { "type": "number" },
+        "payment_method": { "type": "string" },
+        "voucher_no": { "type": "string" },
+        "notes": { "type": "string" },
+        "status": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "company_id", "date", "employee_id", "total_entitled"]
+    },
+    "HrDeduction": {
+      "title": "HrDeduction",
+      "description": "HR Employee salary deduction",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "company_id": { "type": "string" },
+        "employee_id": { "type": "string" },
+        "employee_name": { "type": "string" },
+        "type": { "type": "string" },
+        "date": { "type": "string" },
+        "amount": { "type": "number" },
+        "days_hours": { "type": "string" },
+        "reason": { "type": "string" },
+        "project_branch": { "type": "string" },
+        "attachments": { "type": "string" },
+        "created_by": { "type": "string" },
+        "approved_by": { "type": "string" },
+        "status": { "type": "string" },
+        "month_applied": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "company_id", "employee_id", "type", "date", "amount"]
+    },
+    "CompanyAsset": {
+      "title": "CompanyAsset",
+      "description": "Company assets like vehicles, real estates, etc",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "company_id": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "model": { "type": "string" },
+        "plate_number_or_title": { "type": "string" },
+        "mileage": { "type": "number" },
+        "status": { "type": "string" },
+        "purchase_date": { "type": "string" },
+        "purchase_value": { "type": "number" },
+        "notes": { "type": "string" },
+        "maintenance_logs": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "company_id", "name", "type", "status"]
     }
   },
   "firestore": {
@@ -318,6 +476,30 @@
     "attendance": {
       "schema": "Attendance",
       "description": "Attendance tracking check-in/out records"
+    },
+    "hr_employees": {
+      "schema": "HrEmployee",
+      "description": "HR employee profiles"
+    },
+    "hr_contracts": {
+      "schema": "HrContract",
+      "description": "HR employee historical and current contracts"
+    },
+    "hr_custody": {
+      "schema": "HrCustody",
+      "description": "HR employee custody items"
+    },
+    "hr_journals": {
+      "schema": "HrJournal",
+      "description": "HR worker/employee daily journals"
+    },
+    "hr_deductions": {
+      "schema": "HrDeduction",
+      "description": "HR employee salary deductions"
+    },
+    "company_assets": {
+      "schema": "CompanyAsset",
+      "description": "Company assets like vehicles, real estates, etc"
     }
   }
 }

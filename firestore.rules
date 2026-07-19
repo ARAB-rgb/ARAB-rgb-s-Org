@@ -221,5 +221,35 @@ service cloud.firestore {
       allow create, update: if isSignedIn() && isValidAttendance(incoming()) && isValidId(attendanceId);
       allow delete: if isSignedIn() && isValidId(attendanceId);
     }
+
+    match /hr_employees/{id} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isSignedIn() && isValidId(id);
+    }
+
+    match /hr_contracts/{id} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isSignedIn() && isValidId(id);
+    }
+
+    match /hr_custody/{id} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isSignedIn() && isValidId(id);
+    }
+
+    match /hr_journals/{id} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isSignedIn() && isValidId(id);
+    }
+
+    match /hr_deductions/{id} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isSignedIn() && isValidId(id);
+    }
+
+    match /company_assets/{id} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isSignedIn() && isValidId(id);
+    }
   }
 }

@@ -253,15 +253,18 @@ class SupabaseEmulationChain {
       const { data, error } = await q;
       if (error) throw error;
 
-      // Fallback to Firestore if companies table is empty in Supabase due to RLS policies
-      if (this.table === "companies" && (!data || data.length === 0)) {
+      // Fallback to Firestore if companies/users table is empty in Supabase due to RLS policies
+      if (
+        (this.table === "companies" || this.table === "users") &&
+        (!data || data.length === 0)
+      ) {
         try {
-          const colRef = collection(db, "companies");
+          const colRef = collection(db, this.table);
           const snap = await getDocs(colRef);
           const fDocs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
           return { data: fDocs, error: null };
         } catch (e) {
-          console.warn("Failed to fallback to Firestore companies:", e);
+          console.warn(`Failed to fallback to Firestore ${this.table}:`, e);
         }
       }
 

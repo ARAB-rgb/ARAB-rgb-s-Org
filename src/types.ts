@@ -29,6 +29,23 @@ export interface UserPerms {
   is_authorized?: boolean;
   use_global?: boolean;
   worker_id?: string | null;
+  hr_employees_view?: boolean;
+  hr_employees_add?: boolean;
+  hr_employees_edit?: boolean;
+  hr_employees_delete?: boolean;
+  hr_contracts_view?: boolean;
+  hr_contracts_add?: boolean;
+  hr_contracts_approve?: boolean;
+  hr_custody_view?: boolean;
+  hr_custody_add?: boolean;
+  hr_custody_return?: boolean;
+  hr_journals_add?: boolean;
+  hr_journals_approve?: boolean;
+  hr_journals_pay?: boolean;
+  hr_deductions_add?: boolean;
+  hr_deductions_approve?: boolean;
+  hr_salaries_view?: boolean;
+  hr_reports_print?: boolean;
 }
 
 export interface User {
@@ -233,4 +250,30 @@ export interface Extract {
   notes?: string;
   created_at?: string;
 }
+
+export interface CompanyAssetMaintenanceLog {
+  id: string;
+  date: string;
+  description: string;
+  cost: number;
+  mileage_at_maintenance?: number;
+  status: "completed" | "pending";
+}
+
+export interface CompanyAsset {
+  id: string;
+  company_id: string;
+  name: string;
+  type: "vehicle" | "real_estate" | "equipment" | "other" | string;
+  model?: string;
+  plate_number_or_title?: string;
+  mileage?: number;
+  status: "active" | "maintenance" | "sold" | "inactive" | string;
+  purchase_date?: string;
+  purchase_value?: number;
+  notes?: string;
+  maintenance_logs?: CompanyAssetMaintenanceLog[];
+  created_at?: string;
+}
+
 
