@@ -304,39 +304,63 @@ class SupabaseEmulationChain {
   }
 
   async maybeSingle(): Promise<{ data: any | null; error: Error | null }> {
+    // المحاولة أولاً من Supabase
     if (isSupabaseHealthy) {
       try {
         let q = supabase.from(this.table).select("*");
+
         for (const f of this.filters) {
           q = q.eq(f.field, f.val);
         }
+
         const { data, error } = await q.limit(1).maybeSingle();
-        if (error) {
-          console.warn("Real Supabase maybeSingle returned error, falling back to Firestore:", error.message);
-          throw error;
-        } else {
+
+        // إذا وجد السجل في Supabase نعيده مباشرة
+        if (!error && data) {
           return { data, error: null };
         }
+
+        // إذا لم يجد السجل، لا نعتبرها بيانات دخول خاطئة
+        // بل ننتقل إلى Firestore
+        console.warn(
+          `No record found in Supabase table ${this.table}; trying Firestore fallback.`
+        );
       } catch (err: any) {
-        console.warn("⚠️ Real Supabase maybeSingle failed, falling back to Firestore.", err);
-        isSupabaseHealthy = false;
+        console.warn(
+          `Supabase lookup failed for ${this.table}; trying Firestore fallback.`,
+          err
+        );
       }
     }
 
-    // Fallback to Firestore
+    // البحث الاحتياطي في Firestore
     try {
       const qConstraints: any[] = [];
+
       for (const f of this.filters) {
-        qConstraints.push(where(f.field, '==', f.val));
+        qConstraints.push(where(f.field, "==", f.val));
       }
+
       const colRef = collection(db, this.table);
-      const q = query(colRef, ...qConstraints);
-      const snap = await getDocs(q);
-      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      return { data: docs[0] || null, error: null };
+      const firestoreQuery = query(colRef, ...qConstraints);
+      const snap = await getDocs(firestoreQuery);
+
+      const docs = snap.docs.map((d) => ({
+        id: d.id,
+        ...d.data(),
+      }));
+
+      return {
+        data: docs[0] || null,
+        error: null,
+      };
     } catch (err: any) {
-      handleFirestoreError(err, OperationType.GET, this.table);
-      return { data: null, error: err };
+      console.error(`Firestore fallback failed for ${this.table}:`, err);
+
+      return {
+        data: null,
+        error: err instanceof Error ? err : new Error(String(err)),
+      };
     }
   }
 

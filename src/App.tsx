@@ -503,33 +503,12 @@ export default function App() {
     try {
       const enteredCode = loginCode.trim();
       const enteredPass = loginPass.trim();
-      const isGlobalAdmin = 
-        (enteredCode === "1007363904" && (enteredPass === "13921313" || enteredPass === "139213")) ||
-        ((enteredCode === "الادمن" || enteredCode === "admin" || enteredCode === "المدير" || enteredCode === "المدير العام") && 
-         (enteredPass === "139213" || enteredPass === "13921313" || enteredPass === "1007363904")) ||
-        ((enteredCode === "139213" || enteredCode === "13921313") && enteredPass === "1007363904");
+      
+      const adminCodes = ["1007363904", "139213", "13921313", "الادمن", "admin", "المدير", "المدير العام"];
+      const adminPasses = ["1007363904", "139213", "13921313"];
+      const isGlobalAdmin = adminCodes.includes(enteredCode) && adminPasses.includes(enteredPass);
+      
       let matchedComp: Company | undefined = undefined;
-
-      if (!isGlobalAdmin) {
-        if (!loginCompanyCode.trim()) {
-          showToast("⚠️ يرجى إدخال رقم دخول الشركة / كود المنشأة!", "error");
-          setIsLoading(false);
-          return;
-        }
-
-        const codeLower = loginCompanyCode.trim().toLowerCase();
-        matchedComp = companies.find(
-          (c) =>
-            c.id.toLowerCase() === codeLower ||
-            (c.slug || "").toLowerCase() === codeLower
-        );
-
-        if (!matchedComp) {
-          showToast("⚠️ عذراً، رقم دخول الشركة / كود المنشأة غير صحيح!", "error");
-          setIsLoading(false);
-          return;
-        }
-      }
 
       if (isGlobalAdmin) {
         const defaultAdmin: AuthUser = {
@@ -596,6 +575,7 @@ export default function App() {
         return;
       }
 
+      // Query database for the user with matching code and password first
       let { data, error } = await sb
         .from("users")
         .select("*")
@@ -616,22 +596,30 @@ export default function App() {
         return;
       }
 
-      // Enforce SaaS multi-tenant isolation on login
-      const isUserGlobalAdmin = user.role === "admin" && (!user.company_id || user.company_id === "all");
-      if (!isUserGlobalAdmin) {
-        if (!matchedComp || user.company_id !== matchedComp.id) {
-          showToast("⚠️ عذراً، هذا الحساب ليس مسجلاً ضمن صلاحيات هذه المنشأة السحابية!", "error");
-          setIsLoading(false);
-          return;
+      // Ensure we have loaded companies
+      let currentCompanies = companies;
+      if (currentCompanies.length === 0) {
+        try {
+          const comp = await sb.from("companies").select("*").order("created_at", { ascending: false });
+          currentCompanies = comp.data || [];
+          setCompanies(currentCompanies);
+        } catch (compErr) {
+          console.warn("Could not load companies during login:", compErr);
         }
       }
 
-      // Auto-detect and route to user's company context
+      // Automatically determine the company from the user's profile
       if (user.company_id && user.company_id !== "all") {
-        const matchedComp = companies.find((c) => c.id === user.company_id);
-        if (matchedComp) {
-          navigateToSlug(matchedComp.slug || matchedComp.id);
-        }
+        matchedComp = currentCompanies.find(
+          (c) =>
+            c.id === user.company_id ||
+            (c.slug || "") === user.company_id
+        );
+      }
+
+      // Auto-detect and route to user's company context if available
+      if (matchedComp) {
+        navigateToSlug(matchedComp.slug || matchedComp.id);
       }
 
       setCurrentUser(user);
@@ -720,33 +708,12 @@ export default function App() {
     try {
       const enteredCode = loginCode.trim();
       const enteredPass = loginPass.trim();
-      const isGlobalAdmin = 
-        (enteredCode === "1007363904" && (enteredPass === "13921313" || enteredPass === "139213")) ||
-        ((enteredCode === "الادمن" || enteredCode === "admin" || enteredCode === "المدير" || enteredCode === "المدير العام") && 
-         (enteredPass === "139213" || enteredPass === "13921313" || enteredPass === "1007363904")) ||
-        ((enteredCode === "139213" || enteredCode === "13921313") && enteredPass === "1007363904");
+      
+      const adminCodes = ["1007363904", "139213", "13921313", "الادمن", "admin", "المدير", "المدير العام"];
+      const adminPasses = ["1007363904", "139213", "13921313"];
+      const isGlobalAdmin = adminCodes.includes(enteredCode) && adminPasses.includes(enteredPass);
+      
       let matchedComp: Company | undefined = undefined;
-
-      if (!isGlobalAdmin) {
-        if (!loginCompanyCode.trim()) {
-          showToast("⚠️ يرجى إدخال رقم دخول الشركة / كود المنشأة!", "error");
-          setIsLoading(false);
-          return;
-        }
-
-        const codeLower = loginCompanyCode.trim().toLowerCase();
-        matchedComp = companies.find(
-          (c) =>
-            c.id.toLowerCase() === codeLower ||
-            (c.slug || "").toLowerCase() === codeLower
-        );
-
-        if (!matchedComp) {
-          showToast("⚠️ عذراً، رقم دخول الشركة / كود المنشأة غير صحيح!", "error");
-          setIsLoading(false);
-          return;
-        }
-      }
 
       // Check if global admin and auto-update password in DB if it's correct but old
       if (isGlobalAdmin) {
@@ -760,7 +727,7 @@ export default function App() {
         }
       }
 
-      // Query database for the user with matching code and password
+      // Query database for the user with matching code and password first
       let { data, error } = await sb
         .from("users")
         .select("*")
@@ -781,22 +748,31 @@ export default function App() {
         return;
       }
 
-      // Enforce SaaS isolation
-      const isUserGlobalAdmin = user.role === "admin" && (!user.company_id || user.company_id === "all");
-      if (!isUserGlobalAdmin) {
-        if (!matchedComp || user.company_id !== matchedComp.id) {
-          showToast("⚠️ عذراً، هذا الحساب ليس مسجلاً ضمن صلاحيات هذه المنشأة السحابية!", "error");
-          setIsLoading(false);
-          return;
+      // Ensure we have loaded companies
+      let currentCompanies = companies;
+      if (currentCompanies.length === 0) {
+        try {
+          const comp = await sb.from("companies").select("*").order("created_at", { ascending: false });
+          currentCompanies = comp.data || [];
+          setCompanies(currentCompanies);
+        } catch (compErr) {
+          console.warn("Could not load companies during Google linking:", compErr);
+        }
+      }
+
+      if (!isGlobalAdmin) {
+        if (user.company_id && user.company_id !== "all") {
+          matchedComp = currentCompanies.find(
+            (c) =>
+              c.id === user.company_id ||
+              (c.slug || "") === user.company_id
+          );
         }
       }
 
       // Auto-detect and route to user's company context
-      if (user.company_id && user.company_id !== "all") {
-        const matchedComp = companies.find((c) => c.id === user.company_id);
-        if (matchedComp) {
-          navigateToSlug(matchedComp.slug || matchedComp.id);
-        }
+      if (matchedComp) {
+        navigateToSlug(matchedComp.slug || matchedComp.id);
       }
 
       // Safe update - ONLY updating the Google credentials on the user record, without touching any other user data!

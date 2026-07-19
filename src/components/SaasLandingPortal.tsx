@@ -187,25 +187,6 @@ export function SaasLandingPortal({
               </div>
 
               <form onSubmit={handleLinkGoogle} className="space-y-5">
-                {/* 1. Company Code */}
-                <div className="space-y-1.5">
-                  <div className="flex justify-between items-center px-1">
-                    <label className="text-[10px] font-black text-slate-300">رقم دخول الشركة / كود المنشأة</label>
-                    <span className="text-[9px] text-slate-500 font-mono">COMPANY ID</span>
-                  </div>
-                  <div className="relative h-11">
-                    <Building className="absolute right-4 top-3.5 w-4 h-4 text-amber-500/70" />
-                    <input
-                      type="text"
-                      placeholder="أدخل رقم دخول المنشأة أو رابطها السحابي (اختياري للمدير العام)..."
-                      value={loginCompanyCode}
-                      onChange={(e) => setLoginCompanyCode(e.target.value)}
-                      className="w-full h-full pl-4 pr-11 py-2.5 bg-slate-950/80 border border-slate-800 rounded-2xl text-xs font-bold text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 transition-all text-right"
-                    />
-                  </div>
-                  <span className="text-[8px] text-slate-500 block px-1">مثال لشركة التجربة: <b className="text-amber-400/70 font-mono">arab-world</b></span>
-                </div>
-
                 {/* 2. Employee Code */}
                 <div className="space-y-1.5">
                   <div className="flex justify-between items-center px-1">
@@ -286,25 +267,6 @@ export function SaasLandingPortal({
               </div>
 
               <form onSubmit={handleLogin} className="space-y-5">
-                {/* 1. Company Code */}
-                <div className="space-y-1.5">
-                  <div className="flex justify-between items-center px-1">
-                    <label className="text-[10px] font-black text-slate-300">رقم دخول الشركة / كود المنشأة</label>
-                    <span className="text-[9px] text-slate-500 font-mono">COMPANY ID</span>
-                  </div>
-                  <div className="relative h-11">
-                    <Building className="absolute right-4 top-3.5 w-4 h-4 text-amber-500/70" />
-                    <input
-                      type="text"
-                      placeholder="أدخل رقم دخول المنشأة أو رابطها السحابي (اختياري للمدير العام)..."
-                      value={loginCompanyCode}
-                      onChange={(e) => setLoginCompanyCode(e.target.value)}
-                      className="w-full h-full pl-4 pr-11 py-2.5 bg-slate-950/80 border border-slate-800 rounded-2xl text-xs font-bold text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 transition-all text-right"
-                    />
-                  </div>
-                  <span className="text-[8px] text-slate-500 block px-1">مثال لشركة التجربة: <b className="text-amber-400/70 font-mono">arab-world</b> أو <b className="text-amber-400/70 font-mono">demo-company</b></span>
-                </div>
-
                 {/* 2. Employee Code */}
                 <div className="space-y-1.5">
                   <div className="flex justify-between items-center px-1">
