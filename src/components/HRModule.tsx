@@ -10,7 +10,7 @@ import {
   Coins, Briefcase, Building, ChevronLeft, ChevronRight, File, ShieldCheck, HeartPulse
 } from "lucide-react";
 import { sb } from "../db";
-import { User as AuthUser, Project, Company } from "../types";
+import { User as AuthUser, Project, Company, CompanyAsset } from "../types";
 
 // HR Interfaces
 export interface HrEmployee {
@@ -151,6 +151,7 @@ export const HRModule: React.FC<HRProps> = ({
   const [custodies, setCustodies] = useState<HrCustody[]>([]);
   const [journals, setJournals] = useState<HrJournal[]>([]);
   const [deductions, setDeductions] = useState<HrDeduction[]>([]);
+  const [companyAssets, setCompanyAssets] = useState<CompanyAsset[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
 
   // Common filters
@@ -200,6 +201,10 @@ export const HRModule: React.FC<HRProps> = ({
       // 5. Deductions
       const dedRes = await sb.from("hr_deductions").select("*").eq("company_id", activeCompanyId);
       if (dedRes.data) setDeductions(dedRes.data);
+
+      // 6. Company Assets
+      const assetsRes = await sb.from("company_assets").select("*").eq("company_id", activeCompanyId);
+      if (assetsRes.data) setCompanyAssets(assetsRes.data);
     } catch (err) {
       console.error("Error loading HR data", err);
     } finally {
@@ -1977,6 +1982,61 @@ export const HRModule: React.FC<HRProps> = ({
                   {employees.map(emp => (
                     <option key={emp.id} value={emp.id}>{emp.name}</option>
                   ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] text-amber-400 font-bold mb-1 flex items-center gap-1">
+                  <span>اختر من أصول وممتلكات الشركة المتاحة (لتعبئة البيانات تلقائياً)</span>
+                  <span className="text-[9px] text-slate-500 font-medium">(أصول نشطة وغير مسلّمة كعهدة حالية)</span>
+                </label>
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const selectedId = e.target.value;
+                    const asset = companyAssets.find(a => a.id === selectedId);
+                    if (asset) {
+                      let mappedType = "أخرى";
+                      if (asset.type === "vehicle") mappedType = "سيارة";
+                      else if (asset.type === "equipment") mappedType = "معدات";
+                      
+                      setCustodyForm({
+                        ...custodyForm,
+                        type: mappedType,
+                        description: `${asset.name} ${asset.model ? `(موديل: ${asset.model})` : ""}`.trim(),
+                        serial_no: asset.plate_number_or_title || "",
+                        value: asset.purchase_value || 0,
+                      });
+                    }
+                  }}
+                  className="w-full bg-slate-950 border border-amber-500/20 hover:border-amber-500/50 px-4 py-2.5 rounded-xl text-xs text-amber-200 outline-none transition-all cursor-pointer font-bold"
+                >
+                  <option value="" className="text-slate-400">-- اختر من ممتلكات الشركة النشطة والمتاحة حالياً --</option>
+                  {companyAssets
+                    .filter(asset => {
+                      // 1. Must be active status
+                      if (asset.status !== "active") return false;
+
+                      // 2. Must not be currently assigned (held custody with status "مستلمة")
+                      const isAssigned = custodies.some(c => 
+                        c.status === "مستلمة" && 
+                        c.serial_no && 
+                        asset.plate_number_or_title && 
+                        c.serial_no.trim().toLowerCase() === asset.plate_number_or_title.trim().toLowerCase()
+                      );
+                      return !isAssigned;
+                    })
+                    .map(asset => {
+                      let typeLabel = "أصل";
+                      if (asset.type === "vehicle") typeLabel = "سيارة";
+                      else if (asset.type === "real_estate") typeLabel = "عقار";
+                      else if (asset.type === "equipment") typeLabel = "معدات/أجهزة";
+
+                      return (
+                        <option key={asset.id} value={asset.id} className="text-white">
+                          {asset.name} {asset.model ? `(${asset.model})` : ""} {asset.plate_number_or_title ? `[رقم/لوحة: ${asset.plate_number_or_title}]` : ""} - {typeLabel}
+                        </option>
+                      );
+                    })}
                 </select>
               </div>
               <div>
