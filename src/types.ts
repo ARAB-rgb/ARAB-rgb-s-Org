@@ -43,6 +43,8 @@ export interface User {
   company_id?: string | null;
   status?: string;
   created_at?: string;
+  email?: string;
+  google_id?: string;
 }
 
 export interface Installment {

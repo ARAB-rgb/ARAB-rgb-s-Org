@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Building, Sparkles, Shield, ArrowRight, Plus, CheckCircle, Smartphone, Lock, Award, Briefcase, Users, Landmark, AlertTriangle, Search, Globe, MapPin } from "lucide-react";
+import { Building, Sparkles, Shield, ArrowRight, Plus, CheckCircle, Smartphone, Lock, Award, Briefcase, Users, Landmark, AlertTriangle, Search, Globe, MapPin, User, Key } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Company } from "../types";
 
@@ -19,6 +19,21 @@ interface SaasLandingPortalProps {
   }) => Promise<boolean>;
   onNavigateToSlug: (slug: string) => void;
   showToast: (message: string, type?: "success" | "error" | "info") => void;
+
+  // Login parameters
+  loginCode: string;
+  setLoginCode: (v: string) => void;
+  loginCompanyCode: string;
+  setLoginCompanyCode: (v: string) => void;
+  loginPass: string;
+  setLoginPass: (v: string) => void;
+  handleLogin: (e: React.FormEvent) => Promise<void>;
+  isLoading: boolean;
+
+  handleGoogleSignIn?: () => Promise<void>;
+  googleUser?: { email: string; uid: string; displayName?: string } | null;
+  setGoogleUser?: (v: { email: string; uid: string; displayName?: string } | null) => void;
+  handleLinkGoogle?: (e: React.FormEvent) => Promise<void>;
 }
 
 export function SaasLandingPortal({
@@ -26,11 +41,23 @@ export function SaasLandingPortal({
   onRegisterCompany,
   onNavigateToSlug,
   showToast,
+  loginCode,
+  setLoginCode,
+  loginCompanyCode,
+  setLoginCompanyCode,
+  loginPass,
+  setLoginPass,
+  handleLogin,
+  isLoading,
+  handleGoogleSignIn,
+  googleUser,
+  setGoogleUser,
+  handleLinkGoogle,
 }: SaasLandingPortalProps) {
   const [showRegisterForm, setShowRegisterForm] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Form States
+  // Registration Form States
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [manager, setManager] = useState("");
@@ -38,14 +65,11 @@ export function SaasLandingPortal({
   const [address, setAddress] = useState("");
   const [recordNo, setRecordNo] = useState("");
   const [taxNo, setTaxNo] = useState("");
-  const [capital, setCapital] = useState<number | "">("");
+  const [capital, setCapital] = useState<number | " text-right font-sans">("");
   const [adminCode, setAdminCode] = useState("");
   const [adminPass, setAdminPass] = useState("");
 
-  const [searchQuery, setSearchQuery] = useState("");
-
   const handleSlugChange = (val: string) => {
-    // Keep only lowercase alphanumeric and hyphens
     const cleaned = val.toLowerCase().replace(/[^a-z0-9-]/g, "");
     setSlug(cleaned);
   };
@@ -62,7 +86,6 @@ export function SaasLandingPortal({
       return;
     }
 
-    // Check if slug is already used
     const slugExists = companies.some(
       (c) => (c.slug || "").toLowerCase() === slug.toLowerCase() || c.id.toLowerCase() === slug.toLowerCase()
     );
@@ -87,7 +110,6 @@ export function SaasLandingPortal({
       });
 
       if (success) {
-        // Reset form
         setName("");
         setSlug("");
         setManager("");
@@ -107,363 +129,309 @@ export function SaasLandingPortal({
     }
   };
 
-  const getMockStats = (companyId: string) => {
-    let hash = 0;
-    for (let i = 0; i < companyId.length; i++) {
-      hash = companyId.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    const workers = Math.abs((hash % 15) + 8);
-    const projects = Math.abs((hash % 5) + 3);
-    const city = ["الرياض", "الدمام", "جدة", "مكة المكرمة", "المدينة المنورة"][Math.abs(hash % 5)];
-    return { workers, projects, city };
-  };
-
-  const isSearchEmpty = searchQuery.trim() === "";
-
-  const filteredCompanies = companies.filter((c) => {
-    const term = searchQuery.toLowerCase().trim();
-    if (isSearchEmpty) {
-      const slugLower = (c.slug || "").toLowerCase();
-      return (
-        slugLower === "demo-company" ||
-        slugLower === "arab-world" ||
-        c.id === "arab_world" ||
-        c.id === "demo_company"
-      );
-    }
-    return (
-      c.name.toLowerCase().includes(term) ||
-      (c.slug || "").toLowerCase().includes(term) ||
-      c.id.toLowerCase().includes(term)
-    );
-  });
-
   return (
-    <div className="min-h-screen bg-slate-950 text-right text-slate-100 font-sans selection:bg-amber-500/30 overflow-x-hidden relative" dir="rtl">
-      {/* Background decoration */}
-      <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-amber-500/5 rounded-full blur-[150px] pointer-events-none"></div>
-      <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-blue-500/5 rounded-full blur-[150px] pointer-events-none"></div>
+    <div className="min-h-screen bg-slate-950 text-right text-slate-100 font-sans selection:bg-amber-500/30 overflow-hidden flex flex-col justify-center items-center relative p-4 sm:p-6" dir="rtl">
+      {/* Royal Background decorations */}
+      <div className="absolute top-1/4 left-1/4 w-[500px] h-[500px] bg-amber-500/10 rounded-full blur-[160px] pointer-events-none animate-pulse"></div>
+      <div className="absolute bottom-1/4 right-1/4 w-[500px] h-[500px] bg-blue-900/10 rounded-full blur-[160px] pointer-events-none animate-pulse"></div>
 
-      {/* Main Container */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 relative z-10">
-        {/* Header */}
-        <header className="flex flex-col sm:flex-row items-center justify-between gap-4 border-b border-slate-900 pb-6 mb-12">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center justify-center">
-              <Building className="w-5 h-5 text-amber-500" />
+      {/* Main Login layout */}
+      <div className="w-full max-w-md relative z-10 space-y-8 my-auto">
+        
+        {/* Unified Royal Header (هوية عرب وورلد للمقاولات والعقود) */}
+        <div className="text-center space-y-4">
+          <div className="relative w-24 h-24 mx-auto flex items-center justify-center">
+            {/* Elegant rotating external ring */}
+            <div className="absolute inset-0 rounded-full border border-amber-500/20 animate-[spin_16s_linear_infinite]"></div>
+            <div className="absolute inset-2 rounded-full border-2 border-dashed border-amber-500/40"></div>
+            <div className="absolute inset-4 bg-gradient-to-tr from-amber-500 via-amber-600 to-yellow-500 rounded-full shadow-[0_0_30px_rgba(245,158,11,0.35)] flex items-center justify-center">
+              <Sparkles className="w-9 h-9 text-slate-950 animate-pulse" />
             </div>
-            <div>
-              <h1 className="text-xl font-black text-white tracking-tight">نظام <span className="text-amber-500">سحابي ERP</span> المتكامل</h1>
-              <p className="text-[10px] text-slate-400 font-bold mt-0.5">الحل السحابي الاحترافي لإدارة الشركات، المقاولات، الحسابات والرواتب</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setShowRegisterForm(true)}
-              className="px-4 py-2 bg-gradient-to-l from-amber-500 to-amber-600 text-slate-950 font-black rounded-xl text-xs hover:from-amber-400 hover:to-amber-500 transition-all flex items-center gap-1.5 shadow-[0_4px_20px_rgba(245,158,11,0.2)] cursor-pointer"
-            >
-              <Plus className="w-4 h-4 text-slate-950" />
-              <span>تأسيس شركة جديدة</span>
-            </button>
-          </div>
-        </header>
-
-        {/* Hero Section */}
-        <section className="text-center max-w-4xl mx-auto space-y-6 mb-16 py-6">
-          <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
-            className="inline-flex items-center gap-2 px-3 py-1 bg-amber-500/10 border border-amber-500/20 rounded-full"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-            <span className="text-[10px] font-black text-amber-400">عصر جديد من أنظمة الـ SaaS والمقاولات السحابية الموحدة</span>
-          </motion.div>
-
-          <motion.h2
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.2, duration: 0.6 }}
-            className="text-3xl sm:text-5xl font-black text-white leading-tight font-sans animate-fade-in"
-          >
-            نظام ERP السحابي الحديث <br />
-            <span className="text-transparent bg-clip-text bg-gradient-to-l from-amber-400 via-yellow-200 to-amber-500">
-              لإدارة المنشآت والمقاولات المتعددة
-            </span>
-          </motion.h2>
-
-          <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.3, duration: 0.6 }}
-            className="text-sm sm:text-base text-slate-400 max-w-2xl mx-auto leading-relaxed font-medium"
-          >
-            نظام سحابي مرن يتيح لكل شركة بناء مساحة عمل متكاملة ومعزولة كلياً. قم بإدارة عروض الأسعار، عقود التقسيط، سندات القبض والصرف، سجلات الحضور بالـ GPS للعمال، والخصومات الشهرية برابط ديناميكي آمن وخاص بك.
-          </motion.p>
-        </section>
-
-        {/* Business Value Propositions */}
-        <section className="mb-16">
-          <div className="text-center mb-8">
-            <h3 className="text-lg font-black text-white">✨ الفوائد والميزات العملية التي ستحصل عليها شركتك</h3>
-            <p className="text-xs text-slate-400 mt-1">منظومة موحدة تغنيك عن عشرات البرامج المنفصلة وتوفر لك عزل بيانات احترافي</p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            {[
-              {
-                icon: Briefcase,
-                title: "إدارة المشاريع وعقود العمل 🏗️",
-                desc: "متابعة العقود، نسب الإنجاز، المستخلصات المالية، وتكلفة المواد والعمالة فلياً.",
-                color: "text-amber-400 bg-amber-500/10 border-amber-500/20",
-              },
-              {
-                icon: Landmark,
-                title: "المحاسبة والمالية المتكاملة 🪙",
-                desc: "مراقبة الخزائن اليومية المتعددة، سندات القبض والصرف، والمصروفات بدقة متناهية.",
-                color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20",
-              },
-              {
-                icon: Users,
-                title: "الرواتب والبدلات التلقائية 💵",
-                desc: "احتساب مسيرات الرواتب الذكية، السلف، المكافآت، والخصومات الشهرية بكفاءة عالية.",
-                color: "text-cyan-400 bg-cyan-500/10 border-cyan-500/20",
-              },
-              {
-                icon: Smartphone,
-                title: "البصمة والحضور الجغرافي (GPS) 📍",
-                desc: "تثبيت حضور وانصراف عمال الميدان جغرافياً وموقعياً للتحقق التام من نطاق العمل.",
-                color: "text-rose-400 bg-rose-500/10 border-rose-500/20",
-              },
-              {
-                icon: CheckCircle,
-                title: "عقود التقسيط وعروض الأسعار 📈",
-                desc: "أتمتة تحصيل الأقساط الشهرية وجدولتها رقمياً مع إرسال التنبيهات وإصدار عروض الأسعار.",
-                color: "text-yellow-400 bg-yellow-500/10 border-yellow-500/20",
-              },
-              {
-                icon: Building,
-                title: "تعدد الفروع والمستودعات 🏢",
-                desc: "تخصيص كامل وعزل تام لكل فرع أو شركة سحابية مع لوحة تحكم ومحاسبة مستقلة.",
-                color: "text-indigo-400 bg-indigo-500/10 border-indigo-500/20",
-              },
-              {
-                icon: Globe,
-                title: "روابط مخصصة سهلة القراءة 🌐",
-                desc: "مسار خاص وجذاب لشركتك (مثال: arab-world) يسهّل على موظفيك الوصول السريع والآمن.",
-                color: "text-teal-400 bg-teal-500/10 border-teal-500/20",
-              },
-              {
-                icon: Shield,
-                title: "تطبيق الويب والجوال السريع 📱",
-                desc: "تصميم متجاوب وسريع جداً على شاشات الجوال لمهندسي المواقع والمشرفين الميدانيين.",
-                color: "text-purple-400 bg-purple-500/10 border-purple-500/20",
-              },
-            ].map((item, idx) => (
-              <motion.div
-                key={idx}
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.05 * idx + 0.2, duration: 0.5 }}
-                className="bg-slate-900/40 border border-slate-850 p-5 rounded-2xl space-y-3 hover:border-slate-800 transition-all shadow-md hover:shadow-lg"
-              >
-                <div className={`w-10 h-10 rounded-xl border flex items-center justify-center ${item.color}`}>
-                  <item.icon className="w-5 h-5" />
+          <div className="space-y-1">
+            <span className="text-[10px] tracking-[0.3em] font-black text-amber-500/90 uppercase font-mono">ARAB WORLD CLOUD SERVICE</span>
+            <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight leading-tight">
+              بوابة <span className="text-amber-500">عرب وورلد</span> الموحدة
+            </h1>
+            <p className="text-[11px] text-slate-400 font-medium max-w-sm mx-auto leading-relaxed">
+              منظومة الـ ERP السحابية المتكاملة لإدارة المشاريع والمقاولات وعقود التقسيط والحسابات الموحدة
+            </p>
+          </div>
+        </div>
+
+        {/* The Beautiful Secure Login Card */}
+        <motion.div 
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          className="bg-slate-900/60 backdrop-blur-2xl border border-amber-500/20 p-8 sm:p-10 rounded-[32px] shadow-[0_0_50px_rgba(245,158,11,0.08)] relative overflow-hidden"
+        >
+          {/* Top/Bottom luxury accents */}
+          <div className="absolute top-0 right-0 w-16 h-16 border-t-2 border-r-2 border-amber-500/25 rounded-tr-[32px] pointer-events-none"></div>
+          <div className="absolute bottom-0 left-0 w-16 h-16 border-b-2 border-l-2 border-amber-500/25 rounded-bl-[32px] pointer-events-none"></div>
+
+          {googleUser ? (
+            <>
+              <div className="text-center mb-6">
+                <div className="mx-auto w-12 h-12 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-xl text-amber-500 mb-2">
+                  🔐
                 </div>
-                <h4 className="text-xs font-black text-white">{item.title}</h4>
-                <p className="text-[11px] text-slate-400 leading-relaxed font-medium">{item.desc}</p>
-              </motion.div>
-            ))}
-          </div>
-        </section>
-
-        {/* Search & Safe Multi-Tenant Directory */}
-        <section className="bg-slate-900/20 border border-slate-900 rounded-[32px] p-6 sm:p-10 space-y-8 relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 rounded-full blur-[40px] pointer-events-none"></div>
-
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 border-b border-slate-900 pb-6">
-            <div className="space-y-1">
-              <h3 className="text-lg font-black text-white flex items-center gap-2">
-                <span>🔍</span>
-                <span>البحث والوصول لمساحة عمل شركتك</span>
-              </h3>
-              <p className="text-xs text-slate-400">من أجل خصوصيتك، مساحات العمل التجارية والخاصة مخفية بشكل افتراضي. يرجى البحث للوصول.</p>
-            </div>
-
-            <div className="relative w-full md:w-96">
-              <input
-                type="text"
-                placeholder="🔍 اكتب اسم شركتك أو الرابط المخصص للبحث..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full h-11 pr-10 pl-4 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 transition-all text-right placeholder-slate-500 shadow-inner"
-              />
-            </div>
-          </div>
-
-          {/* If the user is looking at the landing portal and hasn't searched, only show demo portals */}
-          {isSearchEmpty ? (
-            <div className="space-y-6">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 bg-emerald-400 rounded-full animate-ping"></span>
-                <h4 className="text-xs font-black text-emerald-400 uppercase tracking-wider">⚡ بوابة التجريب والتقييم السريع (الشركات المتاحة للتجربة العامة):</h4>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {filteredCompanies.map((c) => {
-                  const companySlug = c.slug || c.id;
-                  const stats = getMockStats(c.id);
-                  return (
-                    <motion.div
-                      key={c.id}
-                      whileHover={{ scale: 1.01 }}
-                      className="bg-slate-950/70 border border-amber-500/20 p-6 rounded-3xl flex flex-col justify-between gap-5 group hover:border-amber-500/50 transition-all shadow-xl relative overflow-hidden"
-                    >
-                      <div className="absolute top-0 left-0 bg-amber-500/10 border-r border-b border-amber-500/20 px-3 py-1 rounded-br-2xl text-[9px] font-black text-amber-400">
-                        ✨ بيئة تجريبية جاهزة للتقييم
-                      </div>
-
-                      <div className="space-y-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-400/20 to-yellow-600/5 border border-amber-500/30 flex items-center justify-center text-amber-400 text-lg font-black font-mono">
-                            {c.name.charAt(0)}
-                          </div>
-                          <div>
-                            <h4 className="text-sm font-black text-white group-hover:text-amber-300 transition-colors">{c.name}</h4>
-                            <p className="text-[10px] text-slate-400 font-bold font-mono mt-0.5 flex items-center gap-1">
-                              <Globe className="w-3 h-3 text-slate-500" />
-                              <span>رابط المنشأة:</span>
-                              <span className="text-amber-400 font-black">/{companySlug}</span>
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* Rich details cards */}
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 bg-slate-900/40 p-3.5 rounded-2xl border border-slate-850 text-right">
-                          <div className="space-y-0.5">
-                            <span className="text-[9px] text-slate-500 font-bold block">📍 المدينة والفرع</span>
-                            <span className="text-[10px] text-slate-300 font-extrabold">{c.address ? c.address.split("،")[0] : stats.city}</span>
-                          </div>
-                          <div className="space-y-0.5">
-                            <span className="text-[9px] text-slate-500 font-bold block">👥 إجمالي الموظفين</span>
-                            <span className="text-[10px] text-slate-300 font-extrabold">{stats.workers} موظف نشط</span>
-                          </div>
-                          <div className="space-y-0.5 col-span-2 sm:col-span-1">
-                            <span className="text-[9px] text-slate-500 font-bold block">🏗️ المشاريع النشطة</span>
-                            <span className="text-[10px] text-slate-300 font-extrabold">{stats.projects} مشاريع قيد التنفيذ</span>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 text-[10px] font-bold text-emerald-400 bg-emerald-500/5 border border-emerald-500/10 rounded-xl px-3 py-1.5 w-fit">
-                          <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse"></span>
-                          <span>حالة الاشتراك: نشط (باقة بريميوم سحابية) 💎</span>
-                        </div>
-                      </div>
-
-                      <button
-                        onClick={() => onNavigateToSlug(companySlug)}
-                        className="w-full py-3 bg-gradient-to-l from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 rounded-2xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg shadow-amber-500/5"
-                      >
-                        <span>⚙️ فتح لوحة التحكم</span>
-                        <ArrowRight className="w-4 h-4" />
-                      </button>
-                    </motion.div>
-                  );
-                })}
-              </div>
-
-              <div className="bg-slate-950/40 border border-slate-850 p-6 rounded-2xl text-center space-y-3">
-                <p className="text-[11px] text-slate-400 font-semibold leading-relaxed max-w-lg mx-auto">
-                  💡 هل تبحث عن شركة تجارية خاصة بك؟ اكتب اسمها في شريط البحث أعلاه. أو قم بـ <b className="text-amber-400 cursor-pointer hover:underline" onClick={() => setShowRegisterForm(true)}>تأسيس شركة جديدة</b> لتسجيل مساحة عمل سحابية مخصصة فوراً.
+                <h3 className="text-sm font-black text-white">
+                  <span>ربط حساب Google الآمن</span>
+                </h3>
+                <p className="text-[10px] text-amber-400 mt-1 font-mono font-bold bg-amber-500/10 py-1 px-2.5 rounded-lg inline-block">{googleUser.email}</p>
+                <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">
+                  أدخل بيانات المنشأة وكود الموظف أدناه لتأكيد ربط هذا الحساب بالمنظومة السحابية لمرة واحدة فقط دون المساس بأي بيانات سابقة
                 </p>
               </div>
-            </div>
-          ) : (
-            <div className="space-y-6">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 bg-amber-400 rounded-full animate-ping"></span>
-                <h4 className="text-xs font-black text-amber-400">🔍 نتائج البحث عن الشركات والمطابقة لاسم "{searchQuery}":</h4>
-              </div>
 
-              {filteredCompanies.length === 0 ? (
-                <div className="text-center py-12 space-y-4">
-                  <div className="text-4xl">🏜️</div>
-                  <p className="text-xs text-slate-400 font-bold">عذراً، لم نجد أي منشأة تطابق اسم البحث أو الرابط المكتوب.</p>
+              <form onSubmit={handleLinkGoogle} className="space-y-5">
+                {/* 1. Company Code */}
+                <div className="space-y-1.5">
+                  <div className="flex justify-between items-center px-1">
+                    <label className="text-[10px] font-black text-slate-300">رقم دخول الشركة / كود المنشأة</label>
+                    <span className="text-[9px] text-slate-500 font-mono">COMPANY ID</span>
+                  </div>
+                  <div className="relative h-11">
+                    <Building className="absolute right-4 top-3.5 w-4 h-4 text-amber-500/70" />
+                    <input
+                      type="text"
+                      placeholder="أدخل رقم دخول المنشأة أو رابطها السحابي (اختياري للمدير العام)..."
+                      value={loginCompanyCode}
+                      onChange={(e) => setLoginCompanyCode(e.target.value)}
+                      className="w-full h-full pl-4 pr-11 py-2.5 bg-slate-950/80 border border-slate-800 rounded-2xl text-xs font-bold text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 transition-all text-right"
+                    />
+                  </div>
+                  <span className="text-[8px] text-slate-500 block px-1">مثال لشركة التجربة: <b className="text-amber-400/70 font-mono">arab-world</b></span>
+                </div>
+
+                {/* 2. Employee Code */}
+                <div className="space-y-1.5">
+                  <div className="flex justify-between items-center px-1">
+                    <label className="text-[10px] font-black text-slate-300">كود الموظف / اسم المستخدم</label>
+                    <span className="text-[9px] text-slate-500 font-mono">USER CODE</span>
+                  </div>
+                  <div className="relative h-11">
+                    <User className="absolute right-4 top-3.5 w-4 h-4 text-amber-500/70" />
+                    <input
+                      required
+                      type="text"
+                      placeholder="أدخل كود الموظف أو اسم المستخدم..."
+                      value={loginCode}
+                      onChange={(e) => setLoginCode(e.target.value)}
+                      className="w-full h-full pl-4 pr-11 py-2.5 bg-slate-950/80 border border-slate-800 rounded-2xl text-xs font-bold text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 transition-all text-right"
+                    />
+                  </div>
+                </div>
+
+                {/* 3. Password */}
+                <div className="space-y-1.5">
+                  <div className="flex justify-between items-center px-1">
+                    <label className="text-[10px] font-black text-slate-300">الرمز السري المالي / كلمة المرور</label>
+                    <span className="text-[9px] text-slate-500 font-mono">SECURE PASSWORD</span>
+                  </div>
+                  <div className="relative h-11">
+                    <Key className="absolute right-4 top-3.5 w-4 h-4 text-amber-500/70" />
+                    <input
+                      required
+                      type="password"
+                      placeholder="أدخل الرمز السري..."
+                      value={loginPass}
+                      onChange={(e) => setLoginPass(e.target.value)}
+                      className="w-full h-full pl-4 pr-11 py-2.5 bg-slate-950/80 border border-slate-800 rounded-2xl text-xs font-mono font-bold text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 transition-all text-left"
+                      dir="ltr"
+                    />
+                  </div>
+                </div>
+
+                {/* Submit buttons for Google linkage */}
+                <div className="space-y-3 pt-2">
                   <button
-                    onClick={() => {
-                      setName(searchQuery);
-                      setShowRegisterForm(true);
-                    }}
-                    className="px-5 py-2.5 bg-slate-950 hover:bg-slate-900 border border-slate-800 rounded-xl text-xs font-black text-amber-400 transition-all cursor-pointer flex items-center gap-1.5 mx-auto"
+                    disabled={isLoading}
+                    type="submit"
+                    className="w-full h-12 bg-gradient-to-l from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black rounded-2xl text-xs transition-all flex items-center justify-center gap-2 shadow-lg shadow-amber-500/10 cursor-pointer disabled:opacity-50"
                   >
-                    <Plus className="w-4 h-4" />
-                    <span>تأسيس شركة جديدة بهذا الاسم الآن 🚀</span>
+                    {isLoading ? (
+                      <>
+                        <span className="w-4 h-4 rounded-full border-2 border-slate-950 border-t-transparent animate-spin"></span>
+                        <span>جاري التحقق وحفظ الارتباط...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>🔗 تأكيد ربط الحساب وتخويل الدخول</span>
+                        <ArrowRight className="w-4 h-4 text-slate-950" />
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setGoogleUser?.(null)}
+                    className="w-full h-11 bg-slate-950 hover:bg-slate-900 border border-slate-800 text-slate-400 hover:text-white rounded-2xl text-xs font-bold transition-all cursor-pointer text-center"
+                  >
+                    إلغاء والعودة للدخول المعتاد
                   </button>
                 </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-fade-in">
-                  {filteredCompanies.map((c) => {
-                    const companySlug = c.slug || c.id;
-                    const stats = getMockStats(c.id);
-                    return (
-                      <motion.div
-                        key={c.id}
-                        whileHover={{ scale: 1.02 }}
-                        className="bg-slate-950/80 border border-slate-800 p-5 rounded-2xl flex flex-col justify-between gap-4 group hover:border-amber-500/30 transition-all shadow-xl"
-                      >
-                        <div className="space-y-3">
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-10 h-10 rounded-xl bg-amber-500/5 border border-amber-500/20 flex items-center justify-center text-amber-400 text-sm font-black font-mono">
-                              {c.name.charAt(0)}
-                            </div>
-                            <div>
-                              <h4 className="text-xs font-black text-white group-hover:text-amber-400 transition-colors">{c.name}</h4>
-                              <p className="text-[10px] text-slate-400 font-bold font-mono mt-0.5">/{companySlug}</p>
-                            </div>
-                          </div>
+              </form>
+            </>
+          ) : (
+            <>
+              <div className="text-center mb-6">
+                <h3 className="text-sm font-black text-white flex items-center justify-center gap-1.5">
+                  <Lock className="w-4 h-4 text-amber-500" />
+                  <span>تسجيل الدخول الآمن</span>
+                </h3>
+                <p className="text-[10px] text-slate-400 mt-1">أدخل معرّفات الدخول للمنشأة والمسؤول لمتابعة العمل</p>
+              </div>
 
-                          <div className="grid grid-cols-2 gap-2 bg-slate-900/30 p-2.5 rounded-xl border border-slate-850 text-right text-[10px]">
-                            <div className="space-y-0.5">
-                              <span className="text-[8px] text-slate-500 font-bold block">📍 الفرع</span>
-                              <span className="text-slate-300 font-bold">{c.address ? c.address.split("،")[0] : stats.city}</span>
-                            </div>
-                            <div className="space-y-0.5">
-                              <span className="text-[8px] text-slate-500 font-bold block">👥 عمال وموظفين</span>
-                              <span className="text-slate-300 font-bold">{stats.workers} فرد نشط</span>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-1.5 text-[9px] font-bold text-amber-400">
-                            <span>💎 باقة بريميوم سحابية نشطة</span>
-                          </div>
-                        </div>
-
-                        <button
-                          onClick={() => onNavigateToSlug(companySlug)}
-                          className="w-full py-2.5 bg-slate-900 hover:bg-amber-500 hover:text-slate-950 border border-slate-800 hover:border-amber-500 rounded-xl text-[11px] font-black text-slate-300 flex items-center justify-center gap-2 transition-all cursor-pointer"
-                        >
-                          <span>⚙️ فتح لوحة التحكم</span>
-                          <ArrowRight className="w-3.5 h-3.5" />
-                        </button>
-                      </motion.div>
-                    );
-                  })}
+              <form onSubmit={handleLogin} className="space-y-5">
+                {/* 1. Company Code */}
+                <div className="space-y-1.5">
+                  <div className="flex justify-between items-center px-1">
+                    <label className="text-[10px] font-black text-slate-300">رقم دخول الشركة / كود المنشأة</label>
+                    <span className="text-[9px] text-slate-500 font-mono">COMPANY ID</span>
+                  </div>
+                  <div className="relative h-11">
+                    <Building className="absolute right-4 top-3.5 w-4 h-4 text-amber-500/70" />
+                    <input
+                      type="text"
+                      placeholder="أدخل رقم دخول المنشأة أو رابطها السحابي (اختياري للمدير العام)..."
+                      value={loginCompanyCode}
+                      onChange={(e) => setLoginCompanyCode(e.target.value)}
+                      className="w-full h-full pl-4 pr-11 py-2.5 bg-slate-950/80 border border-slate-800 rounded-2xl text-xs font-bold text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 transition-all text-right"
+                    />
+                  </div>
+                  <span className="text-[8px] text-slate-500 block px-1">مثال لشركة التجربة: <b className="text-amber-400/70 font-mono">arab-world</b> أو <b className="text-amber-400/70 font-mono">demo-company</b></span>
                 </div>
-              )}
-            </div>
+
+                {/* 2. Employee Code */}
+                <div className="space-y-1.5">
+                  <div className="flex justify-between items-center px-1">
+                    <label className="text-[10px] font-black text-slate-300">كود الموظف / اسم المستخدم</label>
+                    <span className="text-[9px] text-slate-500 font-mono">USER CODE</span>
+                  </div>
+                  <div className="relative h-11">
+                    <User className="absolute right-4 top-3.5 w-4 h-4 text-amber-500/70" />
+                    <input
+                      required
+                      type="text"
+                      placeholder="أدخل كود الموظف أو اسم المستخدم..."
+                      value={loginCode}
+                      onChange={(e) => setLoginCode(e.target.value)}
+                      className="w-full h-full pl-4 pr-11 py-2.5 bg-slate-950/80 border border-slate-800 rounded-2xl text-xs font-bold text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 transition-all text-right"
+                    />
+                  </div>
+                </div>
+
+                {/* 3. Password */}
+                <div className="space-y-1.5">
+                  <div className="flex justify-between items-center px-1">
+                    <label className="text-[10px] font-black text-slate-300">الرمز السري المالي / كلمة المرور</label>
+                    <span className="text-[9px] text-slate-500 font-mono">SECURE PASSWORD</span>
+                  </div>
+                  <div className="relative h-11">
+                    <Key className="absolute right-4 top-3.5 w-4 h-4 text-amber-500/70" />
+                    <input
+                      required
+                      type="password"
+                      placeholder="أدخل الرمز السري..."
+                      value={loginPass}
+                      onChange={(e) => setLoginPass(e.target.value)}
+                      className="w-full h-full pl-4 pr-11 py-2.5 bg-slate-950/80 border border-slate-800 rounded-2xl text-xs font-mono font-bold text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 transition-all text-left"
+                      dir="ltr"
+                    />
+                  </div>
+                </div>
+
+                {/* Submit Button */}
+                <button
+                  disabled={isLoading}
+                  type="submit"
+                  className="w-full h-12 bg-gradient-to-l from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black rounded-2xl text-xs transition-all flex items-center justify-center gap-2 shadow-lg shadow-amber-500/10 cursor-pointer disabled:opacity-50"
+                >
+                  {isLoading ? (
+                    <>
+                      <span className="w-4 h-4 rounded-full border-2 border-slate-950 border-t-transparent animate-spin"></span>
+                      <span>جاري التحقق والولوج للشركة...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>⚙️ دخول لوحة التحكم</span>
+                      <ArrowRight className="w-4 h-4 text-slate-950" />
+                    </>
+                  )}
+                </button>
+
+                {/* Google Sign-In Trigger button */}
+                {handleGoogleSignIn && (
+                  <>
+                    <div className="relative flex py-2 items-center">
+                      <div className="flex-grow border-t border-slate-800/80"></div>
+                      <span className="flex-shrink mx-3 text-[9px] text-slate-500 font-bold">أو الدخول السريع عبر</span>
+                      <div className="flex-grow border-t border-slate-800/80"></div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleGoogleSignIn}
+                      disabled={isLoading}
+                      className="w-full h-11 bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-amber-500/30 text-white font-bold rounded-2xl text-xs transition-all flex items-center justify-center gap-2.5 shadow-md cursor-pointer disabled:opacity-50"
+                    >
+                      <svg className="w-4 h-4 text-white" viewBox="0 0 24 24">
+                        <path
+                          fill="currentColor"
+                          d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                        />
+                        <path
+                          fill="currentColor"
+                          d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                        />
+                        <path
+                          fill="currentColor"
+                          d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                        />
+                        <path
+                          fill="currentColor"
+                          d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                        />
+                      </svg>
+                      <span>الدخول السريع بواسطة Google</span>
+                    </button>
+                  </>
+                )}
+              </form>
+            </>
           )}
-        </section>
+        </motion.div>
+
+        {/* Elegant company creation action at bottom */}
+        <div className="text-center pt-2 space-y-1">
+          <p className="text-[10px] text-slate-400 font-medium">
+            هل تمتلك منشأة وتريد ربطها؟{" "}
+            <button
+              onClick={() => setShowRegisterForm(true)}
+              className="text-amber-500 hover:text-amber-400 font-black hover:underline cursor-pointer"
+            >
+              تأسيس شركة سحابية جديدة الآن 🚀
+            </button>
+          </p>
+          <p className="text-[8.5px] text-slate-500 font-bold leading-relaxed max-w-sm mx-auto">
+            جميع الخوادم مشفرة بنسبة 100% ومحمية ضد الهجمات الرقمية. يتم تشغيل وإدارة المنصة سحابيًا عبر بروتوكولات حماية متقدمة.
+          </p>
+        </div>
+
       </div>
 
       {/* Registration Modal Overlay */}
       <AnimatePresence>
         {showRegisterForm && (
-          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4 z-50 overflow-y-auto">
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-slate-900 border border-slate-800 w-full max-w-2xl rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl relative"
+              className="bg-slate-900 border border-slate-800 w-full max-w-2xl rounded-[32px] p-6 sm:p-8 space-y-6 shadow-2xl relative"
             >
               {/* Close Button */}
               <button
@@ -476,7 +444,7 @@ export function SaasLandingPortal({
               <div className="border-b border-slate-800 pb-4">
                 <h3 className="text-base font-black text-white flex items-center gap-2">
                   <span>🚀</span>
-                  <span>تسجيل منشأة جديدة وتأسيس مساحة عمل SaaS</span>
+                  <span>تأسيس منشأة سحابية جديدة ومساحة عمل SaaS مستقلة</span>
                 </h3>
                 <p className="text-[10px] text-slate-400 mt-1">تأسيس فوري للشركة وبناء كود مسؤول النظام مع فصل كامل وحصري لقاعدة البيانات.</p>
               </div>
@@ -489,7 +457,7 @@ export function SaasLandingPortal({
                     <input
                       required
                       type="text"
-                      placeholder="مثال: شركة التطوير العقاري المحدودة"
+                      placeholder="مثال: شركة عرب وورلد للتجارة"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       className="w-full h-10 px-3 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 text-right"
