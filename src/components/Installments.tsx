@@ -28,8 +28,22 @@ interface InstallmentsProps {
   selectedCompanyId?: string;
 }
 
-const getStoredTreasuries = (companyId?: string | null): string[] => {
+const getStoredTreasuries = (companyId?: string | null, companiesList?: Company[]): string[] => {
   const defaults = ["خزنة الشركة", "خزنة التحصيل", "خزنة التحويل", "نقاط البيع", "خزنة المقاولات"];
+  
+  if (companyId && companyId !== "all" && companiesList) {
+    const matched = companiesList.find(c => c.id === companyId);
+    if (matched && matched.treasuries && Array.isArray(matched.treasuries)) {
+      const merged = [...matched.treasuries];
+      defaults.forEach(d => {
+        if (!merged.includes(d)) {
+          merged.push(d);
+        }
+      });
+      return merged;
+    }
+  }
+
   const suffix = companyId && companyId !== "all" ? `_${companyId}` : "";
   const saved = localStorage.getItem(`aw_treasuries${suffix}`);
   if (saved) {
@@ -96,19 +110,19 @@ export const Installments: React.FC<InstallmentsProps> = ({
   const [capitalSplits, setCapitalSplits] = useState<Record<string, number | "">>({});
   const [installmentCompanyId, setInstallmentCompanyId] = useState("");
   const [dynamicTreasuries, setDynamicTreasuries] = useState<string[]>(() => 
-    getStoredTreasuries(installmentCompanyId || selectedCompanyId)
+    getStoredTreasuries(installmentCompanyId || selectedCompanyId, companies)
   );
 
   useEffect(() => {
     const handleStorageChange = () => {
-      setDynamicTreasuries(getStoredTreasuries(installmentCompanyId || selectedCompanyId));
+      setDynamicTreasuries(getStoredTreasuries(installmentCompanyId || selectedCompanyId, companies));
     };
     window.addEventListener("storage", handleStorageChange);
     handleStorageChange();
     return () => {
       window.removeEventListener("storage", handleStorageChange);
     };
-  }, [installmentCompanyId, selectedCompanyId]);
+  }, [installmentCompanyId, selectedCompanyId, companies]);
   const [isCapitalManuallyEdited, setIsCapitalManuallyEdited] = useState(false);
 
   // Sync selected company when not in edit mode
@@ -285,7 +299,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
     setGuarantor("");
     setStatus("منتظم");
     setNotes("");
-    setTreasury(getStoredTreasuries(installmentCompanyId || selectedCompanyId)[0] || "خزنة التحصيل");
+    setTreasury(getStoredTreasuries(installmentCompanyId || selectedCompanyId, companies)[0] || "خزنة التحصيل");
     setCapital("");
     setCapitalSource("خزنة الشركة");
     setCapitalCompany("");
@@ -316,7 +330,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
     setGuarantor(x.guarantor || "");
     setStatus(x.status || "منتظم");
     setNotes(awCleanNotes(x.notes || ""));
-    setTreasury(awExtractTreasury(x.notes || "") || getStoredTreasuries(installmentCompanyId || selectedCompanyId)[0] || "خزنة التحصيل");
+    setTreasury(awExtractTreasury(x.notes || "") || getStoredTreasuries(installmentCompanyId || selectedCompanyId, companies)[0] || "خزنة التحصيل");
     setCapital(awExtractCapital(x.notes || "") || "");
     const rawSrc = awExtractCapitalSource(x.notes || "");
     const mappedSrc = rawSrc === "شركة" ? "خزنة الشركة" : (rawSrc === "تحصيل" ? "خزنة التحصيل" : rawSrc);

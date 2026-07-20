@@ -9,7 +9,7 @@ import {
   Home, ClipboardList, FileText, Landmark, TrendingUp, TrendingDown, Briefcase, Users,
   Settings, LogOut, Calendar, MapPin, User, Phone, Shield, Search, Plus,
   Edit2, Trash2, Download, AlertTriangle, Sparkles, Clock, RefreshCw, Key, Printer, Building, ChevronDown, ChevronUp,
-  PieChart, ShieldAlert, ShieldCheck, List, Map as MapIcon
+  PieChart, ShieldAlert, ShieldCheck, List, Map as MapIcon, Filter
 } from "lucide-react";
 
 import { User as AuthUser, Installment, Quote, Receipt, Payment, Expense, Project, Worker, DbSession, Company, Extract, AttendanceRecord } from "./types";
@@ -20,7 +20,7 @@ import {
   awExtractWorkerContract, awExtractWorkerLeaves, awBuildWorkerNotes, awCleanWorkerNotes,
   getSupabaseCredentials, saveSupabaseCredentials, checkSupabaseHealth, isSupabaseHealthy,
   awExtractExternalNo, awBuildNotesWithRegionAndTreasuryAndExternalNo, awExtractClassification, awExtractCycle, awExtractReceiptType,
-  serializeQuoteNotes, deserializeQuoteNotes, auth
+  serializeQuoteNotes, deserializeQuoteNotes, auth, awExtractBeneficiaryType
 } from "./db";
 
 import { Toast, ToastItem, ToastType } from "./components/Shared/Toast";
@@ -37,8 +37,26 @@ import { ProjectMap } from "./components/ProjectMap";
 import { HRModule } from "./components/HRModule";
 import { CompanyAssets } from "./components/CompanyAssets";
 
-const getStoredTreasuries = (companyId?: string | null): string[] => {
+const getStoredTreasuries = (companyId?: string | null, companiesList?: Company[]): string[] => {
   const defaults = ["خزنة الشركة", "خزنة التحصيل", "خزنة التحويل", "نقاط البيع", "خزنة المقاولات"];
+  
+  if (companyId && companyId !== "all" && companiesList) {
+    const matched = companiesList.find(c => c.id === companyId);
+    if (matched && matched.treasuries && Array.isArray(matched.treasuries)) {
+      return matched.treasuries;
+    }
+  }
+
+  if ((!companyId || companyId === "all") && companiesList && companiesList.length > 0) {
+    const allTreasuries = new Set<string>(defaults);
+    companiesList.forEach(c => {
+      if (c.treasuries && Array.isArray(c.treasuries)) {
+        c.treasuries.forEach(t => allTreasuries.add(t));
+      }
+    });
+    return Array.from(allTreasuries);
+  }
+
   const suffix = companyId && companyId !== "all" ? `_${companyId}` : "";
   const saved = localStorage.getItem(`aw_treasuries${suffix}`);
   if (saved) {
@@ -305,6 +323,7 @@ export default function App() {
   const [expandedReceipts, setExpandedReceipts] = useState<Record<string, boolean>>({});
   const [expandedPayments, setExpandedPayments] = useState<Record<string, boolean>>({});
   const [expandedExpenses, setExpandedExpenses] = useState<Record<string, boolean>>({});
+  const [selectedExpenseCategoryFilter, setSelectedExpenseCategoryFilter] = useState<string>("all");
 
   // Backup & Restore states
   const [isRestoring, setIsRestoring] = useState(false);
@@ -348,12 +367,17 @@ export default function App() {
   // Search/Sort filters for receipts
   const [rSearch, setRSearch] = useState("");
   const [pSearch, setPSearch] = useState("");
+  const [expenseSearch, setExpenseSearch] = useState("");
   const [projectsViewMode, setProjectsViewMode] = useState<"list" | "map">("list");
   const [wSearch, setWSearch] = useState("");
   const [rSort, setRSort] = useState("date_desc");
   const [rFromDate, setRFromDate] = useState("");
   const [rToDate, setRToDate] = useState("");
   const [rMethodFilter, setRMethodFilter] = useState("");
+
+  // Search/Sort filters for payments
+  const [paymentSearch, setPaymentSearch] = useState("");
+  const [paymentBeneficiaryFilter, setPaymentBeneficiaryFilter] = useState<string>("all");
 
   // 3. Payments Forms
   const [payTo, setPayTo] = useState("");
@@ -365,6 +389,7 @@ export default function App() {
   const [payTreasury, setPayTreasury] = useState("خزنة الشركة");
   const [payContractQuery, setPayContractQuery] = useState("");
   const [paySelectedInstallment, setPaySelectedInstallment] = useState<Installment | null>(null);
+  const [payBeneficiaryType, setPayBeneficiaryType] = useState<"شخص" | "مجموعة">("شخص");
 
   // Treasury management & update state triggers
   const [treasuryUpdateKey, setTreasuryUpdateKey] = useState(0);
@@ -1314,7 +1339,7 @@ export default function App() {
     // We reference treasuryUpdateKey here to force re-evaluation when we add a new treasury
     const _dummy = treasuryUpdateKey;
     const targetCompId = compId || (user?.role !== "admin" ? user?.company_id : selectedCompanyId);
-    const allSafes = getStoredTreasuries(targetCompId);
+    const allSafes = getStoredTreasuries(targetCompId, companies);
     if (!user) return [];
     if (user.role === "admin") return allSafes;
 
@@ -1329,11 +1354,11 @@ export default function App() {
     return allSafes.filter(tName => isSafeAllowedInPerm(user.perms, tName));
   };
 
-  const addNewTreasury = (name: string, compId?: string) => {
+  const addNewTreasury = async (name: string, compId?: string) => {
     const cleanName = name.trim();
     if (!cleanName) return;
     const targetCompId = compId || (currentUser?.role !== "admin" ? currentUser?.company_id : selectedCompanyId);
-    const currentSafes = getStoredTreasuries(targetCompId);
+    const currentSafes = getStoredTreasuries(targetCompId, companies);
     if (currentSafes.includes(cleanName)) {
       showToast("هذه الخزنة مسجلة مسبقاً في النظام!", "error");
       return;
@@ -1341,9 +1366,19 @@ export default function App() {
     const updated = [...currentSafes, cleanName];
     const suffix = targetCompId && targetCompId !== "all" ? `_${targetCompId}` : "";
     localStorage.setItem(`aw_treasuries${suffix}`, JSON.stringify(updated));
+
+    if (targetCompId && targetCompId !== "all") {
+      try {
+        await sb.from("companies").update({ treasuries: updated }).eq("id", targetCompId);
+      } catch (err: any) {
+        console.error("Failed to sync new treasury to DB:", err);
+      }
+    }
+
     showToast(`تم إضافة خزنة جديدة بنجاح: ${cleanName}`);
     setTreasuryUpdateKey(prev => prev + 1);
     window.dispatchEvent(new Event("storage"));
+    await loadEverything();
   };
 
   const openAddTreasuryDialog = (compId?: string) => {
@@ -2468,6 +2503,9 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       : generateNextNo("AW-PAY", payments, "no");
 
     let notesAppended = awBuildNotesWithRegionAndTreasury(payNotes, userRegionFilter, payTreasury);
+    if (payBeneficiaryType) {
+      notesAppended = `[نوع_المستفيد: ${payBeneficiaryType}] ` + notesAppended;
+    }
     if (auditReasonPassed) {
       notesAppended = `${notesAppended} | ⚠️ قيد تعديل رقابي: [السبب: ${auditReasonPassed}] [مرجع: ${auditRefNoPassed}]`;
     }
@@ -2566,6 +2604,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       setPayWorkerId("");
       setPayContractQuery("");
       setPaySelectedInstallment(null);
+      setPayBeneficiaryType("شخص");
       await loadEverything();
       showToast("تم قيّد سند الصرف بنجاح وتحديث أرصدة العمل المرتبط.");
     } catch {
@@ -4264,6 +4303,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
               isAdmin={currentUser?.role === "admin" || can("treasury")}
               selectedCompanyId={selectedCompanyId}
               onUpdate={loadEverything}
+              companies={companies}
             />
           )}
 
@@ -4933,6 +4973,17 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                     </datalist>
                   </div>
                   <div className="space-y-1 sm:col-span-2 md:col-span-2">
+                    <label className="text-[10px] font-black text-amber-500">👤👥 تصنيف المستفيد (مجموعة أو شخص)</label>
+                    <select
+                      value={payBeneficiaryType}
+                      onChange={(e) => setPayBeneficiaryType(e.target.value as "شخص" | "مجموعة")}
+                      className="w-full px-3.5 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-amber-400 focus:outline-none focus:border-amber-500 transition-colors cursor-pointer bg-slate-950"
+                    >
+                      <option value="شخص" className="text-white bg-slate-950">👤 شخص (فرد، عامل، موظف، مقاول مستقل)</option>
+                      <option value="مجموعة" className="text-white bg-slate-950">👥 مجموعة (شركة، مؤسسة، جهة، فرقة عمال)</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1 sm:col-span-2 md:col-span-2">
                     <label className="text-[10px] font-black text-slate-400">صرفنا إلى المستفيد</label>
                     <input required placeholder="صرفنا إلى المستفيد" value={payTo} onChange={(e) => setPayTo(e.target.value)} className="w-full px-3 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 transition-colors" />
                   </div>
@@ -5012,156 +5063,333 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                 </div>
                 <div className="flex gap-2 justify-end">
                   {editPaymentId && (
-                    <button type="button" onClick={() => { setEditPaymentId(null); setPayTo(""); setPayAmount(""); setPayProject(""); setPayNotes(""); setPayTreasury("خزنة الشركة"); setPaymentCompanyId(""); setPayWorkerId(""); setPayContractQuery(""); setPaySelectedInstallment(null); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
+                    <button type="button" onClick={() => { setEditPaymentId(null); setPayTo(""); setPayAmount(""); setPayProject(""); setPayNotes(""); setPayTreasury("خزنة الشركة"); setPaymentCompanyId(""); setPayWorkerId(""); setPayContractQuery(""); setPaySelectedInstallment(null); setPayBeneficiaryType("شخص"); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
                   )}
                   <button type="submit" className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-black">{editPaymentId ? "استبدال وصيغة السند" : "قيد سند الصرف ماليًا"}</button>
                 </div>
               </form>
 
-              <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl overflow-x-auto">
-                <table className="w-full text-right text-xs">
-                  <thead>
-                    <tr className="bg-slate-950 border-b border-slate-800 text-slate-300">
-                      <th className="py-2.5 px-3 font-bold text-center w-10"></th>
-                      <th className="py-2.5 px-3 font-bold">رقم السند</th>
-                      <th className="py-2.5 px-3 font-bold">التاريخ</th>
-                      <th className="py-2.5 px-3 font-bold">صرف إلى</th>
-                      <th className="py-2.5 px-3 font-bold">مبلغ الصرف الصادر</th>
-                      <th className="py-2.5 px-3 font-bold">طريقة الصرف</th>
-                      <th className="py-2.5 px-3 font-bold">المشروع والبيان</th>
-                      <th className="py-2.5 px-3 font-bold text-center">إجراء</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {getVisiblePayments().map((p, idx) => (
-                      <React.Fragment key={p.id || idx}>
-                        <tr className={`border-b border-slate-850 hover:bg-slate-800/10 transition-colors ${expandedPayments[p.id] ? "bg-slate-900/20" : ""}`}>
-                          <td className="py-3 px-2 text-center">
+              {(() => {
+                const allVisiblePayments = getVisiblePayments();
+
+                // Counts & totals for each type
+                const totalAll = allVisiblePayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+                const countAll = allVisiblePayments.length;
+
+                const personPayments = allVisiblePayments.filter(p => awExtractBeneficiaryType(p.notes || "", p.worker_id, p.to_name) === "شخص");
+                const totalPerson = personPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+                const countPerson = personPayments.length;
+
+                const groupPayments = allVisiblePayments.filter(p => awExtractBeneficiaryType(p.notes || "", p.worker_id, p.to_name) === "مجموعة");
+                const totalGroup = groupPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+                const countGroup = groupPayments.length;
+
+                // Filter the list based on search and selected filter type
+                const filteredPayments = allVisiblePayments.filter(p => {
+                  const type = awExtractBeneficiaryType(p.notes || "", p.worker_id, p.to_name);
+                  const matchesFilter = paymentBeneficiaryFilter === "all" || type === paymentBeneficiaryFilter;
+                  
+                  const query = paymentSearch.trim().toLowerCase();
+                  const matchesSearch = !query ||
+                    (p.to_name || "").toLowerCase().includes(query) ||
+                    (p.no || "").toLowerCase().includes(query) ||
+                    (p.project || "").toLowerCase().includes(query) ||
+                    (p.method || "").toLowerCase().includes(query) ||
+                    (p.notes || "").toLowerCase().includes(query);
+
+                  return matchesFilter && matchesSearch;
+                });
+
+                const filteredTotal = filteredPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+
+                return (
+                  <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl space-y-6">
+                    {/* Filter and Search Section */}
+                    <div className="border-b border-slate-850 pb-4">
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div className="space-y-1 text-right">
+                          <h3 className="text-sm font-black text-white flex items-center gap-2">
+                            <Filter className="w-4 h-4 text-amber-500" />
+                            <span>تصفية وفلترة سندات الصرف المتقدمة</span>
+                          </h3>
+                          <p className="text-[10px] text-slate-400 font-semibold">تصفية سريعة حسب نوع المستفيد (شخص أو مجموعة) مع احتساب إجماليات المبالغ المصروفة بدقة</p>
+                        </div>
+                        
+                        {/* Search bar */}
+                        <div className="relative max-w-xs w-full">
+                          <span className="absolute inset-y-0 right-3 flex items-center pointer-events-none text-slate-500">
+                            <Search className="w-3.5 h-3.5" />
+                          </span>
+                          <input
+                            type="text"
+                            placeholder="ابحث برقم السند، المستفيد، المشروع..."
+                            value={paymentSearch}
+                            onChange={(e) => setPaymentSearch(e.target.value)}
+                            className="w-full pr-9 pl-3 py-2 bg-slate-950/60 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 placeholder-slate-500 transition-all text-right"
+                          />
+                          {paymentSearch && (
                             <button
                               type="button"
-                              onClick={() => setExpandedPayments(prev => ({ ...prev, [p.id]: !prev[p.id] }))}
-                              className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
-                              title={expandedPayments[p.id] ? "طي التفاصيل" : "توسيع وعرض التفاصيل"}
+                              onClick={() => setPaymentSearch("")}
+                              className="absolute inset-y-0 left-3 flex items-center text-slate-400 hover:text-white text-[11px] font-bold"
                             >
-                              {expandedPayments[p.id] ? (
-                                <ChevronUp className="w-4 h-4 text-amber-500" />
-                              ) : (
-                                <ChevronDown className="w-4 h-4 text-slate-400" />
-                              )}
+                              مسح
                             </button>
-                          </td>
-                          <td className="py-3 px-3 font-mono font-bold text-slate-300">{p.no}</td>
-                          <td className="py-3 px-3 font-mono text-slate-400">{p.date}</td>
-                          <td className="py-3 px-3 font-black text-white">
-                            <span className="block">{p.to_name}</span>
-                            {p.worker_id && (
-                              <span className="inline-flex items-center gap-1 text-[10px] text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 mt-1">
-                                👷 {workers.find((w) => w.id === p.worker_id)?.name || "عامل مسجل"}
-                              </span>
-                            )}
-                          </td>
-                          <td className="py-3 px-3 font-black text-rose-400 font-mono">-{p.amount.toLocaleString()} ريال</td>
-                          <td className="py-3 px-3 font-bold">
-                            <span className="block">{p.method}</span>
-                            <span className="block text-[10px] text-amber-400 font-extrabold mt-0.5 font-sans">🏦 {awExtractTreasury(p.notes || "") || "خزنة الشركة"}</span>
-                          </td>
-                          <td className="py-3 px-3 text-slate-400">
-                            <b className="text-white text-[11px] block">{p.project}</b>
-                            {awCleanNotes(p.notes || "")}
-                          </td>
-                          <td className="py-3 px-3 text-center space-x-1">
-                            <button onClick={() => { setEditPaymentId(p.id); setPayTo(p.to_name || ""); setPayAmount(p.amount || ""); setPayMethod(p.method || ""); setPayDate(p.date || ""); setPayProject(p.project || ""); setPayNotes(awCleanNotes(p.notes || "")); setPayTreasury(awExtractTreasury(p.notes || "") || "خزنة الشركة"); setPaymentCompanyId(p.company_id || ""); setPayWorkerId(p.worker_id || ""); setPayContractQuery(p.to_name || ""); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
-                            <button onClick={() => { triggerConfirm("حذف سند الصرف", "هل أنت متأكد من حذف هذا السند وتحديث حساب العمال المرتبط؟ يتطلب هذا الإجراء كتابة مذكرة تسوية توضح سبب الحذف للرقابة المالية.", (reason) => deletePaymentLogic(p.id, reason), true, "اكتب هنا سبب حذف سند الصرف (مذكرة التسوية)..."); }} className="p-1 text-rose-400 hover:text-rose-500"><Trash2 className="w-3.5 h-3.5" /></button>
-                          </td>
-                        </tr>
-                        {expandedPayments[p.id] && (
-                          <tr className="bg-slate-950/40 border-b border-slate-800/80">
-                            <td colSpan={8} className="p-4">
-                              <div className="bg-slate-900/40 rounded-2xl p-4 border border-slate-800/60 shadow-xl grid grid-cols-1 md:grid-cols-3 gap-4 text-right">
-                                {/* Beneficiary Details */}
-                                <div className="space-y-1 bg-slate-950/45 p-3.5 rounded-xl border border-slate-800/80">
-                                  <h4 className="text-[11px] font-black text-amber-500 mb-2.5 flex items-center gap-1.5 border-b border-slate-800/60 pb-1.5">
-                                    <span>👤</span> مستلم السند والمستفيد
-                                  </h4>
-                                  <div className="grid grid-cols-2 gap-y-2 gap-x-1 text-[11px] font-bold text-slate-400">
-                                    <div>صرف إلى:</div>
-                                    <div className="text-white text-left truncate">{p.to_name || "—"}</div>
-                                    <div>عامل مسجل لدينا:</div>
-                                    <div className="text-white text-left font-black">
-                                      {p.worker_id ? "نعم (عامل الشركة)" : "لا"}
-                                    </div>
-                                    {p.worker_id && (
-                                      <>
-                                        <div>الاسم الكامل:</div>
-                                        <div className="text-white text-left truncate">{workers.find(w => w.id === p.worker_id)?.name || "—"}</div>
-                                        <div>الراتب اليومي:</div>
-                                        <div className="text-amber-400 text-left font-mono">{workers.find(w => w.id === p.worker_id)?.daily || "—"} ريال</div>
-                                      </>
-                                    )}
-                                  </div>
-                                </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
 
-                                {/* Financial details */}
-                                <div className="space-y-1 bg-slate-950/45 p-3.5 rounded-xl border border-slate-800/80">
-                                  <h4 className="text-[11px] font-black text-rose-400 mb-2.5 flex items-center gap-1.5 border-b border-slate-800/60 pb-1.5">
-                                    <span>💸</span> تفاصيل الصرف المالي
-                                  </h4>
-                                  <div className="grid grid-cols-2 gap-y-2 gap-x-1 text-[11px] font-bold text-slate-400">
-                                    <div>قيمة المصروف:</div>
-                                    <div className="text-rose-400 text-left font-black font-mono">-{Number(p.amount || 0).toLocaleString()} ريال</div>
-                                    <div>طريقة الصرف المالي:</div>
-                                    <div className="text-white text-left">{p.method || "—"}</div>
-                                    <div>الصندوق / الخزنة الممولة:</div>
-                                    <div className="text-amber-400 text-left font-black">🏦 {awExtractTreasury(p.notes || "") || "خزنة الشركة"}</div>
-                                  </div>
-                                </div>
+                    {/* Beneficiary Type Filter Pills */}
+                    <div className="space-y-2 text-right">
+                      <label className="text-[10px] font-black text-amber-500 block">تصنيف المستفيد والمحتسب ماليًا:</label>
+                      <div className="flex flex-wrap gap-2 justify-start" dir="rtl">
+                        {/* All */}
+                        <button
+                          type="button"
+                          onClick={() => setPaymentBeneficiaryFilter("all")}
+                          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all border duration-200 ${
+                            paymentBeneficiaryFilter === "all"
+                              ? "bg-amber-500 text-slate-950 border-amber-400 shadow-lg shadow-amber-500/10 scale-[1.02]"
+                              : "bg-slate-950/40 text-slate-300 border-slate-850 hover:bg-slate-900 hover:border-slate-800"
+                          }`}
+                        >
+                          <span>📂 الكل</span>
+                          <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-mono ${
+                            paymentBeneficiaryFilter === "all" ? "bg-slate-950 text-amber-400 font-extrabold" : "bg-slate-950/80 text-slate-400"
+                          }`}>
+                            {countAll} سندات | {totalAll.toLocaleString()} ريال
+                          </span>
+                        </button>
 
-                                {/* Meta / Auditing info */}
-                                <div className="space-y-1 bg-slate-950/45 p-3.5 rounded-xl border border-slate-800/80">
-                                  <h4 className="text-[11px] font-black text-cyan-400 mb-2.5 flex items-center gap-1.5 border-b border-slate-800/60 pb-1.5">
-                                    <span>📋</span> الجهة والمشروع والرقابة
-                                  </h4>
-                                  <div className="grid grid-cols-2 gap-y-2 gap-x-1 text-[11px] font-bold text-slate-400">
-                                    <div>المشروع التابع:</div>
-                                    <div className="text-white text-left truncate">{p.project || "—"}</div>
-                                    <div>الشركة المصدرة:</div>
-                                    <div className="text-white text-left truncate">{companies.find(c => c.id === p.company_id)?.name || "عام"}</div>
-                                    <div>تاريخ ووقت قيد المعاملة:</div>
-                                    <div className="text-slate-400 text-left font-mono text-[9px]">{p.created_at ? new Date(p.created_at).toLocaleString("ar-EG") : "—"}</div>
-                                  </div>
-                                </div>
+                        {/* Person */}
+                        <button
+                          type="button"
+                          onClick={() => setPaymentBeneficiaryFilter("person")}
+                          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all border duration-200 ${
+                            paymentBeneficiaryFilter === "person"
+                              ? "bg-amber-500 text-slate-950 border-amber-400 shadow-lg shadow-amber-500/10 scale-[1.02]"
+                              : "bg-slate-950/40 text-slate-300 border-slate-850 hover:bg-slate-900 hover:border-slate-800"
+                          }`}
+                        >
+                          <span>👤 شخص (فرد)</span>
+                          <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-mono ${
+                            paymentBeneficiaryFilter === "person" ? "bg-slate-950 text-amber-400 font-extrabold" : "bg-slate-950/80 text-slate-400"
+                          }`}>
+                            {countPerson} سندات | {totalPerson.toLocaleString()} ريال
+                          </span>
+                        </button>
 
-                                {/* Statement / Notes */}
-                                <div className="md:col-span-3 bg-slate-950/25 p-3 rounded-xl border border-slate-850 mt-1">
-                                  <span className="text-[10px] font-black text-slate-400 block mb-1">البيان والسبب التفصيلي المقيّد:</span>
-                                  <p className="text-slate-200 text-xs font-bold leading-relaxed whitespace-pre-wrap">{p.notes ? awCleanNotes(p.notes) : "لا توجد تفاصيل إضافية مسجلة."}</p>
-                                </div>
-                              </div>
-                            </td>
+                        {/* Group */}
+                        <button
+                          type="button"
+                          onClick={() => setPaymentBeneficiaryFilter("group")}
+                          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all border duration-200 ${
+                            paymentBeneficiaryFilter === "group"
+                              ? "bg-amber-500 text-slate-950 border-amber-400 shadow-lg shadow-amber-500/10 scale-[1.02]"
+                              : "bg-slate-950/40 text-slate-300 border-slate-850 hover:bg-slate-900 hover:border-slate-800"
+                          }`}
+                        >
+                          <span>👥 مجموعة / جهة</span>
+                          <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-mono ${
+                            paymentBeneficiaryFilter === "group" ? "bg-slate-950 text-amber-400 font-extrabold" : "bg-slate-950/80 text-slate-400"
+                          }`}>
+                            {countGroup} سندات | {totalGroup.toLocaleString()} ريال
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Financial Summary Widget */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-950/40 border border-slate-850/60 p-4 rounded-2xl text-right" dir="rtl">
+                      <div className="flex items-center gap-3">
+                        <span className="p-3 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-2xl">
+                          <TrendingDown className="w-5 h-5 text-rose-400" />
+                        </span>
+                        <div>
+                          <span className="text-[10px] text-slate-400 block font-bold">التصفية النشطة حالياً:</span>
+                          <span className="text-xs font-black text-white">
+                            {paymentBeneficiaryFilter === "all" ? "جميع سندات الصرف (الكل)" : paymentBeneficiaryFilter === "person" ? "سندات المصروفة لأشخاص (أفراد)" : "سندات المصروفة لمجموعات وجهات"}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="md:border-r border-slate-850 md:pr-4 flex flex-col justify-center">
+                        <span className="text-[10px] text-slate-400 block font-bold">إجمالي المبالغ المصروفة للتصفية الحالية:</span>
+                        <span className="text-base font-black text-rose-400 font-mono">
+                          {filteredTotal.toLocaleString()} ريال سعودي
+                        </span>
+                      </div>
+
+                      <div className="md:border-r border-slate-850 md:pr-4 flex flex-col justify-center">
+                        <span className="text-[10px] text-slate-400 block font-bold">عدد السندات المطابقة:</span>
+                        <span className="text-base font-black text-cyan-400 font-mono">
+                          {filteredPayments.length} سندات صرف مطابقة
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Table View */}
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-right text-xs">
+                        <thead>
+                          <tr className="bg-slate-950 border-b border-slate-800 text-slate-300">
+                            <th className="py-2.5 px-3 font-bold text-center w-10"></th>
+                            <th className="py-2.5 px-3 font-bold">رقم السند</th>
+                            <th className="py-2.5 px-3 font-bold">التاريخ</th>
+                            <th className="py-2.5 px-3 font-bold">صرف إلى</th>
+                            <th className="py-2.5 px-3 font-bold">مبلغ الصرف الصادر</th>
+                            <th className="py-2.5 px-3 font-bold">طريقة الصرف</th>
+                            <th className="py-2.5 px-3 font-bold">المشروع والبيان</th>
+                            <th className="py-2.5 px-3 font-bold text-center">إجراء</th>
                           </tr>
-                        )}
-                      </React.Fragment>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                        </thead>
+                        <tbody>
+                          {filteredPayments.map((p, idx) => {
+                            const bType = awExtractBeneficiaryType(p.notes || "", p.worker_id, p.to_name);
+                            return (
+                              <React.Fragment key={p.id || idx}>
+                                <tr className={`border-b border-slate-850 hover:bg-slate-800/10 transition-colors ${expandedPayments[p.id] ? "bg-slate-900/20" : ""}`}>
+                                  <td className="py-3 px-2 text-center">
+                                    <button
+                                      type="button"
+                                      onClick={() => setExpandedPayments(prev => ({ ...prev, [p.id]: !prev[p.id] }))}
+                                      className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
+                                      title={expandedPayments[p.id] ? "طي التفاصيل" : "توسيع وعرض التفاصيل"}
+                                    >
+                                      {expandedPayments[p.id] ? (
+                                        <ChevronUp className="w-4 h-4 text-amber-500" />
+                                      ) : (
+                                        <ChevronDown className="w-4 h-4 text-slate-400" />
+                                      )}
+                                    </button>
+                                  </td>
+                                  <td className="py-3 px-3 font-mono font-bold text-slate-300">{p.no}</td>
+                                  <td className="py-3 px-3 font-mono text-slate-400">{p.date}</td>
+                                  <td className="py-3 px-3">
+                                    <div className="flex flex-col gap-1">
+                                      <span className="font-black text-white">{p.to_name}</span>
+                                      <span className={`inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded border self-start ${
+                                        bType === "مجموعة" 
+                                          ? "bg-purple-950/40 text-purple-400 border-purple-900" 
+                                          : "bg-emerald-950/40 text-emerald-400 border-emerald-900"
+                                      }`}>
+                                        {bType === "مجموعة" ? "👥 مجموعة / جهة" : "👤 شخص (فرد)"}
+                                      </span>
+                                    </div>
+                                  </td>
+                                  <td className="py-3 px-3 font-black text-rose-400 font-mono">-{p.amount.toLocaleString()} ريال</td>
+                                  <td className="py-3 px-3 font-bold text-slate-200">{p.method}</td>
+                                  <td className="py-3 px-3">
+                                    <span className="block font-bold text-slate-200">{p.project}</span>
+                                    <span className="block text-[10px] text-slate-400 max-w-xs truncate">{awCleanNotes(p.notes || "")}</span>
+                                    <span className="inline-block text-[9px] text-cyan-400 font-sans font-extrabold bg-cyan-950/45 px-1.5 py-0.5 rounded border border-cyan-850 mt-1">🏦 {awExtractTreasury(p.notes || "") || "خزنة الشركة"}</span>
+                                  </td>
+                                  <td className="py-3 px-3 text-center space-x-1">
+                                    <button onClick={() => { setEditPaymentId(p.id); setPayTo(p.to_name || ""); setPayAmount(p.amount || ""); setPayDate(p.date || ""); setPayProject(p.project || ""); setPayMethod(p.method || ""); setPayNotes(awCleanNotes(p.notes || "")); setPayTreasury(awExtractTreasury(p.notes || "") || "خزنة الشركة"); setPaymentCompanyId(p.company_id || ""); setPayWorkerId(p.worker_id || ""); setPayBeneficiaryType(awExtractBeneficiaryType(p.notes || "", p.worker_id, p.to_name)); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
+                                    <button
+                                      onClick={() => {
+                                        if (currentUser?.role !== "admin" && currentUser?.role !== "supervisor" && !can("payments")) {
+                                          showToast("عذراً، لا تمتلك صلاحية حذف السندات!", "error");
+                                          return;
+                                        }
+                                        triggerConfirm(
+                                          "حذف سند صرف",
+                                          `هل أنت متأكد من حذف سند الصرف رقم "${p.no}" بقيمة ${p.amount} ريال بشكل نهائي؟ يتطلب هذا الإجراء توثيق سبب رقابي.`,
+                                          (reason) => deletePaymentLogic(p.id, reason),
+                                          true,
+                                          "اكتب هنا سبب حذف قيد سند الصرف للأرشيف والرقابة..."
+                                        );
+                                      }}
+                                      className="p-1 text-rose-400 hover:text-rose-500"
+                                      title="حذف السند"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </td>
+                                </tr>
+                                {expandedPayments[p.id] && (
+                                  <tr className="bg-slate-950/40 border-b border-slate-800/80">
+                                    <td colSpan={8} className="p-4">
+                                      <div className="bg-slate-900/40 rounded-2xl p-4 border border-slate-800/60 shadow-xl grid grid-cols-1 md:grid-cols-3 gap-4 text-right">
+                                        <div className="space-y-1 bg-slate-950/45 p-3.5 rounded-xl border border-slate-800/80">
+                                          <h4 className="text-[11px] font-black text-amber-500 mb-2.5 flex items-center gap-1.5 border-b border-slate-800/60 pb-1.5">
+                                            <span>🧾</span> تفاصيل السند والمستفيد
+                                          </h4>
+                                          <div className="grid grid-cols-2 gap-y-2 gap-x-1 text-[11px] font-bold text-slate-400">
+                                            <div>رقم السند:</div>
+                                            <div className="text-white text-left font-mono">{p.no}</div>
+                                            <div>صرف إلى:</div>
+                                            <div className="text-white text-left truncate font-black">{p.to_name}</div>
+                                            <div>تصنيف المستفيد:</div>
+                                            <div className="text-amber-500 text-left font-black">{bType === "مجموعة" ? "👥 مجموعة / جهة" : "👤 شخص (فرد)"}</div>
+                                            <div>طريقة الصرف:</div>
+                                            <div className="text-white text-left truncate">{p.method}</div>
+                                          </div>
+                                        </div>
+                                        <div className="space-y-1 bg-slate-950/45 p-3.5 rounded-xl border border-slate-800/80">
+                                          <h4 className="text-[11px] font-black text-rose-400 mb-2.5 flex items-center gap-1.5 border-b border-slate-800/60 pb-1.5">
+                                            <span>💸</span> القيمة والجهة الممولة
+                                          </h4>
+                                          <div className="grid grid-cols-2 gap-y-2 gap-x-1 text-[11px] font-bold text-slate-400">
+                                            <div>المبلغ:</div>
+                                            <div className="text-rose-400 text-left font-black font-mono">-{Number(p.amount || 0).toLocaleString()} ريال</div>
+                                            <div>الخزنة:</div>
+                                            <div className="text-cyan-400 text-left font-black">🏦 {awExtractTreasury(p.notes || "") || "خزنة الشركة"}</div>
+                                          </div>
+                                        </div>
+                                        <div className="space-y-1 bg-slate-950/45 p-3.5 rounded-xl border border-slate-800/80">
+                                          <h4 className="text-[11px] font-black text-cyan-400 mb-2.5 flex items-center gap-1.5 border-b border-slate-800/60 pb-1.5">
+                                            <span>🏢</span> المشروع والتبعية الإدارية
+                                          </h4>
+                                          <div className="grid grid-cols-2 gap-y-2 gap-x-1 text-[11px] font-bold text-slate-400">
+                                            <div>المشروع:</div>
+                                            <div className="text-white text-left truncate">{p.project || "—"}</div>
+                                            <div>الشركة:</div>
+                                            <div className="text-white text-left truncate">{companies.find(c => c.id === p.company_id)?.name || "عام"}</div>
+                                            <div>تاريخ القيد:</div>
+                                            <div className="text-slate-400 text-left font-mono text-[9px]">{p.created_at ? new Date(p.created_at).toLocaleString("ar-EG") : "—"}</div>
+                                          </div>
+                                        </div>
+                                        <div className="md:col-span-3 bg-slate-950/25 p-3 rounded-xl border border-slate-850 mt-1">
+                                          <span className="text-[10px] font-black text-slate-400 block mb-1">البيان والملاحظات بالكامل:</span>
+                                          <p className="text-slate-200 text-xs font-bold leading-relaxed whitespace-pre-wrap">{p.notes ? awCleanNotes(p.notes) : "لا توجد ملاحظات."}</p>
+                                        </div>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </React.Fragment>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
 
-          {/* Core Expenses Tab Container */}
           {activeSection === "expenses" && (
             <div className="space-y-6">
               <form onSubmit={saveExpenseLogic} className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl space-y-5">
                 <div className="border-b border-slate-850 pb-3">
-                  <h3 className="text-base font-black text-white flex items-center gap-2"><span>🧾</span> تسجيل بند مصروف فرعي</h3>
+                  <h3 className="text-base font-black text-white flex items-center gap-2"><span>💸</span> قيد وتسجيل مصروف صادر</h3>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <input required placeholder="اسم المصروف ووصفه" value={eName} onChange={(e) => setEName(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none" />
-                  <select value={eCategory} onChange={(e: any) => setECategory(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                  <input required placeholder="اسم المصروف / البند" value={eName} onChange={(e) => setEName(e.target.value)} className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none" />
+                  <select
+                    required
+                    value={eCategory}
+                    onChange={(e) => setECategory(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none cursor-pointer bg-slate-950"
+                  >
+                    <option value="" className="text-slate-400">📁 اختر فئة المصروف...</option>
                     <option value="مواد">مواد</option>
-                    <option value="إعاشة">إعاشة (أكل وشرب)</option>
+                    <option value="إعاشة">إعاشة</option>
                     <option value="سيارات">سيارات</option>
-                    <option value="عدة">عدة وأدوات</option>
+                    <option value="عدة">عدة</option>
                     <option value="بنزين">بنزين</option>
                     <option value="تغيير زيت">تغيير زيت</option>
                     <option value="وقود">وقود عام</option>
@@ -5221,137 +5449,280 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                 </div>
               </form>
 
-              <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl overflow-x-auto">
-                <table className="w-full text-right text-xs">
-                  <thead>
-                    <tr className="bg-slate-950 border-b border-slate-800 text-slate-300">
-                      <th className="py-2.5 px-3 font-bold text-center w-10"></th>
-                      <th className="py-2.5 px-3 font-bold">رقم المصروف</th>
-                      <th className="py-2.5 px-3 font-bold">التاريخ</th>
-                      <th className="py-2.5 px-3 font-bold">اسم المصروف وفئته</th>
-                      <th className="py-2.5 px-3 font-bold">المبلغ المدفوع</th>
-                      <th className="py-2.5 px-3 font-bold">المورد والمشروع</th>
-                      <th className="py-2.5 px-3 font-bold">البيانات الإضافية والمصدر</th>
-                      <th className="py-2.5 px-3 font-bold text-center">إجراء</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {getVisibleExpenses().map((e, idx) => (
-                      <React.Fragment key={e.id || idx}>
-                        <tr className={`border-b border-slate-850 hover:bg-slate-800/10 transition-colors ${expandedExpenses[e.id] ? "bg-slate-900/20" : ""}`}>
-                          <td className="py-3 px-2 text-center">
+              {(() => {
+                const allVisibleExpenses = getVisibleExpenses();
+                
+                // Calculate dynamic standard list and unique ones in dataset
+                const defaultCategoriesList = ["مواد", "إعاشة", "سيارات", "عدة", "بنزين", "تغيير زيت", "وقود", "عمالة", "نقل", "إيجار", "صيانة", "اتصالات", "أخرى"];
+                const categoriesInVisible = Array.from(new Set(allVisibleExpenses.map(e => e.category || "أخرى")));
+                const mergedCategories: string[] = Array.from(new Set(["all", ...defaultCategoriesList, ...categoriesInVisible])) as string[];
+
+                // Helper to get total for a specific category
+                const getCategoryTotal = (cat: string) => {
+                  if (cat === "all") {
+                    return allVisibleExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+                  }
+                  return allVisibleExpenses
+                    .filter(e => (e.category || "أخرى") === cat)
+                    .reduce((sum, e) => sum + (e.amount || 0), 0);
+                };
+
+                // Get only categories that have some expenses OR are key standard ones
+                const categoriesToShow = mergedCategories.filter(cat => {
+                  if (cat === "all") return true;
+                  return getCategoryTotal(cat) > 0 || defaultCategoriesList.includes(cat);
+                });
+
+                // Filter the list based on selection and search query
+                const filteredExpenses = allVisibleExpenses.filter((e) => {
+                  const categoryMatch = selectedExpenseCategoryFilter === "all" || (e.category || "أخرى") === selectedExpenseCategoryFilter;
+                  const query = expenseSearch.trim().toLowerCase();
+                  const searchMatch = !query || 
+                    (e.name || "").toLowerCase().includes(query) ||
+                    (e.no || "").toLowerCase().includes(query) ||
+                    (e.project || "").toLowerCase().includes(query) ||
+                    (e.supplier || "").toLowerCase().includes(query) ||
+                    (e.notes || "").toLowerCase().includes(query) ||
+                    (e.category || "").toLowerCase().includes(query);
+                  return categoryMatch && searchMatch;
+                });
+
+                const selectedCategoryTotal = filteredExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+
+                return (
+                  <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl space-y-6">
+                    {/* Advanced Filter Section Header */}
+                    <div className="border-b border-slate-850 pb-4">
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div className="space-y-1 text-right">
+                          <h3 className="text-sm font-black text-white flex items-center gap-2">
+                            <Filter className="w-4 h-4 text-amber-500" />
+                            <span>تصفية وفلترة المصروفات المتقدمة</span>
+                          </h3>
+                          <p className="text-[10px] text-slate-450 font-semibold">تصفية سريعة لبنود المصروفات حسب الفئات وبحث ذكي مع احتساب الإجماليات بدقة</p>
+                        </div>
+                        
+                        {/* Search bar */}
+                        <div className="relative max-w-xs w-full">
+                          <span className="absolute inset-y-0 right-3 flex items-center pointer-events-none text-slate-500">
+                            <Search className="w-3.5 h-3.5" />
+                          </span>
+                          <input
+                            type="text"
+                            placeholder="ابحث برقم السند، الوصف، المورد أو المشروع..."
+                            value={expenseSearch}
+                            onChange={(e) => setExpenseSearch(e.target.value)}
+                            className="w-full pr-9 pl-3 py-2 bg-slate-950/60 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 placeholder-slate-500 transition-all text-right"
+                          />
+                          {expenseSearch && (
                             <button
                               type="button"
-                              onClick={() => setExpandedExpenses(prev => ({ ...prev, [e.id]: !prev[e.id] }))}
-                              className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
-                              title={expandedExpenses[e.id] ? "طي التفاصيل" : "توسيع وعرض التفاصيل"}
+                              onClick={() => setExpenseSearch("")}
+                              className="absolute inset-y-0 left-3 flex items-center text-slate-400 hover:text-white text-[11px] font-bold"
                             >
-                              {expandedExpenses[e.id] ? (
-                                <ChevronUp className="w-4 h-4 text-amber-500" />
-                              ) : (
-                                <ChevronDown className="w-4 h-4 text-slate-400" />
-                              )}
+                              مسح
                             </button>
-                          </td>
-                          <td className="py-3 px-3 font-mono font-bold text-slate-300">{e.no}</td>
-                          <td className="py-3 px-3 font-mono text-slate-400">{e.date}</td>
-                          <td className="py-3 px-3">
-                            <span className="block font-black text-white">{e.name}</span>
-                            <span className="block text-[10px] text-amber-500 mt-0.5 font-bold">فئة: {e.category}</span>
-                          </td>
-                          <td className="py-3 px-3 font-black text-rose-400 font-mono">-{e.amount.toLocaleString()} ريال</td>
-                          <td className="py-3 px-3">
-                            <span className="block font-bold text-slate-200">{e.supplier || "مورد كلي"}</span>
-                            <span className="block text-[10px] text-slate-400 font-bold mt-0.5">{e.project}</span>
-                          </td>
-                          <td className="py-3 px-3">
-                            <span className="block text-slate-400 max-w-xs truncate">{awCleanNotes(e.notes || "")}</span>
-                            <span className="inline-block text-[9px] text-cyan-400 font-sans font-extrabold bg-cyan-950/45 px-1.5 py-0.5 rounded border border-cyan-850 mt-1">🏦 {awExtractTreasury(e.notes || "") || "خزنة الشركة"}</span>
-                          </td>
-                          <td className="py-3 px-3 text-center space-x-1">
-                            <button onClick={() => { setEditExpenseId(e.id); setEName(e.name || ""); setECategory(e.category || ""); setEAmount(e.amount || ""); setEDate(e.date || ""); setEProject(e.project || ""); setESupplier(e.supplier || ""); setENotes(awCleanNotes(e.notes || "")); setETreasury(awExtractTreasury(e.notes || "") || "خزنة الشركة"); setExpenseCompanyId(e.company_id || ""); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Category Filter Pills Grid */}
+                    <div className="space-y-2 text-right">
+                      <label className="text-[10px] font-black text-amber-500 block">تصنيف الفئات المتوفرة والمحتسبة مالياً:</label>
+                      <div className="flex flex-wrap gap-2 justify-start" dir="rtl">
+                        {categoriesToShow.map((cat) => {
+                          const isSelected = selectedExpenseCategoryFilter === cat;
+                          const total = getCategoryTotal(cat);
+                          const isAll = cat === "all";
+                          
+                          return (
                             <button
-                              onClick={() => {
-                                if (currentUser?.role !== "admin" && currentUser?.role !== "supervisor" && !can("expenses")) {
-                                  showToast("عذراً، لا تمتلك صلاحية حذف المصاريف!", "error");
-                                  return;
-                                }
-                                triggerConfirm(
-                                  "حذف سند المصروف",
-                                  `هل أنت متأكد من حذف سند المصروف "${e.name}" بقيمة ${e.amount} ريال بشكل نهائي؟ يتطلب هذا الإجراء توثيق سبب رقابي.`,
-                                  (reason) => deleteExpenseLogic(e.id, reason),
-                                  true,
-                                  "اكتب هنا سبب حذف قيد المصروف للأرشيف والرقابة..."
-                                );
-                              }}
-                              className="p-1 text-rose-400 hover:text-rose-500"
-                              title="حذف المصروف"
+                              key={cat}
+                              type="button"
+                              onClick={() => setSelectedExpenseCategoryFilter(cat)}
+                              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all border duration-200 ${
+                                isSelected
+                                  ? "bg-amber-500 text-slate-950 border-amber-400 shadow-lg shadow-amber-500/10 scale-[1.02]"
+                                  : "bg-slate-950/40 text-slate-300 border-slate-850 hover:bg-slate-900 hover:border-slate-800"
+                              }`}
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>{isAll ? "📂 الكل" : cat}</span>
+                              <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-mono ${
+                                isSelected ? "bg-slate-950 text-amber-400 font-extrabold" : "bg-slate-950/80 text-slate-400"
+                              }`}>
+                                {total.toLocaleString()} ريال
+                              </span>
                             </button>
-                          </td>
-                        </tr>
-                        {expandedExpenses[e.id] && (
-                          <tr className="bg-slate-950/40 border-b border-slate-800/80">
-                            <td colSpan={8} className="p-4">
-                              <div className="bg-slate-900/40 rounded-2xl p-4 border border-slate-800/60 shadow-xl grid grid-cols-1 md:grid-cols-3 gap-4 text-right">
-                                {/* Name and category */}
-                                <div className="space-y-1 bg-slate-950/45 p-3.5 rounded-xl border border-slate-800/80">
-                                  <h4 className="text-[11px] font-black text-amber-500 mb-2.5 flex items-center gap-1.5 border-b border-slate-800/60 pb-1.5">
-                                    <span>🧾</span> تصنيف وبند المصروف
-                                  </h4>
-                                  <div className="grid grid-cols-2 gap-y-2 gap-x-1 text-[11px] font-bold text-slate-400">
-                                    <div>اسم المصروف:</div>
-                                    <div className="text-white text-left truncate">{e.name || "—"}</div>
-                                    <div>الفئة والتصنيف:</div>
-                                    <div className="text-amber-500 text-left font-black">{e.category || "—"}</div>
-                                    <div>المورد/المستفيد:</div>
-                                    <div className="text-white text-left truncate">{e.supplier || "—"}</div>
-                                  </div>
-                                </div>
+                          );
+                        })}
+                      </div>
+                    </div>
 
-                                {/* Cost info */}
-                                <div className="space-y-1 bg-slate-950/45 p-3.5 rounded-xl border border-slate-800/80">
-                                  <h4 className="text-[11px] font-black text-rose-400 mb-2.5 flex items-center gap-1.5 border-b border-slate-800/60 pb-1.5">
-                                    <span>💸</span> تفاصيل التكلفة والصندوق
-                                  </h4>
-                                  <div className="grid grid-cols-2 gap-y-2 gap-x-1 text-[11px] font-bold text-slate-400">
-                                    <div>المبلغ المصروف:</div>
-                                    <div className="text-rose-400 text-left font-black font-mono">-{Number(e.amount || 0).toLocaleString()} ريال</div>
-                                    <div>الخزنة الممولة:</div>
-                                    <div className="text-cyan-400 text-left font-black">🏦 {awExtractTreasury(e.notes || "") || "خزنة الشركة"}</div>
-                                  </div>
-                                </div>
+                    {/* Selected Category Financial Summary Widget */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-950/40 border border-slate-850/60 p-4 rounded-2xl text-right" dir="rtl">
+                      <div className="flex items-center gap-3">
+                        <span className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-2xl">
+                          <TrendingDown className="w-5 h-5" />
+                        </span>
+                        <div>
+                          <span className="text-[10px] text-slate-400 block font-bold">الفئة المحددة حالياً:</span>
+                          <span className="text-xs font-black text-white">
+                            {selectedExpenseCategoryFilter === "all" ? "كافة فئات المصروفات (الكل)" : selectedExpenseCategoryFilter}
+                          </span>
+                        </div>
+                      </div>
 
-                                {/* Projects / Admin info */}
-                                <div className="space-y-1 bg-slate-950/45 p-3.5 rounded-xl border border-slate-800/80">
-                                  <h4 className="text-[11px] font-black text-cyan-400 mb-2.5 flex items-center gap-1.5 border-b border-slate-800/60 pb-1.5">
-                                    <span>🏢</span> المشروع الإداري والفرع
-                                  </h4>
-                                  <div className="grid grid-cols-2 gap-y-2 gap-x-1 text-[11px] font-bold text-slate-400">
-                                    <div>المشروع التابع:</div>
-                                    <div className="text-white text-left truncate">{e.project || "—"}</div>
-                                    <div>الشركة التابعة:</div>
-                                    <div className="text-white text-left truncate">{companies.find(c => c.id === e.company_id)?.name || "عام"}</div>
-                                    <div>تاريخ قيد السند:</div>
-                                    <div className="text-slate-400 text-left font-mono text-[9px]">{e.created_at ? new Date(e.created_at).toLocaleString("ar-EG") : "—"}</div>
-                                  </div>
-                                </div>
+                      <div className="md:border-r border-slate-850 md:pr-4 flex flex-col justify-center">
+                        <span className="text-[10px] text-slate-400 block font-bold">إجمالي المصروف المالي للفئة المحددة:</span>
+                        <span className="text-base font-black text-rose-400 font-mono">
+                          {selectedCategoryTotal.toLocaleString()} ريال سعودي
+                        </span>
+                      </div>
 
-                                {/* Notes */}
-                                <div className="md:col-span-3 bg-slate-950/25 p-3 rounded-xl border border-slate-850 mt-1">
-                                  <span className="text-[10px] font-black text-slate-400 block mb-1">الملاحظات والبيان التفصيلي بالكامل:</span>
-                                  <p className="text-slate-200 text-xs font-bold leading-relaxed whitespace-pre-wrap">{e.notes ? awCleanNotes(e.notes) : "لا توجد ملاحظات إضافية مسجلة."}</p>
-                                </div>
-                              </div>
-                            </td>
+                      <div className="md:border-r border-slate-850 md:pr-4 flex flex-col justify-center">
+                        <span className="text-[10px] text-slate-400 block font-bold">عدد السندات المطابقة للتصفية:</span>
+                        <span className="text-base font-black text-cyan-400 font-mono">
+                          {filteredExpenses.length} سندات مصروف
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Table View with responsive overflow-x-auto */}
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-right text-xs">
+                        <thead>
+                          <tr className="bg-slate-950 border-b border-slate-800 text-slate-300">
+                            <th className="py-2.5 px-3 font-bold text-center w-10"></th>
+                            <th className="py-2.5 px-3 font-bold">رقم المصروف</th>
+                            <th className="py-2.5 px-3 font-bold">التاريخ</th>
+                            <th className="py-2.5 px-3 font-bold">اسم المصروف وفئته</th>
+                            <th className="py-2.5 px-3 font-bold">المبلغ المدفوع</th>
+                            <th className="py-2.5 px-3 font-bold">المورد والمشروع</th>
+                            <th className="py-2.5 px-3 font-bold">البيانات الإضافية والمصدر</th>
+                            <th className="py-2.5 px-3 font-bold text-center">إجراء</th>
                           </tr>
-                        )}
-                      </React.Fragment>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                        </thead>
+                        <tbody>
+                          {filteredExpenses.map((e, idx) => (
+                            <React.Fragment key={e.id || idx}>
+                              <tr className={`border-b border-slate-850 hover:bg-slate-800/10 transition-colors ${expandedExpenses[e.id] ? "bg-slate-900/20" : ""}`}>
+                                <td className="py-3 px-2 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => setExpandedExpenses(prev => ({ ...prev, [e.id]: !prev[e.id] }))}
+                                    className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
+                                    title={expandedExpenses[e.id] ? "طي التفاصيل" : "توسيع وعرض التفاصيل"}
+                                  >
+                                    {expandedExpenses[e.id] ? (
+                                      <ChevronUp className="w-4 h-4 text-amber-500" />
+                                    ) : (
+                                      <ChevronDown className="w-4 h-4 text-slate-400" />
+                                    )}
+                                  </button>
+                                </td>
+                                <td className="py-3 px-3 font-mono font-bold text-slate-300">{e.no}</td>
+                                <td className="py-3 px-3 font-mono text-slate-400">{e.date}</td>
+                                <td className="py-3 px-3">
+                                  <span className="block font-black text-white">{e.name}</span>
+                                  <span className="block text-[10px] text-amber-500 mt-0.5 font-bold">فئة: {e.category}</span>
+                                </td>
+                                <td className="py-3 px-3 font-black text-rose-400 font-mono">-{e.amount.toLocaleString()} ريال</td>
+                                <td className="py-3 px-3">
+                                  <span className="block font-bold text-slate-200">{e.supplier || "مورد كلي"}</span>
+                                  <span className="block text-[10px] text-slate-400 font-bold mt-0.5">{e.project}</span>
+                                </td>
+                                <td className="py-3 px-3">
+                                  <span className="block text-slate-400 max-w-xs truncate">{awCleanNotes(e.notes || "")}</span>
+                                  <span className="inline-block text-[9px] text-cyan-400 font-sans font-extrabold bg-cyan-950/45 px-1.5 py-0.5 rounded border border-cyan-850 mt-1">🏦 {awExtractTreasury(e.notes || "") || "خزنة الشركة"}</span>
+                                </td>
+                                <td className="py-3 px-3 text-center space-x-1">
+                                  <button onClick={() => { setEditExpenseId(e.id); setEName(e.name || ""); setECategory(e.category || ""); setEAmount(e.amount || ""); setEDate(e.date || ""); setEProject(e.project || ""); setESupplier(e.supplier || ""); setENotes(awCleanNotes(e.notes || "")); setETreasury(awExtractTreasury(e.notes || "") || "خزنة الشركة"); setExpenseCompanyId(e.company_id || ""); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
+                                  <button
+                                    onClick={() => {
+                                      if (currentUser?.role !== "admin" && currentUser?.role !== "supervisor" && !can("expenses")) {
+                                        showToast("عذراً، لا تمتلك صلاحية حذف المصاريف!", "error");
+                                        return;
+                                      }
+                                      triggerConfirm(
+                                        "حذف سند المصروف",
+                                        `هل أنت متأكد من حذف سند المصروف "${e.name}" بقيمة ${e.amount} ريال بشكل نهائي؟ يتطلب هذا الإجراء توثيق سبب رقابي.`,
+                                        (reason) => deleteExpenseLogic(e.id, reason),
+                                        true,
+                                        "اكتب هنا سبب حذف قيد المصروف للأرشيف والرقابة..."
+                                      );
+                                    }}
+                                    className="p-1 text-rose-400 hover:text-rose-500"
+                                    title="حذف المصروف"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </td>
+                              </tr>
+                              {expandedExpenses[e.id] && (
+                                <tr className="bg-slate-950/40 border-b border-slate-800/80">
+                                  <td colSpan={8} className="p-4">
+                                    <div className="bg-slate-900/40 rounded-2xl p-4 border border-slate-800/60 shadow-xl grid grid-cols-1 md:grid-cols-3 gap-4 text-right">
+                                      {/* Name and category */}
+                                      <div className="space-y-1 bg-slate-950/45 p-3.5 rounded-xl border border-slate-800/80">
+                                        <h4 className="text-[11px] font-black text-amber-500 mb-2.5 flex items-center gap-1.5 border-b border-slate-800/60 pb-1.5">
+                                          <span>🧾</span> تصنيف وبند المصروف
+                                        </h4>
+                                        <div className="grid grid-cols-2 gap-y-2 gap-x-1 text-[11px] font-bold text-slate-400">
+                                          <div>اسم المصروف:</div>
+                                          <div className="text-white text-left truncate">{e.name || "—"}</div>
+                                          <div>الفئة والتصنيف:</div>
+                                          <div className="text-amber-500 text-left font-black">{e.category || "—"}</div>
+                                          <div>المورد/المستفيد:</div>
+                                          <div className="text-white text-left truncate">{e.supplier || "—"}</div>
+                                        </div>
+                                      </div>
+
+                                      {/* Cost info */}
+                                      <div className="space-y-1 bg-slate-950/45 p-3.5 rounded-xl border border-slate-800/80">
+                                        <h4 className="text-[11px] font-black text-rose-400 mb-2.5 flex items-center gap-1.5 border-b border-slate-800/60 pb-1.5">
+                                          <span>💸</span> تفاصيل التكلفة والصندوق
+                                        </h4>
+                                        <div className="grid grid-cols-2 gap-y-2 gap-x-1 text-[11px] font-bold text-slate-400">
+                                          <div>المبلغ المصروف:</div>
+                                          <div className="text-rose-400 text-left font-black font-mono">-{Number(e.amount || 0).toLocaleString()} ريال</div>
+                                          <div>الخزنة الممولة:</div>
+                                          <div className="text-cyan-400 text-left font-black">🏦 {awExtractTreasury(e.notes || "") || "خزنة الشركة"}</div>
+                                        </div>
+                                      </div>
+
+                                      {/* Projects / Admin info */}
+                                      <div className="space-y-1 bg-slate-950/45 p-3.5 rounded-xl border border-slate-800/80">
+                                        <h4 className="text-[11px] font-black text-cyan-400 mb-2.5 flex items-center gap-1.5 border-b border-slate-800/60 pb-1.5">
+                                          <span>🏢</span> المشروع الإداري والفرع
+                                        </h4>
+                                        <div className="grid grid-cols-2 gap-y-2 gap-x-1 text-[11px] font-bold text-slate-400">
+                                          <div>المشروع التابع:</div>
+                                          <div className="text-white text-left truncate">{e.project || "—"}</div>
+                                          <div>الشركة التابعة:</div>
+                                          <div className="text-white text-left truncate">{companies.find(c => c.id === e.company_id)?.name || "عام"}</div>
+                                          <div>تاريخ قيد السند:</div>
+                                          <div className="text-slate-400 text-left font-mono text-[9px]">{e.created_at ? new Date(e.created_at).toLocaleString("ar-EG") : "—"}</div>
+                                        </div>
+                                      </div>
+
+                                      {/* Notes */}
+                                      <div className="md:col-span-3 bg-slate-950/25 p-3 rounded-xl border border-slate-850 mt-1">
+                                        <span className="text-[10px] font-black text-slate-400 block mb-1">الملاحظات والبيان التفصيلي بالكامل:</span>
+                                        <p className="text-slate-200 text-xs font-bold leading-relaxed whitespace-pre-wrap">{e.notes ? awCleanNotes(e.notes) : "لا توجد ملاحظات إضافية مسجلة."}</p>
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -7557,7 +7928,7 @@ CREATE TABLE extracts (
                     (تنبيه: إذا لم تقم بتحديد أي خزنة، فسيتم منح الموظف صلاحية رؤية كافة الخزائن بشكل افتراضي لتسهيل العمل دون قيود)
                   </p>
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 mt-2">
-                    {getStoredTreasuries(selectedCompanyIdForPerms !== "global" ? selectedCompanyIdForPerms : selectedCompanyId).map((tName) => {
+                    {getStoredTreasuries(selectedCompanyIdForPerms !== "global" ? selectedCompanyIdForPerms : selectedCompanyId, companies).map((tName) => {
                       const permKey = `safe_${tName}`;
                       const hasCompObj = !!uCompanyPerms[selectedCompanyIdForPerms];
                       const isCustomActive = selectedCompanyIdForPerms === "global" || (hasCompObj && !uCompanyPerms[selectedCompanyIdForPerms].use_global);

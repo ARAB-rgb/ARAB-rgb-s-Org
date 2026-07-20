@@ -665,6 +665,7 @@ export function awCleanNotes(notes: string): string {
   return String(notes || "")
     .replace(/\s*\[الإدارة:\s*[^\]]+\]\s*/g, " ")
     .replace(/\s*\[الخزنة:\s*[^\]]+\]\s*/g, " ")
+    .replace(/\s*\[نوع_المستفيد:\s*[^\]]+\]\s*/g, " ")
     .replace(/\s*\[رأس_المال:\s*[^\]]+\]\s*/g, " ")
     .replace(/\s*\[رأس_المال_المصدر:\s*[^\]]+\]\s*/g, " ")
     .replace(/\s*\[رأس_المال_شركة:\s*[^\]]+\]\s*/g, " ")
@@ -675,6 +676,30 @@ export function awCleanNotes(notes: string): string {
     .replace(/\s*\[التصنيف:\s*[^\]]+\]\s*/g, " ")
     .replace(/\s*\[\[?AW_BRANCH:\s*[^\]\s]+\]?\]\s*/gi, " ")
     .trim();
+}
+
+export function awExtractBeneficiaryType(notes: string, workerId?: string | null, toName?: string): "شخص" | "مجموعة" {
+  const text = String(notes || "");
+  if (text.includes("[نوع_المستفيد: شخص]")) return "شخص";
+  if (text.includes("[نوع_المستفيد: مجموعة]")) return "مجموعة";
+  if (workerId) return "شخص";
+  
+  const name = String(toName || "").toLowerCase();
+  if (
+    name.includes("شركة") ||
+    name.includes("مجموعة") ||
+    name.includes("مؤسسة") ||
+    name.includes("فرقة") ||
+    name.includes("توريد") ||
+    name.includes("مكتب") ||
+    name.includes("عمال") ||
+    name.includes("سكن") ||
+    name.includes("شركه") ||
+    name.includes("مؤسسه")
+  ) {
+    return "مجموعة";
+  }
+  return "شخص";
 }
 
 export function awBuildNotesWithRegion(notes: string, region: string): string {

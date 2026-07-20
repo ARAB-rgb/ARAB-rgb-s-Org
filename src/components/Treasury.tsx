@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from "react";
 import { Wallet, Landmark, TrendingUp, Search, Plus, Trash2, AlertTriangle, Coins, Edit2, Check, X } from "lucide-react";
-import { Receipt, Payment, Expense, Installment } from "../types";
+import { Receipt, Payment, Expense, Installment, Company } from "../types";
 import { sb, awExtractTreasury, awExtractCapital, awExtractCapitalSource, awExtractCapitalCompany, awExtractCapitalCollection, awGetSafeCapitalOutflow } from "../db";
 import { safeStorage } from "../safeStorage";
 
@@ -20,10 +20,31 @@ interface TreasuryProps {
   isAdmin?: boolean;
   selectedCompanyId?: string;
   onUpdate?: () => void;
+  companies?: Company[];
 }
 
-const getStoredTreasuries = (companyId?: string): string[] => {
+const getStoredTreasuries = (companyId?: string, companiesList?: Company[]): string[] => {
   const defaults = ["خزنة الشركة", "خزنة التحصيل", "خزنة التحويل", "نقاط البيع", "خزنة المقاولات"];
+  
+  // If specific company, load from DB
+  if (companyId && companyId !== "all" && companiesList) {
+    const matched = companiesList.find(c => c.id === companyId);
+    if (matched && matched.treasuries && Array.isArray(matched.treasuries)) {
+      return matched.treasuries;
+    }
+  }
+
+  // Combined across all companies if "all"
+  if ((!companyId || companyId === "all") && companiesList && companiesList.length > 0) {
+    const allTreasuries = new Set<string>(defaults);
+    companiesList.forEach(c => {
+      if (c.treasuries && Array.isArray(c.treasuries)) {
+        c.treasuries.forEach(t => allTreasuries.add(t));
+      }
+    });
+    return Array.from(allTreasuries);
+  }
+
   const suffix = companyId && companyId !== "all" ? `_${companyId}` : "";
   const saved = localStorage.getItem(`aw_treasuries${suffix}`);
   if (saved) {
@@ -40,9 +61,9 @@ const getStoredTreasuries = (companyId?: string): string[] => {
   return defaults;
 };
 
-export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses, installments, authorizedTreasuries, isAdmin = false, selectedCompanyId, onUpdate }) => {
+export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses, installments, authorizedTreasuries, isAdmin = false, selectedCompanyId, onUpdate, companies = [] }) => {
   const [treasuries, setTreasuries] = useState<string[]>(() => {
-    const list = getStoredTreasuries(selectedCompanyId);
+    const list = getStoredTreasuries(selectedCompanyId, companies);
     if (authorizedTreasuries) {
       return list.filter(t => authorizedTreasuries.includes(t));
     }
@@ -52,7 +73,7 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
     if (authorizedTreasuries && authorizedTreasuries.length > 0) {
       return authorizedTreasuries[0];
     }
-    const list = getStoredTreasuries(selectedCompanyId);
+    const list = getStoredTreasuries(selectedCompanyId, companies);
     return list[0] || "خزنة الشركة";
   });
   const [searchQuery, setSearchQuery] = useState("");
@@ -63,8 +84,8 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
   const [isUpdating, setIsUpdating] = useState(false);
 
   useEffect(() => {
-    // Reset/Reload treasuries when selectedCompanyId changes
-    const list = getStoredTreasuries(selectedCompanyId);
+    // Reset/Reload treasuries when selectedCompanyId or companies changes
+    const list = getStoredTreasuries(selectedCompanyId, companies);
     const filtered = authorizedTreasuries
       ? list.filter(t => authorizedTreasuries.includes(t))
       : list;
@@ -74,12 +95,12 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
     } else {
       setActiveTab(filtered[0] || "خزنة الشركة");
     }
-  }, [selectedCompanyId, authorizedTreasuries]);
+  }, [selectedCompanyId, authorizedTreasuries, companies]);
 
   useEffect(() => {
     // Reload if storage changes in other windows
     const handleStorageChange = () => {
-      const freshList = getStoredTreasuries(selectedCompanyId);
+      const freshList = getStoredTreasuries(selectedCompanyId, companies);
       const filtered = authorizedTreasuries
         ? freshList.filter(t => authorizedTreasuries.includes(t))
         : freshList;
@@ -92,10 +113,10 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
     return () => {
       window.removeEventListener("storage", handleStorageChange);
     };
-  }, [activeTab, authorizedTreasuries, selectedCompanyId]);
+  }, [activeTab, authorizedTreasuries, selectedCompanyId, companies]);
 
   // Handle adding a treasury
-  const handleAddTreasury = (e: React.FormEvent) => {
+  const handleAddTreasury = async (e: React.FormEvent) => {
     e.preventDefault();
     setInlineError(null);
     const name = newTreasuryName.trim();
@@ -108,6 +129,15 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
     setTreasuries(updated);
     const suffix = selectedCompanyId && selectedCompanyId !== "all" ? `_${selectedCompanyId}` : "";
     localStorage.setItem(`aw_treasuries${suffix}`, JSON.stringify(updated));
+
+    if (selectedCompanyId && selectedCompanyId !== "all") {
+      try {
+        await sb.from("companies").update({ treasuries: updated }).eq("id", selectedCompanyId);
+      } catch (err: any) {
+        console.error("Failed to save treasury to DB:", err);
+      }
+    }
+
     setNewTreasuryName("");
     // Dispatch to keep Installments synced
     window.dispatchEvent(new Event("storage"));
@@ -165,6 +195,11 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
       const suffix = selectedCompanyId && selectedCompanyId !== "all" ? `_${selectedCompanyId}` : "";
       localStorage.setItem(`aw_treasuries${suffix}`, JSON.stringify(updated));
 
+      // Save to database
+      if (selectedCompanyId && selectedCompanyId !== "all") {
+        await sb.from("companies").update({ treasuries: updated }).eq("id", selectedCompanyId);
+      }
+
       // 2. Update existing entries in Database
       // Receipts
       const affectedReceipts = receipts.filter(r => getReceiptTreasury(r) === cleanOld);
@@ -214,7 +249,7 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
   };
 
   // Handle deleting a treasury
-  const handleDeleteTreasury = (name: string) => {
+  const handleDeleteTreasury = async (name: string) => {
     setInlineError(null);
     if (treasuries.length <= 1) {
       setInlineError("⚠️ يجب إبقاء خزنة واحدة على الأقل في النظام لتسجيل المعاملات المالية!");
@@ -229,16 +264,29 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
     }
 
     if (window.confirm(confirmMsg)) {
-      const updated = treasuries.filter(t => t !== name);
-      setTreasuries(updated);
-      const suffix = selectedCompanyId && selectedCompanyId !== "all" ? `_${selectedCompanyId}` : "";
-      localStorage.setItem(`aw_treasuries${suffix}`, JSON.stringify(updated));
-      if (activeTab === name) {
-        setActiveTab(updated[0] || "خزنة الشركة");
-      }
-      window.dispatchEvent(new Event("storage"));
-      if (onUpdate) {
-        onUpdate();
+      try {
+        setIsUpdating(true);
+        const updated = treasuries.filter(t => t !== name);
+        setTreasuries(updated);
+        const suffix = selectedCompanyId && selectedCompanyId !== "all" ? `_${selectedCompanyId}` : "";
+        localStorage.setItem(`aw_treasuries${suffix}`, JSON.stringify(updated));
+
+        // Save to database
+        if (selectedCompanyId && selectedCompanyId !== "all") {
+          await sb.from("companies").update({ treasuries: updated }).eq("id", selectedCompanyId);
+        }
+
+        if (activeTab === name) {
+          setActiveTab(updated[0] || "خزنة الشركة");
+        }
+        window.dispatchEvent(new Event("storage"));
+        if (onUpdate) {
+          onUpdate();
+        }
+      } catch (err: any) {
+        setInlineError(`⚠️ حدث خطأ أثناء حذف الخزنة: ${err.message || err}`);
+      } finally {
+        setIsUpdating(false);
       }
     }
   };
@@ -414,53 +462,80 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
     <div className="space-y-8" dir="rtl">
 
       {/* Dynamic Main Consolidated Liquidity Widget */}
-      <div className="relative overflow-hidden rounded-3xl p-6 bg-slate-900/80 backdrop-blur-xl border border-emerald-500/40 shadow-2xl transition-all duration-300">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl -mr-20 -mt-20 pointer-events-none" />
-        <div className="absolute bottom-0 left-0 w-48 h-48 bg-blue-500/5 rounded-full blur-2xl -ml-10 -mb-10 pointer-events-none" />
+      {(() => {
+        const selectedCompany = companies.find(c => c.id === selectedCompanyId);
+        const hasSpecificCompany = selectedCompanyId && selectedCompanyId !== "all" && selectedCompany;
         
-        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 relative z-10">
-          <div className="space-y-2">
-            <div className="flex items-center gap-2.5">
-              <span className="p-2.5 bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 rounded-2xl flex items-center justify-center">
-                <Wallet className="w-5 h-5 animate-pulse" />
-              </span>
-              <div>
-                <h4 className="text-sm font-black text-slate-200">الرصيد المشترك الإجمالي لكافة الخزائن</h4>
-                <p className="text-[10px] text-slate-400">إجمالي النقدية المتوفرة والمحتسبة بالدفتر في جميع الصناديق</p>
-              </div>
-            </div>
-            
-            <div className="pt-2">
-              <h2 className="text-4xl font-extrabold text-white font-mono tracking-tight flex items-baseline gap-1.5">
-                {totalBalance.toLocaleString()} <span className="text-sm font-normal font-sans text-slate-400">ريال سعودي</span>
-              </h2>
-            </div>
-          </div>
+        const titleText = hasSpecificCompany 
+          ? `رصيد خزائن شركة ${selectedCompany.name}`
+          : "الرصيد الموحد لكافة شركات المنظومة (المجموع الكلي)";
+          
+        const descText = hasSpecificCompany
+          ? "إجمالي السيولة النقدية والترصيد المالي الخاص بصناديق هذه الشركة فقط"
+          : "إجمالي السيولة النقدية المتوفرة والمحتسبة بالدفتر في كافة خزائن الشركات التابعة معاً";
 
-          <div className="flex flex-wrap gap-4 w-full lg:w-auto">
-            <div className="flex-1 min-w-[140px] bg-slate-950/60 rounded-2xl p-4 border border-emerald-500/15 text-right shadow-inner">
-              <span className="block text-slate-500 text-[10px] font-black mb-1">وارد الخزائن المشترك</span>
-              <b className="text-emerald-400 font-extrabold text-sm font-mono flex items-center justify-start gap-1">
-                <span>+</span>{totalInbound.toLocaleString()} <span className="text-[9px] font-sans font-normal text-slate-450">ريال</span>
-              </b>
-            </div>
-            <div className="flex-1 min-w-[140px] bg-slate-950/60 rounded-2xl p-4 border border-rose-500/15 text-right shadow-inner">
-              <span className="block text-slate-500 text-[10px] font-black mb-1">صادر الخزائن المشترك</span>
-              <b className="text-rose-400 font-extrabold text-sm font-mono flex items-center justify-start gap-1">
-                <span>-</span>{totalOutbound.toLocaleString()} <span className="text-[9px] font-sans font-normal text-slate-450">ريال</span>
-              </b>
-            </div>
-            {totalCapitalOut > 0 && (
-              <div className="flex-1 min-w-[140px] bg-slate-950/60 rounded-2xl p-4 border border-purple-500/15 text-right shadow-inner">
-                <span className="block text-slate-500 text-[10px] font-black mb-1">منها رأس مال ممول</span>
-                <b className="text-purple-400 font-extrabold text-sm font-mono flex items-center justify-start gap-1">
-                  <span>-</span>{totalCapitalOut.toLocaleString()} <span className="text-[9px] font-sans font-normal text-slate-450">ريال</span>
-                </b>
+        const inboundLabel = hasSpecificCompany
+          ? "وارد خزائن الشركة"
+          : "وارد الخزائن الموحد";
+
+        const outboundLabel = hasSpecificCompany
+          ? "صادر خزائن الشركة"
+          : "صادر الخزائن الموحد";
+
+        const capitalLabel = hasSpecificCompany
+          ? "منها رأس مال ممول من الشركة"
+          : "منها رأس مال ممول موحد";
+
+        return (
+          <div className="relative overflow-hidden rounded-3xl p-6 bg-slate-900/80 backdrop-blur-xl border border-emerald-500/40 shadow-2xl transition-all duration-300">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl -mr-20 -mt-20 pointer-events-none" />
+            <div className="absolute bottom-0 left-0 w-48 h-48 bg-blue-500/5 rounded-full blur-2xl -ml-10 -mb-10 pointer-events-none" />
+            
+            <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 relative z-10">
+              <div className="space-y-2">
+                <div className="flex items-center gap-2.5">
+                  <span className="p-2.5 bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 rounded-2xl flex items-center justify-center">
+                    <Wallet className="w-5 h-5 animate-pulse" />
+                  </span>
+                  <div>
+                    <h4 className="text-sm font-black text-slate-200">{titleText}</h4>
+                    <p className="text-[10px] text-slate-400">{descText}</p>
+                  </div>
+                </div>
+                
+                <div className="pt-2">
+                  <h2 className="text-4xl font-extrabold text-white font-mono tracking-tight flex items-baseline gap-1.5">
+                    {totalBalance.toLocaleString()} <span className="text-sm font-normal font-sans text-slate-400">ريال سعودي</span>
+                  </h2>
+                </div>
               </div>
-            )}
+
+              <div className="flex flex-wrap gap-4 w-full lg:w-auto">
+                <div className="flex-1 min-w-[140px] bg-slate-950/60 rounded-2xl p-4 border border-emerald-500/15 text-right shadow-inner">
+                  <span className="block text-slate-500 text-[10px] font-black mb-1">{inboundLabel}</span>
+                  <b className="text-emerald-400 font-extrabold text-sm font-mono flex items-center justify-start gap-1">
+                    <span>+</span>{totalInbound.toLocaleString()} <span className="text-[9px] font-sans font-normal text-slate-450">ريال</span>
+                  </b>
+                </div>
+                <div className="flex-1 min-w-[140px] bg-slate-950/60 rounded-2xl p-4 border border-rose-500/15 text-right shadow-inner">
+                  <span className="block text-slate-500 text-[10px] font-black mb-1">{outboundLabel}</span>
+                  <b className="text-rose-400 font-extrabold text-sm font-mono flex items-center justify-start gap-1">
+                    <span>-</span>{totalOutbound.toLocaleString()} <span className="text-[9px] font-sans font-normal text-slate-450">ريال</span>
+                  </b>
+                </div>
+                {totalCapitalOut > 0 && (
+                  <div className="flex-1 min-w-[140px] bg-slate-950/60 rounded-2xl p-4 border border-purple-500/15 text-right shadow-inner">
+                    <span className="block text-slate-500 text-[10px] font-black mb-1">{capitalLabel}</span>
+                    <b className="text-purple-400 font-extrabold text-sm font-mono flex items-center justify-start gap-1">
+                      <span>-</span>{totalCapitalOut.toLocaleString()} <span className="text-[9px] font-sans font-normal text-slate-450">ريال</span>
+                    </b>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
+        );
+      })()}
       
       {/* Dynamic Main Premium Glass Card Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
