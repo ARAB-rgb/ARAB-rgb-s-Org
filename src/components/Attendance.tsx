@@ -117,9 +117,30 @@ export const Attendance: React.FC<AttendanceProps> = ({
   const [mNotes, setMNotes] = useState<string>("");
 
   // Dynamic state for Custom Permission Controls
-  const [reqGpsBiometrics, setReqGpsBiometrics] = useState<boolean>(true);
-  const [allowEmployeeSelfPunch, setAllowEmployeeSelfPunch] = useState<boolean>(true);
-  const [allowSupervisorBypass, setAllowSupervisorBypass] = useState<boolean>(true);
+  const [reqGpsBiometrics, setReqGpsBiometrics] = useState<boolean>(() => {
+    const val = localStorage.getItem("att_reqGpsBiometrics");
+    return val !== null ? val === "true" : true;
+  });
+  const [allowEmployeeSelfPunch, setAllowEmployeeSelfPunch] = useState<boolean>(() => {
+    const val = localStorage.getItem("att_allowEmployeeSelfPunch");
+    return val !== null ? val === "true" : true;
+  });
+  const [allowSupervisorBypass, setAllowSupervisorBypass] = useState<boolean>(() => {
+    const val = localStorage.getItem("att_allowSupervisorBypass");
+    return val !== null ? val === "true" : true;
+  });
+
+  useEffect(() => {
+    localStorage.setItem("att_reqGpsBiometrics", String(reqGpsBiometrics));
+  }, [reqGpsBiometrics]);
+
+  useEffect(() => {
+    localStorage.setItem("att_allowEmployeeSelfPunch", String(allowEmployeeSelfPunch));
+  }, [allowEmployeeSelfPunch]);
+
+  useEffect(() => {
+    localStorage.setItem("att_allowSupervisorBypass", String(allowSupervisorBypass));
+  }, [allowSupervisorBypass]);
 
   // Check if current user role matches
   const isAdmin = currentUser?.role === "admin";
@@ -127,10 +148,34 @@ export const Attendance: React.FC<AttendanceProps> = ({
   const isEmployee = currentUser?.role === "employee";
   const isAuthorizedToBypass = isAdmin || (isSupervisor && allowSupervisorBypass);
 
-  // Automatically match "employee" logged in user to their Worker Profile
-  const matchedWorker = workers.find(
-    (w) => w.id === currentUser?.worker_id || w.name === currentUser?.name
-  );
+  // Robust Arabic normalizer to avoid mismatches due to minor spelling/orthography differences
+  const normalizeArabic = (str: string): string => {
+    if (!str) return "";
+    return str
+      .trim()
+      .toLowerCase()
+      .replace(/[\u064B-\u0652]/g, "") // Remove harakat (diacritics)
+      .replace(/[أإآ]/g, "ا")
+      .replace(/ة/g, "ه")
+      .replace(/ى/g, "ي")
+      .replace(/\s+/g, " ");
+  };
+
+  // Automatically match logged in user to their Worker Profile using multi-tier fallback (ID, Code, Normalized Name)
+  const matchedWorker = workers.find((w) => {
+    if (!currentUser) return false;
+    
+    // 1. Match by primary key id (UUID)
+    if (currentUser.worker_id && w.id === currentUser.worker_id) return true;
+    
+    // 2. Match by string-based worker_id code (e.g. employee card / ID)
+    if (currentUser.worker_id && w.worker_id === currentUser.worker_id) return true;
+    
+    // 3. Match by robust normalized name comparison
+    if (normalizeArabic(w.name) === normalizeArabic(currentUser.name)) return true;
+    
+    return false;
+  });
 
   useEffect(() => {
     if (isEmployee && matchedWorker) {
@@ -161,6 +206,50 @@ export const Attendance: React.FC<AttendanceProps> = ({
       }
     } else {
       setSelectedProjectId("");
+    }
+  };
+
+  const handleCreateAndLinkWorker = async () => {
+    if (!currentUser) return;
+    setIsLoading(true);
+    try {
+      const newWorkerId = Math.random().toString(36).substring(7);
+      const codeId = currentUser.worker_id || `EMP-${Math.floor(1000 + Math.random() * 9000)}`;
+      const row = {
+        id: newWorkerId,
+        name: currentUser.name,
+        worker_id: codeId,
+        phone: currentUser.email || "",
+        job: "عامل" as const,
+        project: "",
+        daily: 0,
+        days: 0,
+        advance: 0,
+        total: 0,
+        balance: 0,
+        status: "على رأس العمل" as const,
+        company_id: currentUser.company_id || (selectedCompanyId !== "all" ? selectedCompanyId : null),
+        created_at: new Date().toISOString()
+      };
+      
+      const { error } = await sb.from("workers").insert(row);
+      if (error) {
+        showToast(error.message, "error");
+        return;
+      }
+      
+      // Update the user's worker_id field so it is permanently linked
+      const { error: userError } = await sb.from("users").update({ worker_id: newWorkerId }).eq("id", currentUser.id);
+      if (userError) {
+        console.error("Error updating user worker_id", userError);
+      }
+      
+      showToast("تم إنشاء وربط ملف الموظف بنجاح! يمكنك الآن تسجيل الحضور والانصراف.", "success");
+      if (onUpdate) await onUpdate();
+    } catch (err) {
+      showToast("حدث خطأ أثناء إنشاء ملف الموظف", "error");
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -702,9 +791,32 @@ export const Attendance: React.FC<AttendanceProps> = ({
                 <div className="space-y-1">
                   <label className="text-[10px] font-black text-slate-400 block">الموظف / العامل المستهدف *</label>
                   {isEmployee ? (
-                    <div className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white font-extrabold flex items-center justify-between">
-                      <span>👷 {matchedWorker ? matchedWorker.name : currentUser?.name}</span>
-                      <span className="text-[9px] bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded-md font-black">حسابك المقترن</span>
+                    <div className="space-y-2">
+                      <div className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white font-extrabold flex items-center justify-between font-sans">
+                        <span>👷 {matchedWorker ? matchedWorker.name : currentUser?.name}</span>
+                        {matchedWorker ? (
+                          <span className="text-[9px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-md font-black">حسابك المقترن</span>
+                        ) : (
+                          <span className="text-[9px] bg-rose-500/10 text-rose-400 px-2 py-0.5 rounded-md font-black">غير مقترن بملف موظف!</span>
+                        )}
+                      </div>
+                      
+                      {!matchedWorker && (
+                        <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl space-y-2">
+                          <p className="text-[10px] text-amber-300 font-bold leading-relaxed font-sans">
+                            ⚠️ لم يتم العثور على ملف موظف مطابق لاسمك أو رقمك الوظيفي في النظام لتسجيل بصمتك عليه.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={handleCreateAndLinkWorker}
+                            disabled={isLoading}
+                            className="w-full py-2 px-3 text-[10px] font-black bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl transition-colors flex items-center justify-center gap-1 shadow-md cursor-pointer font-sans"
+                          >
+                            <Sparkles className="w-3.5 h-3.5 animate-pulse" />
+                            <span>إنشاء وربط ملف موظف جديد لحسابك فوراً</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <select

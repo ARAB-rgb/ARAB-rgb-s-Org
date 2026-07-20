@@ -63,6 +63,19 @@ export const FinancialReports: React.FC<FinancialReportsProps> = ({
   // UI state for collapses
   const [showFilters, setShowFilters] = useState<boolean>(true);
 
+  const selectedCompany = useMemo(() => {
+    return companies.find((c) => c.id === selectedCompanyId);
+  }, [companies, selectedCompanyId]);
+
+  const selectedCompanyLogo = useMemo(() => {
+    if (!selectedCompanyId || selectedCompanyId === "all") return "";
+    try {
+      return window.localStorage.getItem(`aw_company_logo_${selectedCompanyId}`) || "";
+    } catch {
+      return "";
+    }
+  }, [selectedCompanyId]);
+
   // Dynamic lists for filter dropdowns
   const distinctProjects = useMemo(() => {
     const list = new Set<string>();
@@ -666,38 +679,70 @@ export const FinancialReports: React.FC<FinancialReportsProps> = ({
         <div className="absolute top-0 right-0 w-80 h-80 bg-amber-500/5 rounded-full blur-[100px] pointer-events-none print:hidden"></div>
         <div className="absolute bottom-0 left-0 w-80 h-80 bg-indigo-500/5 rounded-full blur-[100px] pointer-events-none print:hidden"></div>
 
-        {/* Print Header (Visible on print, hidden in app) */}
-        <div className="hidden print:flex flex-row justify-between items-center border-b-2 border-slate-950 pb-6 mb-8 text-black" dir="rtl">
-          <div>
-            <h1 className="text-xl font-black">عرب وورلد آدز للحسابات والتقسيط</h1>
-            <p className="text-xs font-bold text-slate-600 mt-1">كشف محاسبي معتمد بالبيانات والتحليلات الفورية</p>
-            {selectedCompanyId !== "all" && (
-              <p className="text-xs font-bold text-slate-600 mt-1">
-                الشركة المصدرة: {companies.find((c) => c.id === selectedCompanyId)?.name || selectedCompanyId}
+        {/* Dynamic Corporate Header & Letterhead (Visible in app and prints perfectly) */}
+        <div className="border-b border-slate-800 pb-6 mb-6 print:border-b-2 print:border-slate-950 text-right" dir="rtl">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+            <div className="flex items-center gap-4">
+              {/* Company Logo Display */}
+              {selectedCompanyLogo ? (
+                <img
+                  src={selectedCompanyLogo}
+                  alt={selectedCompany?.name || "Logo"}
+                  className="w-16 h-16 object-contain rounded-2xl bg-white p-1 border border-white/10 print:border-slate-900 print:bg-transparent"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-500 to-yellow-600 flex items-center justify-center text-slate-950 font-black text-2xl shadow-lg shadow-amber-500/10 print:shadow-none print:border-2 print:border-slate-900 shrink-0">
+                  {selectedCompany?.name ? selectedCompany.name.trim().charAt(0) : "🏢"}
+                </div>
+              )}
+              
+              <div>
+                <h1 className="text-lg md:text-xl font-black text-white print:text-black tracking-tight font-sans">
+                  {selectedCompanyId === "all" ? "عرب وورلد آدز للحسابات والتقسيط" : (selectedCompany?.name || "عرب وورلد آدز للحسابات والتقسيط")}
+                </h1>
+                <p className="text-xs text-slate-400 print:text-slate-600 mt-1 font-bold">
+                  {selectedCompanyId === "all" 
+                    ? "كشف محاسبي مدمج لكافة الفروع والشركات التابعة" 
+                    : `القوائم والتقارير المالية المعتمدة للشركة`}
+                </p>
+                {selectedCompanyId !== "all" && selectedCompany?.commercial_register && (
+                  <span className="inline-block text-[10px] text-slate-500 font-mono mt-1 font-semibold print:text-slate-600">
+                    رقم السجل التجاري: {selectedCompany.commercial_register}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Meta details & Timestamp info */}
+            <div className="flex flex-col text-right md:text-left md:items-end gap-1.5 shrink-0 w-full md:w-auto">
+              <div className="bg-white/5 px-4 py-1.5 rounded-xl border border-white/5 print:border-slate-950 print:bg-transparent inline-block self-start md:self-auto print:text-black">
+                <span className="block text-[8px] font-bold text-slate-400 print:text-slate-500">حالة البيانات والتدقيق</span>
+                <span className="block text-[10px] font-black text-emerald-400 print:text-slate-950">🟢 معتمدة ومدققة فوري</span>
+              </div>
+              <div className="text-[10px] text-slate-400 print:text-slate-600 font-medium">
+                <span className="block">تاريخ الاستخراج: {new Date().toLocaleDateString("ar-SA")}</span>
+                <span className="block mt-0.5">تم بواسطة: {currentUser?.name || "المسؤول المالي"}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Subheader specifying dates and active report title */}
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mt-6 pt-4 border-t border-slate-800/40 print:border-t-2 print:border-slate-950/40 gap-4">
+            <div>
+              <h2 className="text-sm font-black text-amber-400 print:text-black flex items-center gap-2 font-sans">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 print:bg-black"></span>
+                <span>{currentReportTitle()}</span>
+              </h2>
+              <p className="text-[11px] text-slate-400 print:text-slate-600 mt-0.5">
+                تقرير مالي للفترة المحتسبة: {fromDate || "البداية"} إلى {toDate || "الآن"}
               </p>
+            </div>
+            {selectedCompanyId !== "all" && selectedCompany?.phone && (
+              <span className="text-[10px] text-slate-500 print:text-slate-600 font-mono font-bold mt-2 sm:mt-0">
+                هاتف التواصل: {selectedCompany.phone}
+              </span>
             )}
-          </div>
-          <div className="text-left">
-            <span className="block text-xs font-bold">تاريخ الاستخراج: {new Date().toLocaleDateString("ar-SA")}</span>
-            <span className="block text-[10px] text-slate-500">تم بواسطة: {currentUser?.name || "المسؤول المالي"}</span>
-          </div>
-        </div>
-
-        {/* Report Meta Header */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-white/5 pb-6 mb-6 gap-4">
-          <div>
-            <h2 className="text-lg font-black text-white print:text-black flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
-              <span>{currentReportTitle()}</span>
-            </h2>
-            <p className="text-xs text-slate-400 print:text-slate-600 mt-1">
-              تقرير مالي للفترة المحتسبة: {fromDate || "البداية"} إلى {toDate || "الآن"}
-            </p>
-          </div>
-
-          <div className="bg-white/5 px-4 py-2 rounded-2xl border border-white/5 print:hidden">
-            <span className="block text-[9px] font-bold text-slate-400">حالة البيانات</span>
-            <span className="block text-xs font-black text-emerald-400">🟢 مدققة وفورية</span>
           </div>
         </div>
 

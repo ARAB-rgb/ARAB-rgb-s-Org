@@ -418,6 +418,7 @@ export default function App() {
   const [cCapital, setCCapital] = useState<number | "">("");
   const [cPhone, setCPhone] = useState("");
   const [cAddress, setCAddress] = useState("");
+  const [cLogoUrl, setCLogoUrl] = useState("");
 
   // 8. Extracts Forms
   const [exCompanyId, setExCompanyId] = useState("");
@@ -2880,6 +2881,8 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
     e.preventDefault();
     if (!cName) return;
 
+    const targetCompanyId = editCompanyId || "comp_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7);
+
     const row: any = {
       name: cName.trim(),
       commercial_register: cRegister.trim(),
@@ -2890,11 +2893,13 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
     };
 
     if (!editCompanyId) {
-      row.id = "comp_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7);
+      row.id = targetCompanyId;
     }
 
     setIsLoading(true);
     try {
+      localStorage.setItem(`aw_company_logo_${targetCompanyId}`, cLogoUrl.trim());
+
       const q = editCompanyId
         ? sb.from("companies").update(row).eq("id", editCompanyId)
         : sb.from("companies").insert(row);
@@ -2913,6 +2918,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       setCCapital("");
       setCPhone("");
       setCAddress("");
+      setCLogoUrl("");
       await loadEverything();
       showToast("تم حفظ بطاقة الشركة بنجاح!");
     } catch {
@@ -6359,6 +6365,20 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                       />
                     </div>
 
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-slate-400 font-bold flex items-center gap-1">
+                        <span>🖼️</span>
+                        <span>رابط شعار الشركة (Logo URL)</span>
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="مثال: https://example.com/logo.png"
+                        value={cLogoUrl}
+                        onChange={(e) => setCLogoUrl(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 font-mono"
+                      />
+                    </div>
+
                     <div className="flex gap-2 justify-end pt-2">
                       {editCompanyId && (
                         <button
@@ -6371,6 +6391,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                             setCCapital("");
                             setCPhone("");
                             setCAddress("");
+                            setCLogoUrl("");
                           }}
                           className="px-4 py-2 bg-slate-800 hover:bg-slate-755 text-slate-300 rounded-xl text-xs font-black transition-colors"
                         >
@@ -6445,6 +6466,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                                         setCCapital(comp.capital || "");
                                         setCPhone(comp.phone || "");
                                         setCAddress(comp.address || "");
+                                        setCLogoUrl(localStorage.getItem(`aw_company_logo_${comp.id}`) || "");
                                       }}
                                       className="p-1 px-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 rounded-lg text-[10px] font-bold transition-all"
                                     >

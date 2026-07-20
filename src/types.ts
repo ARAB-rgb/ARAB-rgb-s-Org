@@ -233,6 +233,7 @@ export interface Company {
   address?: string;
   notes?: string;     // بنود وشروط إضافية للعقود
   promissory_note_template?: string; // صيغة سند الأمر الافتراضية للشركة
+  logo_url?: string;  // شعار الشركة كـ URL أو base64
   created_at?: string;
 }
 
