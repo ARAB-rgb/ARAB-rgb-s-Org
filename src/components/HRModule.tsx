@@ -7,7 +7,7 @@ import React, { useState, useEffect } from "react";
 import {
   Users, User, FileText, ClipboardList, Shield, Landmark, TrendingUp, TrendingDown,
   Clock, Search, Plus, Trash2, Edit2, Calendar, Check, X, AlertCircle, Printer, Download,
-  Coins, Briefcase, Building, ChevronLeft, ChevronRight, File, ShieldCheck, HeartPulse
+  Coins, Briefcase, Building, ChevronLeft, ChevronRight, File, ShieldCheck, HeartPulse, CheckCircle2
 } from "lucide-react";
 import { sb } from "../db";
 import { User as AuthUser, Project, Company, CompanyAsset } from "../types";
@@ -125,6 +125,28 @@ export interface HrDeduction {
   created_at?: string;
 }
 
+export interface HrPayroll {
+  id: string;
+  company_id: string;
+  month: string; // YYYY-MM
+  employee_id: string;
+  employee_name: string;
+  basic_salary: number;
+  allowances: number;
+  journals_total: number;
+  deductions_total: number;
+  advances_total: number;
+  net_salary: number;
+  payment_method: string;
+  treasury: string;
+  voucher_no: string;
+  status: "مسودة" | "مدفوع بالكامل" | "مدفوع جزئياً";
+  paid_at?: string;
+  paid_by?: string;
+  notes?: string;
+  created_at?: string;
+}
+
 interface HRProps {
   currentUser: AuthUser | null;
   projects: Project[];
@@ -143,7 +165,7 @@ export const HRModule: React.FC<HRProps> = ({
   onPaymentCreated
 }) => {
   // Navigation tabs inside HR
-  const [activeTab, setActiveTab] = useState<"employees" | "contracts" | "custody" | "journals" | "deductions" | "ledger" | "reports">("employees");
+  const [activeTab, setActiveTab] = useState<"employees" | "contracts" | "payrolls" | "custody" | "journals" | "deductions" | "ledger" | "reports">("employees");
 
   // State lists
   const [employees, setEmployees] = useState<HrEmployee[]>([]);
@@ -151,12 +173,15 @@ export const HRModule: React.FC<HRProps> = ({
   const [custodies, setCustodies] = useState<HrCustody[]>([]);
   const [journals, setJournals] = useState<HrJournal[]>([]);
   const [deductions, setDeductions] = useState<HrDeduction[]>([]);
+  const [payrolls, setPayrolls] = useState<HrPayroll[]>([]);
   const [companyAssets, setCompanyAssets] = useState<CompanyAsset[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
 
-  // Common filters
+  // Common filters & Month
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [selectedMonth, setSelectedMonth] = useState<string>(new Date().toISOString().slice(0, 7)); // e.g. "2026-07"
+  const [deductionCategoryFilter, setDeductionCategoryFilter] = useState<string>("all");
 
   // Active Company ID based on session and choice
   const activeCompanyId = currentUser?.role === "admin"
@@ -202,7 +227,11 @@ export const HRModule: React.FC<HRProps> = ({
       const dedRes = await sb.from("hr_deductions").select("*").eq("company_id", activeCompanyId);
       if (dedRes.data) setDeductions(dedRes.data);
 
-      // 6. Company Assets
+      // 6. Payrolls (سداد الرواتب)
+      const payRes = await sb.from("hr_payrolls").select("*").eq("company_id", activeCompanyId);
+      if (payRes.data) setPayrolls(payRes.data);
+
+      // 7. Company Assets
       const assetsRes = await sb.from("company_assets").select("*").eq("company_id", activeCompanyId);
       if (assetsRes.data) setCompanyAssets(assetsRes.data);
     } catch (err) {
@@ -222,6 +251,24 @@ export const HRModule: React.FC<HRProps> = ({
   const [custodyForm, setCustodyForm] = useState<Partial<HrCustody> | null>(null);
   const [journalForm, setJournalForm] = useState<Partial<HrJournal> | null>(null);
   const [deductionForm, setDeductionForm] = useState<Partial<HrDeduction> | null>(null);
+
+  // Salary Payment Modal state
+  const [paySalaryForm, setPaySalaryForm] = useState<{
+    employee: HrEmployee;
+    basicSalary: number;
+    allowances: number;
+    journalsTotal: number;
+    deductionsTotal: number;
+    advancesTotal: number;
+    netSalary: number;
+    treasury: string;
+    method: string;
+    notes: string;
+  } | null>(null);
+
+  // Deduction loan cash disburse toggle
+  const [deductionDisburseCash, setDeductionDisburseCash] = useState<boolean>(false);
+  const [deductionTreasury, setDeductionTreasury] = useState<string>("خزنة التحصيل");
 
   // Batch journals modal
   const [showBatchModal, setShowBatchModal] = useState<boolean>(false);
@@ -552,11 +599,129 @@ export const HRModule: React.FC<HRProps> = ({
     }
   };
 
-  // Handle Deduction Save
+  // Handle Pay Salary (Single Employee)
+  const handlePaySalary = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!paySalaryForm) return;
+
+    try {
+      const paymentNo = `PAY-SAL-${Math.floor(10000 + Math.random() * 90000)}`;
+      const mainPayment = {
+        id: crypto.randomUUID(),
+        company_id: activeCompanyId,
+        no: paymentNo,
+        to_name: paySalaryForm.employee.name,
+        amount: paySalaryForm.netSalary,
+        method: paySalaryForm.method || "نقداً",
+        date: new Date().toISOString().split("T")[0],
+        project: paySalaryForm.employee.project || "شؤون الموظفين",
+        notes: `صرف وسداد راتب شهر (${selectedMonth}) للموظف: ${paySalaryForm.employee.name} [الخزنة: ${paySalaryForm.treasury || "خزنة التحصيل"}] ${paySalaryForm.notes ? "- " + paySalaryForm.notes : ""}`,
+        created_at: new Date().toISOString()
+      };
+
+      await sb.from("payments").insert(mainPayment);
+
+      const payrollPayload: HrPayroll = {
+        id: crypto.randomUUID(),
+        company_id: activeCompanyId,
+        month: selectedMonth,
+        employee_id: paySalaryForm.employee.id,
+        employee_name: paySalaryForm.employee.name,
+        basic_salary: paySalaryForm.basicSalary,
+        allowances: paySalaryForm.allowances,
+        journals_total: paySalaryForm.journalsTotal,
+        deductions_total: paySalaryForm.deductionsTotal,
+        advances_total: paySalaryForm.advancesTotal,
+        net_salary: paySalaryForm.netSalary,
+        payment_method: paySalaryForm.method || "نقداً",
+        treasury: paySalaryForm.treasury || "خزنة التحصيل",
+        voucher_no: paymentNo,
+        status: "مدفوع بالكامل",
+        paid_at: new Date().toISOString(),
+        paid_by: currentUser?.name || "المدير",
+        notes: paySalaryForm.notes,
+        created_at: new Date().toISOString()
+      };
+
+      await sb.from("hr_payrolls").insert(payrollPayload);
+
+      // Also mark matching unpaid journals for this month as paid
+      const monthJournals = journals.filter(
+        j => j.employee_id === paySalaryForm.employee.id &&
+        j.date.startsWith(selectedMonth) &&
+        j.status === "معتمدة"
+      );
+      for (const j of monthJournals) {
+        await sb.from("hr_journals").update({
+          status: "مدفوعة بالكامل",
+          paid_amount: j.total_entitled,
+          remaining_amount: 0,
+          voucher_no: paymentNo,
+          payment_method: paySalaryForm.treasury || "خزنة التحصيل"
+        }).eq("id", j.id);
+      }
+
+      showToast(`تم صرف وسداد راتب الموظف (${paySalaryForm.employee.name}) بنجاح برقم سند: ${paymentNo}`);
+      setPaySalaryForm(null);
+      if (onPaymentCreated) onPaymentCreated();
+      loadAllData();
+    } catch (err: any) {
+      showToast(err.message || "فشل عملية صرف الراتب", "error");
+    }
+  };
+
+  // Handle Batch Pay All Approved Journals
+  const handleBatchPayJournals = async () => {
+    const unpaidApproved = journals.filter(j => j.status === "معتمدة");
+    if (unpaidApproved.length === 0) {
+      return showToast("لا توجد يوميات معتمدة بانتظار الصرف", "info");
+    }
+
+    const treasuryName = prompt("يرجى إدخال اسم الخزنة لصرف جميع اليوميات المعتمدة (مثال: خزنة التحصيل / خزنة الشركة الرئيسية):", "خزنة التحصيل");
+    if (!treasuryName) return;
+
+    try {
+      let paidCount = 0;
+      for (const jour of unpaidApproved) {
+        const paymentNo = `PAY-HR-${Math.floor(1000 + Math.random() * 9000)}`;
+        const mainPayment = {
+          id: crypto.randomUUID(),
+          company_id: activeCompanyId,
+          no: paymentNo,
+          to_name: jour.employee_name,
+          amount: jour.total_entitled,
+          method: "نقداً",
+          date: jour.date,
+          project: jour.project || "شؤون الموظفين",
+          notes: `صرف يومية مستحقة للموظف تاريخ: ${jour.date} [الخزنة: ${treasuryName}]`,
+          created_at: new Date().toISOString()
+        };
+
+        await sb.from("payments").insert(mainPayment);
+        await sb.from("hr_journals").update({
+          status: "مدفوعة بالكامل",
+          paid_amount: jour.total_entitled,
+          remaining_amount: 0,
+          voucher_no: paymentNo,
+          payment_method: `الخزنة: ${treasuryName}`
+        }).eq("id", jour.id);
+
+        paidCount++;
+      }
+
+      showToast(`تم صرف تسديد ${paidCount} يومية معتمدة بنجاح خصماً من ${treasuryName}`);
+      if (onPaymentCreated) onPaymentCreated();
+      loadAllData();
+    } catch (err: any) {
+      showToast(err.message || "فشل الصرف الجماعي اليوميات", "error");
+    }
+  };
+
+  // Handle Deduction / Loan Save
   const handleSaveDeduction = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!deductionForm?.employee_id || !deductionForm?.amount || !deductionForm?.type) {
-      return showToast("يرجى ملء بيانات الخصم بالكامل", "error");
+      return showToast("يرجى ملء بيانات الخصم بالسلفة بالكامل", "error");
     }
 
     const emp = employees.find(emp => emp.id === deductionForm.employee_id);
@@ -564,28 +729,52 @@ export const HRModule: React.FC<HRProps> = ({
 
     try {
       const isEdit = !!deductionForm.id;
+      const isLoan = deductionForm.type === "سلفة";
+      let paymentNo = "";
+
+      // If financial loan and disburse cash requested
+      if (isLoan && deductionDisburseCash && !isEdit) {
+        paymentNo = `PAY-ADV-${Math.floor(1000 + Math.random() * 9000)}`;
+        const mainPayment = {
+          id: crypto.randomUUID(),
+          company_id: activeCompanyId,
+          no: paymentNo,
+          to_name: empName,
+          amount: Number(deductionForm.amount || 0),
+          method: "نقداً",
+          date: deductionForm.date || new Date().toISOString().split("T")[0],
+          project: deductionForm.project_branch || "شؤون الموظفين",
+          notes: `صرف سلفة مالية للموظف: ${empName} [الخزنة: ${deductionTreasury}] ${deductionForm.reason ? "- " + deductionForm.reason : ""}`,
+          created_at: new Date().toISOString()
+        };
+        await sb.from("payments").insert(mainPayment);
+        if (onPaymentCreated) onPaymentCreated();
+      }
+
       const payload: any = {
         ...deductionForm,
         employee_name: empName,
         company_id: activeCompanyId,
         amount: Number(deductionForm.amount || 0),
-        created_by: currentUser?.name || "النظام"
+        status: (isLoan && deductionDisburseCash) ? "معتمد" : (deductionForm.status || "مسودة"),
+        created_by: currentUser?.name || "النظام",
+        reason: paymentNo ? `[تم صرف السلفة بسند: ${paymentNo} من ${deductionTreasury}] ${deductionForm.reason || ""}` : deductionForm.reason
       };
 
       if (!isEdit) {
         payload.id = crypto.randomUUID();
         payload.created_at = new Date().toISOString();
-        payload.status = payload.status || "مسودة";
         await sb.from("hr_deductions").insert(payload);
-        showToast("تم تسجيل الخصم بنجاح وبانتظار الاعتماد");
+        showToast(isLoan ? "تم تسجل واستخراج السلفة المالية بنجاح" : "تم تسجيل الخصم بنجاح وبانتظار الاعتماد");
       } else {
         await sb.from("hr_deductions").update(payload).eq("id", deductionForm.id);
-        showToast("تم تحديث الخصم بنجاح");
+        showToast("تم تحديث السجلات بنجاح");
       }
       setDeductionForm(null);
+      setDeductionDisburseCash(false);
       loadAllData();
     } catch (err: any) {
-      showToast(err.message || "فشل حفظ الخصم", "error");
+      showToast(err.message || "فشل حفظ العملية", "error");
     }
   };
 
@@ -629,12 +818,79 @@ export const HRModule: React.FC<HRProps> = ({
     return { days: diffDays, text: "ساري الصلاحية", color: "text-emerald-400 bg-emerald-500/10", alert: false };
   };
 
+  // Delete Handlers
+  const handleDeleteJournal = async (id: string) => {
+    if (!confirm("هل أنت تأكد من رغبتك في حذف سجل اليومية هذا؟")) return;
+    try {
+      await sb.from("hr_journals").delete().eq("id", id);
+      showToast("تم حذف سجل اليومية بنجاح");
+      loadAllData();
+    } catch (err: any) {
+      showToast(err.message || "فشل حذف اليومية", "error");
+    }
+  };
+
+  const handleDeleteDeduction = async (id: string) => {
+    if (!confirm("هل أنت تأكد من رغبتك في حذف هذا الخصم / السلفة؟")) return;
+    try {
+      await sb.from("hr_deductions").delete().eq("id", id);
+      showToast("تم حذف السجل بنجاح");
+      loadAllData();
+    } catch (err: any) {
+      showToast(err.message || "فشل الحذف", "error");
+    }
+  };
+
+  const handleDeleteEmployee = async (id: string) => {
+    if (!confirm("هل أنت تأكد من رغبتك في حذف بيانات الموظف نهائياً؟")) return;
+    try {
+      await sb.from("hr_employees").delete().eq("id", id);
+      showToast("تم حذف سجل الموظف بنجاح");
+      loadAllData();
+    } catch (err: any) {
+      showToast(err.message || "فشل حذف الموظف", "error");
+    }
+  };
+
+  const handleDeleteContract = async (id: string) => {
+    if (!confirm("هل أنت تأكد من رغبتك في حذف العقد؟")) return;
+    try {
+      await sb.from("hr_contracts").delete().eq("id", id);
+      showToast("تم حذف العقد بنجاح");
+      loadAllData();
+    } catch (err: any) {
+      showToast(err.message || "فشل حذف العقد", "error");
+    }
+  };
+
+  const handleDeleteCustody = async (id: string) => {
+    if (!confirm("هل أنت تأكد من حذف سجل العهدة هذا؟")) return;
+    try {
+      await sb.from("hr_custody").delete().eq("id", id);
+      showToast("تم حذف سجل العهدة بنجاح");
+      loadAllData();
+    } catch (err: any) {
+      showToast(err.message || "فشل حذف سجل العهدة", "error");
+    }
+  };
+
+  const handleDeletePayroll = async (id: string) => {
+    if (!confirm("هل أنت تأكد من إلغاء وحذف مسير/سداد هذا الراتب؟")) return;
+    try {
+      await sb.from("hr_payrolls").delete().eq("id", id);
+      showToast("تم إلغاء سجل الراتب بنجاح");
+      loadAllData();
+    } catch (err: any) {
+      showToast(err.message || "فشل إلغاء سجل الراتب", "error");
+    }
+  };
+
   // Ledger calculation helper
   const getEmployeeLedger = (empId: string) => {
     const emp = employees.find(e => e.id === empId);
     if (!emp) return null;
 
-    let journalsList = journals.filter(j => j.employee_id === empId && j.status === "معتمدة" || j.status === "مدفوعة بالكامل");
+    let journalsList = journals.filter(j => j.employee_id === empId && (j.status === "معتمدة" || j.status === "مدفوعة بالكامل"));
     let deductionsList = deductions.filter(d => d.employee_id === empId && d.status === "معتمد");
 
     if (ledgerStartDate) {
@@ -646,14 +902,14 @@ export const HRModule: React.FC<HRProps> = ({
       deductionsList = deductionsList.filter(d => d.date <= ledgerEndDate);
     }
 
-    const totalJournalsEarned = journalsList.reduce((sum, j) => sum + j.total_entitled, 0);
-    const totalJournalsPaid = journalsList.reduce((sum, j) => sum + j.paid_amount, 0);
-    const totalDeductions = deductionsList.reduce((sum, d) => sum + d.amount, 0);
+    const totalJournalsEarned = journalsList.reduce((sum, j) => sum + (j.total_entitled || 0), 0);
+    const totalJournalsPaid = journalsList.reduce((sum, j) => sum + (j.paid_amount || 0), 0);
+    const totalDeductions = deductionsList.reduce((sum, d) => sum + (d.amount || 0), 0);
 
     const empCustodies = custodies.filter(c => c.employee_id === empId);
     const empContracts = contracts.filter(c => c.employee_id === empId);
 
-    const netEarned = (emp.payment_method === "monthly" ? emp.basic_salary + emp.allowances : 0) + totalJournalsEarned;
+    const netEarned = (emp.payment_method === "monthly" ? ((emp.basic_salary || 0) + (emp.allowances || 0)) : 0) + totalJournalsEarned;
     const finalBalance = netEarned - totalJournalsPaid - totalDeductions;
 
     return {
@@ -729,9 +985,10 @@ export const HRModule: React.FC<HRProps> = ({
         {[
           { key: "employees", label: "ملف الموظف", icon: User, allowed: can("hr_employees_view") },
           { key: "contracts", label: "العقود والرواتب", icon: ClipboardList, allowed: can("hr_contracts_view") },
-          { key: "custody", label: "العهد والأصول", icon: Shield, allowed: can("hr_custody_view") },
+          { key: "payrolls", label: "مسير وسداد الرواتب", icon: Coins, allowed: can("hr_salaries_view") },
           { key: "journals", label: "اليوميات والحضور", icon: Clock, allowed: can("hr_journals_add") },
-          { key: "deductions", label: "الخصميات والجزاءات", icon: TrendingDown, allowed: can("hr_deductions_add") },
+          { key: "deductions", label: "الخصميات والسلف", icon: TrendingDown, allowed: can("hr_deductions_add") },
+          { key: "custody", label: "العهد والأصول", icon: Shield, allowed: can("hr_custody_view") },
           { key: "ledger", label: "كشف حساب الموظف", icon: Landmark, allowed: can("hr_salaries_view") },
           { key: "reports", label: "التقارير الإحصائية", icon: FileText, allowed: can("hr_reports_print") },
         ].filter(t => t.allowed).map((tab) => {
@@ -865,9 +1122,19 @@ export const HRModule: React.FC<HRProps> = ({
                       {can("hr_employees_edit") && (
                         <button
                           onClick={() => setEmployeeForm(emp)}
+                          title="تعديل بيانات الموظف"
                           className="p-2 bg-white/5 hover:bg-amber-500/20 hover:text-amber-300 border border-white/5 hover:border-amber-500/20 rounded-xl transition-all"
                         >
                           <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      {can("hr_employees_edit") && (
+                        <button
+                          onClick={() => handleDeleteEmployee(emp.id)}
+                          title="حذف الموظف نهائياً"
+                          className="p-2 bg-white/5 hover:bg-rose-500/20 hover:text-rose-400 border border-white/5 hover:border-rose-500/20 rounded-xl transition-all"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       )}
                       {can("hr_employees_edit") && emp.status === "على رأس العمل" && (
@@ -966,7 +1233,7 @@ export const HRModule: React.FC<HRProps> = ({
                           </span>
                         )}
                       </td>
-                      <td className="p-4 font-mono">{con.basic_salary.toLocaleString()} ريال</td>
+                      <td className="p-4 font-mono">{(con.basic_salary || 0).toLocaleString()} ريال</td>
                       <td className="p-4 font-mono text-slate-400">
                         {con.housing_allowance} / {con.transport_allowance}
                       </td>
@@ -980,27 +1247,320 @@ export const HRModule: React.FC<HRProps> = ({
                           {con.status}
                         </span>
                       </td>
-                      <td className="p-4 text-left space-x-2 space-x-reverse">
-                        <button
-                          onClick={() => setPrintContract(con)}
-                          className="text-amber-400 hover:text-amber-300 underline font-black"
-                        >
-                          نسخة الطباعة والتوقيع
-                        </button>
-                        {can("hr_contracts_add") && (
+                      <td className="p-4 text-left">
+                        <div className="flex items-center justify-end gap-2">
                           <button
-                            onClick={() => setContractForm(con)}
-                            className="text-slate-400 hover:text-slate-200"
+                            onClick={() => setPrintContract(con)}
+                            className="text-amber-400 hover:text-amber-300 underline font-black text-[11px]"
                           >
-                            تعديل
+                            نسخة الطباعة والتوقيع
                           </button>
-                        )}
+                          {can("hr_contracts_add") && (
+                            <>
+                              <button
+                                onClick={() => setContractForm(con)}
+                                title="تعديل العقد"
+                                className="p-1.5 bg-white/5 hover:bg-amber-500/20 text-amber-400 rounded-lg border border-white/5 transition-all"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteContract(con.id)}
+                                title="حذف العقد"
+                                className="p-1.5 bg-white/5 hover:bg-rose-500/20 text-rose-400 rounded-lg border border-white/5 transition-all"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Payroll & Salaries Disbursement (مسير وسداد الرواتب) */}
+      {activeTab === "payrolls" && (
+        <div className="space-y-6">
+          {/* Header Controls & Month Selector */}
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-900/40 p-4 rounded-2xl border border-white/5">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-400">
+                <Coins className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-md font-black text-slate-100">مسير وسداد الرواتب واليوميات الشامل</h3>
+                <p className="text-xs text-slate-400">إعداد كشوف الرواتب الشهرية واليوميات وصرف السندات المالية مباشرة من الخزينة</p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+              <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-white/10">
+                <span className="text-xs text-slate-400 font-bold">شهر المسير:</span>
+                <input
+                  type="month"
+                  value={selectedMonth}
+                  onChange={(e) => setSelectedMonth(e.target.value)}
+                  className="bg-transparent text-xs text-amber-300 font-mono outline-none cursor-pointer"
+                />
+              </div>
+
+              {can("hr_salaries_view") && (
+                <button
+                  onClick={async () => {
+                    const unpaidEmps = employees.filter(emp => {
+                      const alreadyPaid = payrolls.some(p => p.employee_id === emp.id && p.month === selectedMonth && p.status === "مدفوع بالكامل");
+                      return !alreadyPaid;
+                    });
+
+                    if (unpaidEmps.length === 0) {
+                      return showToast("جميع رواتب الموظفين لهذا الشهر مسددة بالفعل", "info");
+                    }
+
+                    const tName = prompt(`هل تريد صرف وتسديد رواتب (${unpaidEmps.length}) موظف بشكل جماعي لشهر ${selectedMonth}؟\nيرجى تحديد اسم الخزنة:`, "خزنة التحصيل");
+                    if (!tName) return;
+
+                    try {
+                      let count = 0;
+                      for (const emp of unpaidEmps) {
+                        const empJournals = journals.filter(j => j.employee_id === emp.id && j.date.startsWith(selectedMonth) && j.status === "معتمدة");
+                        const journalsTotal = empJournals.reduce((s, j) => s + j.total_entitled, 0);
+                        const empDeds = deductions.filter(d => d.employee_id === emp.id && d.month_applied === selectedMonth && d.status === "معتمد");
+                        const dTotal = empDeds.filter(d => d.type !== "سلفة").reduce((s, d) => s + d.amount, 0);
+                        const aTotal = empDeds.filter(d => d.type === "سلفة").reduce((s, d) => s + d.amount, 0);
+
+                        const basic = emp.payment_method === "monthly" ? (emp.basic_salary || 0) : 0;
+                        const allow = emp.payment_method === "monthly" ? (emp.allowances || 0) : 0;
+                        const net = (basic + allow + journalsTotal) - (dTotal + aTotal);
+
+                        if (net <= 0) continue;
+
+                        const paymentNo = `PAY-SAL-${Math.floor(10000 + Math.random() * 90000)}`;
+                        await sb.from("payments").insert({
+                          id: crypto.randomUUID(),
+                          company_id: activeCompanyId,
+                          no: paymentNo,
+                          to_name: emp.name,
+                          amount: net,
+                          method: "نقداً",
+                          date: new Date().toISOString().split("T")[0],
+                          project: emp.project || "شؤون الموظفين",
+                          notes: `صرف جماعي لراتب شهر (${selectedMonth}) للموظف: ${emp.name} [الخزنة: ${tName}]`,
+                          created_at: new Date().toISOString()
+                        });
+
+                        await sb.from("hr_payrolls").insert({
+                          id: crypto.randomUUID(),
+                          company_id: activeCompanyId,
+                          month: selectedMonth,
+                          employee_id: emp.id,
+                          employee_name: emp.name,
+                          basic_salary: basic,
+                          allowances: allow,
+                          journals_total: journalsTotal,
+                          deductions_total: dTotal,
+                          advances_total: aTotal,
+                          net_salary: net,
+                          payment_method: "نقداً",
+                          treasury: tName,
+                          voucher_no: paymentNo,
+                          status: "مدفوع بالكامل",
+                          paid_at: new Date().toISOString(),
+                          paid_by: currentUser?.name || "المدير",
+                          created_at: new Date().toISOString()
+                        });
+
+                        count++;
+                      }
+                      showToast(`تم صرف وتسديد رواتب (${count}) موظف بنجاح خصماً من ${tName}`);
+                      if (onPaymentCreated) onPaymentCreated();
+                      loadAllData();
+                    } catch (err: any) {
+                      showToast(err.message || "فشل الصرف الجماعي للرواتب", "error");
+                    }
+                  }}
+                  className="bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black text-xs px-4 py-2.5 rounded-xl flex items-center gap-2 shadow-lg transition-all"
+                >
+                  <Coins className="w-4 h-4" />
+                  <span>صرف وسداد جماعي لشهر {selectedMonth}</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Quick Metrics Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {(() => {
+              const activeEmps = employees.filter(e => e.status === "على رأس العمل");
+              let totalBasicAllow = 0;
+              let totalJour = 0;
+              let totalDeds = 0;
+              let totalPaidNet = 0;
+
+              activeEmps.forEach(emp => {
+                if (emp.payment_method === "monthly") {
+                  totalBasicAllow += (emp.basic_salary || 0) + (emp.allowances || 0);
+                }
+                const empJ = journals.filter(j => j.employee_id === emp.id && j.date.startsWith(selectedMonth) && j.status === "معتمدة");
+                totalJour += empJ.reduce((s, j) => s + j.total_entitled, 0);
+
+                const empD = deductions.filter(d => d.employee_id === emp.id && d.month_applied === selectedMonth && d.status === "معتمد");
+                totalDeds += empD.reduce((s, d) => s + d.amount, 0);
+              });
+
+              const monthPayrolls = payrolls.filter(p => p.month === selectedMonth && p.status === "مدفوع بالكامل");
+              totalPaidNet = monthPayrolls.reduce((s, p) => s + p.net_salary, 0);
+              const grossEntitled = totalBasicAllow + totalJour;
+              const netPayableEstimated = grossEntitled - totalDeds;
+
+              return (
+                <>
+                  <div className="bg-slate-900/60 p-4 rounded-2xl border border-white/5 space-y-1">
+                    <span className="text-[10px] text-slate-400 block font-bold">إجمالي المستحقات (شهري + يوميات)</span>
+                    <div className="text-lg font-black text-amber-400 font-mono">{(grossEntitled || 0).toLocaleString()} <span className="text-xs">ريال</span></div>
+                  </div>
+                  <div className="bg-slate-900/60 p-4 rounded-2xl border border-white/5 space-y-1">
+                    <span className="text-[10px] text-slate-400 block font-bold">إجمالي الخصومات والسلف المستقطعة</span>
+                    <div className="text-lg font-black text-rose-400 font-mono">{(totalDeds || 0).toLocaleString()} <span className="text-xs">ريال</span></div>
+                  </div>
+                  <div className="bg-slate-900/60 p-4 rounded-2xl border border-white/5 space-y-1">
+                    <span className="text-[10px] text-slate-400 block font-bold">صافي الرواتب المسددة بالسندات</span>
+                    <div className="text-lg font-black text-emerald-400 font-mono">{(totalPaidNet || 0).toLocaleString()} <span className="text-xs">ريال</span></div>
+                  </div>
+                  <div className="bg-slate-900/60 p-4 rounded-2xl border border-white/5 space-y-1">
+                    <span className="text-[10px] text-slate-400 block font-bold">المتبقي الصافي بانتظار الصرف</span>
+                    <div className="text-lg font-black text-sky-400 font-mono">{(Math.max(0, netPayableEstimated - totalPaidNet) || 0).toLocaleString()} <span className="text-xs">ريال</span></div>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+
+          {/* Payroll Main Matrix Table */}
+          <div className="bg-slate-950/40 border border-white/5 rounded-2xl overflow-hidden">
+            <div className="p-4 border-b border-white/5 flex justify-between items-center bg-white/5">
+              <h4 className="text-xs font-black text-slate-200">كشف سداد رواتب الموظفين لشهر: {selectedMonth}</h4>
+              <span className="text-[10px] text-slate-400 font-mono">عدد الموظفين: {employees.length}</span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-right text-xs">
+                <thead>
+                  <tr className="bg-white/5 text-slate-300 font-black border-b border-white/5">
+                    <th className="p-4">الموظف</th>
+                    <th className="p-4">نظام الأجر</th>
+                    <th className="p-4">الأساسي + البدلات</th>
+                    <th className="p-4">استحقاق اليوميات</th>
+                    <th className="p-4">الخصميات والجزاءات</th>
+                    <th className="p-4">أقساط السلف</th>
+                    <th className="p-4">صافي الراتب المستحق</th>
+                    <th className="p-4">حالة السداد</th>
+                    <th className="p-4 text-left">إجراء السداد والصرف</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {employees.map((emp) => {
+                    const empJournals = journals.filter(j => j.employee_id === emp.id && j.date.startsWith(selectedMonth) && j.status === "معتمدة");
+                    const journalsTotal = empJournals.reduce((s, j) => s + j.total_entitled, 0);
+
+                    const empDeds = deductions.filter(d => d.employee_id === emp.id && d.month_applied === selectedMonth && d.status === "معتمد");
+                    const deductionsTotal = empDeds.filter(d => d.type !== "سلفة").reduce((s, d) => s + d.amount, 0);
+                    const advancesTotal = empDeds.filter(d => d.type === "سلفة").reduce((s, d) => s + d.amount, 0);
+
+                    const basicSalary = emp.payment_method === "monthly" ? (emp.basic_salary || 0) : 0;
+                    const allowances = emp.payment_method === "monthly" ? (emp.allowances || 0) : 0;
+
+                    const gross = basicSalary + allowances + journalsTotal;
+                    const netSalary = gross - (deductionsTotal + advancesTotal);
+
+                    const paidPayroll = payrolls.find(p => p.employee_id === emp.id && p.month === selectedMonth && p.status === "مدفوع بالكامل");
+
+                    return (
+                      <tr key={emp.id} className="border-b border-white/5 hover:bg-white/5 transition-all">
+                        <td className="p-4">
+                          <div className="font-black text-slate-100">{emp.name}</div>
+                          <div className="text-[9px] text-slate-500 font-mono mt-0.5">{emp.project || "عام"} | {emp.job_title}</div>
+                        </td>
+                        <td className="p-4">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${emp.payment_method === "monthly" ? "bg-sky-500/10 text-sky-400" : "bg-amber-500/10 text-amber-400"}`}>
+                            {emp.payment_method === "monthly" ? "راتب شهري" : `يوميات (${emp.daily_rate} ريال)`}
+                          </span>
+                        </td>
+                        <td className="p-4 font-mono text-slate-300">
+                          {emp.payment_method === "monthly" ? `${((basicSalary || 0) + (allowances || 0)).toLocaleString()} ريال` : "-"}
+                        </td>
+                        <td className="p-4 font-mono text-amber-400 font-bold">
+                          {journalsTotal > 0 ? `${(journalsTotal || 0).toLocaleString()} ريال` : "-"}
+                        </td>
+                        <td className="p-4 font-mono text-rose-400">
+                          {deductionsTotal > 0 ? `${(deductionsTotal || 0).toLocaleString()} ريال` : "-"}
+                        </td>
+                        <td className="p-4 font-mono text-purple-400">
+                          {advancesTotal > 0 ? `${(advancesTotal || 0).toLocaleString()} ريال` : "-"}
+                        </td>
+                        <td className="p-4 font-mono text-emerald-400 font-black text-sm">
+                          {(netSalary || 0).toLocaleString()} ريال
+                        </td>
+                        <td className="p-4">
+                          {paidPayroll ? (
+                            <div className="space-y-0.5">
+                              <span className="px-2.5 py-1 rounded-full text-[10px] font-black bg-emerald-500/15 text-emerald-400 flex items-center gap-1 w-fit">
+                                <CheckCircle2 className="w-3 h-3" />
+                                <span>مدفوع بالكامل</span>
+                              </span>
+                              <div className="text-[9px] text-amber-400 font-mono font-bold">سند: {paidPayroll.voucher_no}</div>
+                            </div>
+                          ) : (
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-black bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                              بانتظار الصرف
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-4 text-left">
+                          {paidPayroll ? (
+                            <div className="flex items-center justify-end gap-2">
+                              <span className="text-[10px] text-slate-500 font-mono">تم الصرف: {paidPayroll.paid_at?.slice(0, 10)}</span>
+                              <button
+                                onClick={() => handleDeletePayroll(paidPayroll.id)}
+                                title="إلغاء وحذف مسير السداد"
+                                className="p-1.5 bg-white/5 hover:bg-rose-500/20 text-rose-400 rounded-lg border border-white/5 transition-all"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                setPaySalaryForm({
+                                  employee: emp,
+                                  basicSalary,
+                                  allowances,
+                                  journalsTotal,
+                                  deductionsTotal,
+                                  advancesTotal,
+                                  netSalary,
+                                  treasury: "خزنة التحصيل",
+                                  method: "نقداً",
+                                  notes: ""
+                                });
+                              }}
+                              className="bg-amber-500 hover:bg-amber-600 text-slate-950 px-3 py-1.5 rounded-xl text-[11px] font-black shadow-lg transition-all"
+                            >
+                              صرف وسداد الراتب
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
@@ -1049,7 +1609,7 @@ export const HRModule: React.FC<HRProps> = ({
                     <td className="p-4 font-mono">{cust.serial_no || "-"}</td>
                     <td className="p-4 font-mono">{cust.delivery_date}</td>
                     <td className="p-4">{cust.delivered_by || "الإدارة"}</td>
-                    <td className="p-4 font-mono text-slate-400">{cust.value.toLocaleString()} ريال</td>
+                    <td className="p-4 font-mono text-slate-400">{(cust.value || 0).toLocaleString()} ريال</td>
                     <td className="p-4">
                       <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
                         cust.status === "مستلمة" ? "bg-amber-500/15 text-amber-400 animate-pulse" :
@@ -1061,32 +1621,49 @@ export const HRModule: React.FC<HRProps> = ({
                       </span>
                     </td>
                     <td className="p-4 text-left">
-                      {cust.status === "مستلمة" && can("hr_custody_return") ? (
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            onClick={() => {
-                              const cond = prompt("يرجى إدخال حالة العهدة عند الاسترجاع:");
-                              if (cond !== null) handleReturnCustody(cust.id, cond);
-                            }}
-                            className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 px-3 py-1.5 rounded-lg border border-emerald-500/20 text-[10px]"
-                          >
-                            استرجاع العهدة
-                          </button>
-                          <button
-                            onClick={async () => {
-                              if (confirm("هل تريد اعتماد العهدة كـ تالفة/مفقودة من قبل صاحب الصلاحية؟")) {
-                                await sb.from("hr_custody").update({ status: "تالفة" }).eq("id", cust.id);
-                                loadAllData();
-                              }
-                            }}
-                            className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 px-3 py-1.5 rounded-lg border border-rose-500/20 text-[10px]"
-                          >
-                            تالفة/مفقودة
-                          </button>
-                        </div>
-                      ) : (
-                        <span className="text-[10px] text-slate-500 font-mono">تاريخ الإرجاع: {cust.return_date || "-"}</span>
-                      )}
+                      <div className="flex items-center justify-end gap-1.5">
+                        {cust.status === "مستلمة" && can("hr_custody_return") && (
+                          <>
+                            <button
+                              onClick={() => {
+                                const cond = prompt("يرجى إدخال حالة العهدة عند الاسترجاع:");
+                                if (cond !== null) handleReturnCustody(cust.id, cond);
+                              }}
+                              className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 px-2.5 py-1.5 rounded-lg border border-emerald-500/20 text-[10px]"
+                            >
+                              استرجاع
+                            </button>
+                            <button
+                              onClick={async () => {
+                                if (confirm("هل تريد اعتماد العهدة كـ تالفة/مفقودة من قبل صاحب الصلاحية؟")) {
+                                  await sb.from("hr_custody").update({ status: "تالفة" }).eq("id", cust.id);
+                                  loadAllData();
+                                }
+                              }}
+                              className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 px-2.5 py-1.5 rounded-lg border border-rose-500/20 text-[10px]"
+                            >
+                              تالفة
+                            </button>
+                          </>
+                        )}
+                        {cust.status !== "مستلمة" && (
+                          <span className="text-[10px] text-slate-500 font-mono pl-1">مُرجعة ({cust.return_date || "-"})</span>
+                        )}
+                        <button
+                          onClick={() => setCustodyForm(cust)}
+                          title="تعديل العهدة"
+                          className="p-1.5 bg-white/5 hover:bg-amber-500/20 text-amber-400 rounded-lg border border-white/5 transition-all"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteCustody(cust.id)}
+                          title="حذف العهدة"
+                          className="p-1.5 bg-white/5 hover:bg-rose-500/20 text-rose-400 rounded-lg border border-white/5 transition-all"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -1104,7 +1681,16 @@ export const HRModule: React.FC<HRProps> = ({
               <Clock className="w-5 h-5 text-amber-500" />
               <span>يوميات وساعات عمل الموظفين والعمال</span>
             </h3>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {can("hr_journals_pay") && journals.some(j => j.status === "معتمدة") && (
+                <button
+                  onClick={handleBatchPayJournals}
+                  className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs px-4 py-2.5 rounded-xl flex items-center gap-2 shadow-lg transition-all"
+                >
+                  <Coins className="w-4 h-4" />
+                  <span>صرف وسداد جميع اليوميات المعتمدة</span>
+                </button>
+              )}
               {can("hr_journals_add") && (
                 <>
                   <button
@@ -1121,9 +1707,9 @@ export const HRModule: React.FC<HRProps> = ({
                   </button>
                   <button
                     onClick={() => setJournalForm({})}
-                    className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs px-4 py-2.5 rounded-xl flex items-center gap-2 shadow-lg transition-all"
+                    className="bg-slate-800 hover:bg-slate-700 text-white font-black text-xs px-4 py-2.5 rounded-xl flex items-center gap-2 shadow-lg transition-all"
                   >
-                    <Plus className="w-4 h-4" />
+                    <Plus className="w-4 h-4 text-amber-400" />
                     <span>تسجيل يومية منفردة</span>
                   </button>
                 </>
@@ -1145,7 +1731,7 @@ export const HRModule: React.FC<HRProps> = ({
                   <th className="p-4">طريقة الصرف</th>
                   <th className="p-4">سند الصرف</th>
                   <th className="p-4">الحالة</th>
-                  <th className="p-4 text-left">الصرف والاعتماد</th>
+                  <th className="p-4 text-left">الإجراءات والصرف</th>
                 </tr>
               </thead>
               <tbody>
@@ -1158,8 +1744,8 @@ export const HRModule: React.FC<HRProps> = ({
                       {jour.work_days > 0 ? `${jour.work_days} يوم` : `${jour.work_hours} ساعة`}
                     </td>
                     <td className="p-4 font-mono">{jour.overtime_hours || "-"}</td>
-                    <td className="p-4 font-black text-amber-400 font-mono">{jour.total_entitled.toLocaleString()} ريال</td>
-                    <td className="p-4 font-mono text-emerald-400">{jour.paid_amount.toLocaleString()} ريال</td>
+                    <td className="p-4 font-black text-amber-400 font-mono">{(jour.total_entitled || 0).toLocaleString()} ريال</td>
+                    <td className="p-4 font-mono text-emerald-400">{(jour.paid_amount || 0).toLocaleString()} ريال</td>
                     <td className="p-4 text-[10px] text-slate-400">{jour.payment_method || "-"}</td>
                     <td className="p-4 font-mono text-[10px] text-amber-500 font-bold">{jour.voucher_no || "-"}</td>
                     <td className="p-4">
@@ -1171,30 +1757,46 @@ export const HRModule: React.FC<HRProps> = ({
                         {jour.status}
                       </span>
                     </td>
-                    <td className="p-4 text-left space-x-1 space-x-reverse">
-                      {jour.status === "مسودة" && can("hr_journals_approve") && (
+                    <td className="p-4 text-left">
+                      <div className="flex items-center justify-end gap-1.5">
+                        {jour.status === "مسودة" && can("hr_journals_approve") && (
+                          <button
+                            onClick={async () => {
+                              await sb.from("hr_journals").update({ status: "معتمدة" }).eq("id", jour.id);
+                              loadAllData();
+                              showToast("تم اعتماد اليومية بنجاح");
+                            }}
+                            className="bg-amber-500 text-slate-950 px-2.5 py-1.5 rounded-lg text-[10px] font-black"
+                          >
+                            اعتماد
+                          </button>
+                        )}
+                        {jour.status === "معتمدة" && can("hr_journals_pay") && (
+                          <button
+                            onClick={() => {
+                              const tName = prompt("يرجى اختيار اسم الخزنة للصرف الفعلي (مثال: خزنة الشركة، خزنة التحصيل):");
+                              if (tName) handlePayJournal(jour, tName);
+                            }}
+                            className="bg-emerald-500 text-slate-950 px-2.5 py-1.5 rounded-lg text-[10px] font-black"
+                          >
+                            صرف مالي
+                          </button>
+                        )}
                         <button
-                          onClick={async () => {
-                            await sb.from("hr_journals").update({ status: "معتمدة" }).eq("id", jour.id);
-                            loadAllData();
-                            showToast("تم اعتماد اليومية بنجاح");
-                          }}
-                          className="bg-amber-500 text-slate-950 px-2.5 py-1.5 rounded-lg text-[10px] font-black"
+                          onClick={() => setJournalForm(jour)}
+                          title="تعديل اليومية"
+                          className="p-1.5 bg-white/5 hover:bg-amber-500/20 text-amber-400 rounded-lg border border-white/5 transition-all"
                         >
-                          اعتماد
+                          <Edit2 className="w-3.5 h-3.5" />
                         </button>
-                      )}
-                      {jour.status === "معتمدة" && can("hr_journals_pay") && (
                         <button
-                          onClick={() => {
-                            const tName = prompt("يرجى اختيار اسم الخزنة للصرف الفعلي (مثال: خزنة الشركة، خزنة التحصيل):");
-                            if (tName) handlePayJournal(jour, tName);
-                          }}
-                          className="bg-emerald-500 text-slate-950 px-2.5 py-1.5 rounded-lg text-[10px] font-black"
+                          onClick={() => handleDeleteJournal(jour.id)}
+                          title="حذف اليومية"
+                          className="p-1.5 bg-white/5 hover:bg-rose-500/20 text-rose-400 rounded-lg border border-white/5 transition-all"
                         >
-                          صرف مالي
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
-                      )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -1204,23 +1806,61 @@ export const HRModule: React.FC<HRProps> = ({
         </div>
       )}
 
-      {/* Fifth Tab: Deductions */}
+      {/* Fifth Tab: Deductions & Loans */}
       {activeTab === "deductions" && (
         <div className="space-y-6">
-          <div className="flex justify-between items-center">
-            <h3 className="text-md font-black text-slate-100 flex items-center gap-2">
-              <TrendingDown className="w-5 h-5 text-rose-400" />
-              <span>الخصميات والجزاءات الإدارية والسلف</span>
-            </h3>
-            {can("hr_deductions_add") && (
-              <button
-                onClick={() => setDeductionForm({})}
-                className="bg-rose-500 hover:bg-rose-600 text-white font-black text-xs px-4 py-2.5 rounded-xl flex items-center gap-2 shadow-lg transition-all"
-              >
-                <Plus className="w-4 h-4" />
-                <span>إضافة خصم أو جزاء جديد</span>
-              </button>
-            )}
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900/40 p-4 rounded-2xl border border-white/5">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-400">
+                <TrendingDown className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-md font-black text-slate-100">سجل الخصميات والجزاءات والسلف المالية</h3>
+                <p className="text-xs text-slate-400">إدارة خصومات الغياب والتأخير والسلف المالية وصرفها وتطبيقها على مسير الرواتب</p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex bg-slate-950 p-1 rounded-xl border border-white/10 text-xs">
+                <button
+                  onClick={() => setDeductionCategoryFilter("all")}
+                  className={`px-3 py-1.5 rounded-lg font-black transition-all ${deductionCategoryFilter === "all" ? "bg-amber-500 text-slate-950 shadow" : "text-slate-400 hover:text-white"}`}
+                >
+                  عرض الكل ({deductions.length})
+                </button>
+                <button
+                  onClick={() => setDeductionCategoryFilter("deduction")}
+                  className={`px-3 py-1.5 rounded-lg font-black transition-all ${deductionCategoryFilter === "deduction" ? "bg-amber-500 text-slate-950 shadow" : "text-slate-400 hover:text-white"}`}
+                >
+                  الخصميات والجزاءات ({deductions.filter(d => d.type !== "سلفة").length})
+                </button>
+                <button
+                  onClick={() => setDeductionCategoryFilter("loan")}
+                  className={`px-3 py-1.5 rounded-lg font-black transition-all ${deductionCategoryFilter === "loan" ? "bg-amber-500 text-slate-950 shadow" : "text-slate-400 hover:text-white"}`}
+                >
+                  السلف المالية ({deductions.filter(d => d.type === "سلفة").length})
+                </button>
+              </div>
+
+              {can("hr_deductions_add") && (
+                <button
+                  onClick={() => setDeductionForm({ type: "سلفة" })}
+                  className="bg-purple-600 hover:bg-purple-700 text-white font-black text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-lg transition-all"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>استخراج سلفة مالية</span>
+                </button>
+              )}
+              {can("hr_deductions_add") && (
+                <button
+                  onClick={() => setDeductionForm({ type: "غياب" })}
+                  className="bg-rose-500 hover:bg-rose-600 text-white font-black text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-lg transition-all"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>تسجيل خصم / جزاء</span>
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="bg-slate-950/40 border border-white/5 rounded-2xl overflow-hidden">
@@ -1228,22 +1868,28 @@ export const HRModule: React.FC<HRProps> = ({
               <thead>
                 <tr className="bg-white/5 text-slate-300 font-black border-b border-white/5">
                   <th className="p-4">اسم الموظف</th>
-                  <th className="p-4">نوع الخصم</th>
+                  <th className="p-4">نوع العملية</th>
                   <th className="p-4">التاريخ</th>
                   <th className="p-4">المبلغ</th>
                   <th className="p-4">الشهر المطبق</th>
                   <th className="p-4">السبب والبيان</th>
                   <th className="p-4">الحالة</th>
-                  <th className="p-4 text-left">الاعتماد</th>
+                  <th className="p-4 text-left">الاعتماد والخيارات</th>
                 </tr>
               </thead>
               <tbody>
-                {deductions.map((ded) => (
+                {deductions
+                  .filter(d => {
+                    if (deductionCategoryFilter === "deduction") return d.type !== "سلفة";
+                    if (deductionCategoryFilter === "loan") return d.type === "سلفة";
+                    return true;
+                  })
+                  .map((ded) => (
                   <tr key={ded.id} className="border-b border-white/5 hover:bg-white/5 transition-all">
                     <td className="p-4 font-black text-slate-100">{ded.employee_name}</td>
                     <td className="p-4 text-amber-300">{ded.type}</td>
                     <td className="p-4 font-mono">{ded.date}</td>
-                    <td className="p-4 font-mono text-rose-400 font-black">{ded.amount.toLocaleString()} ريال</td>
+                    <td className="p-4 font-mono text-rose-400 font-black">{(ded.amount || 0).toLocaleString()} ريال</td>
                     <td className="p-4 font-mono">{ded.month_applied}</td>
                     <td className="p-4 text-slate-400">{ded.reason}</td>
                     <td className="p-4">
@@ -1256,14 +1902,30 @@ export const HRModule: React.FC<HRProps> = ({
                       </span>
                     </td>
                     <td className="p-4 text-left">
-                      {ded.status === "مسودة" && can("hr_deductions_approve") && (
+                      <div className="flex items-center justify-end gap-1.5">
+                        {ded.status === "مسودة" && can("hr_deductions_approve") && (
+                          <button
+                            onClick={() => handleApproveDeduction(ded.id)}
+                            className="bg-emerald-500 text-slate-950 px-2.5 py-1.5 rounded-lg text-[10px] font-black"
+                          >
+                            اعتماد
+                          </button>
+                        )}
                         <button
-                          onClick={() => handleApproveDeduction(ded.id)}
-                          className="bg-emerald-500 text-slate-950 px-3 py-1.5 rounded-lg text-[10px] font-black"
+                          onClick={() => setDeductionForm(ded)}
+                          title="تعديل"
+                          className="p-1.5 bg-white/5 hover:bg-amber-500/20 text-amber-400 rounded-lg border border-white/5 transition-all"
                         >
-                          اعتماد الخصم
+                          <Edit2 className="w-3.5 h-3.5" />
                         </button>
-                      )}
+                        <button
+                          onClick={() => handleDeleteDeduction(ded.id)}
+                          title="حذف"
+                          className="p-1.5 bg-white/5 hover:bg-rose-500/20 text-rose-400 rounded-lg border border-white/5 transition-all"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -1345,19 +2007,19 @@ export const HRModule: React.FC<HRProps> = ({
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                   <div className="bg-white/5 p-4 rounded-xl border border-white/5">
                     <span className="block text-[10px] text-slate-400">الراتب الأساسي + البدلات</span>
-                    <b className="text-base text-white font-mono">{(leg.employee.basic_salary + leg.employee.allowances).toLocaleString()} ريال</b>
+                    <b className="text-base text-white font-mono">{((leg.employee?.basic_salary || 0) + (leg.employee?.allowances || 0)).toLocaleString()} ريال</b>
                   </div>
                   <div className="bg-white/5 p-4 rounded-xl border border-white/5">
                     <span className="block text-[10px] text-slate-400">إجمالي مستحقات اليوميات</span>
-                    <b className="text-base text-amber-400 font-mono">{leg.totalJournalsEarned.toLocaleString()} ريال</b>
+                    <b className="text-base text-amber-400 font-mono">{(leg.totalJournalsEarned || 0).toLocaleString()} ريال</b>
                   </div>
                   <div className="bg-white/5 p-4 rounded-xl border border-white/5">
                     <span className="block text-[10px] text-slate-400">إجمالي الخصميات المعتمدة</span>
-                    <b className="text-base text-rose-400 font-mono">{leg.totalDeductions.toLocaleString()} ريال</b>
+                    <b className="text-base text-rose-400 font-mono">{(leg.totalDeductions || 0).toLocaleString()} ريال</b>
                   </div>
                   <div className="bg-emerald-500/10 p-4 rounded-xl border border-emerald-500/20">
                     <span className="block text-[10px] text-emerald-400">صافي المستحق (الرصيد المتبقي)</span>
-                    <b className="text-base text-emerald-300 font-mono">{leg.finalBalance.toLocaleString()} ريال</b>
+                    <b className="text-base text-emerald-300 font-mono">{(leg.finalBalance || 0).toLocaleString()} ريال</b>
                   </div>
                 </div>
 
@@ -1373,7 +2035,7 @@ export const HRModule: React.FC<HRProps> = ({
                         {leg.empCustodies.filter(c => c.status === "مستلمة").map(c => (
                           <li key={c.id} className="flex justify-between">
                             <span>{c.type} ({c.description})</span>
-                            <span className="text-amber-400 font-mono">{c.value.toLocaleString()} ريال</span>
+                            <span className="text-amber-400 font-mono">{(c.value || 0).toLocaleString()} ريال</span>
                           </li>
                         ))}
                       </ul>
@@ -1453,7 +2115,7 @@ export const HRModule: React.FC<HRProps> = ({
                   return (
                     <div key={proj.id} className="flex justify-between items-center text-xs">
                       <span className="text-slate-400 truncate max-w-40">{proj.name}</span>
-                      <b className="font-mono text-amber-300">{cost.toLocaleString()} ريال</b>
+                      <b className="font-mono text-amber-300">{(cost || 0).toLocaleString()} ريال</b>
                     </div>
                   );
                 })}
@@ -1531,11 +2193,11 @@ export const HRModule: React.FC<HRProps> = ({
                   </div>
                   <div>
                     <span className="block text-slate-500 text-[10px]">الراتب الأساسي</span>
-                    <b className="text-amber-300 font-mono">{emp.basic_salary.toLocaleString()} ريال</b>
+                    <b className="text-amber-300 font-mono">{(emp.basic_salary || 0).toLocaleString()} ريال</b>
                   </div>
                   <div>
                     <span className="block text-slate-500 text-[10px]">البدلات الإجمالية</span>
-                    <b className="text-amber-300 font-mono">{emp.allowances.toLocaleString()} ريال</b>
+                    <b className="text-amber-300 font-mono">{(emp.allowances || 0).toLocaleString()} ريال</b>
                   </div>
                   <div>
                     <span className="block text-slate-500 text-[10px]">رقم الحساب البنكي</span>
@@ -1613,7 +2275,7 @@ export const HRModule: React.FC<HRProps> = ({
                 <p>يوافق الطرف الثاني على العمل بمسمى وظيفي <b>{employees.find(e => e.id === printContract.employee_id)?.job_title || ""}</b>، وتحت إدارة وإشراف الطرف الأول في فرع/مشروع {printContract.project_branch || "المشروع الجاري"}.</p>
 
                 <h3 className="font-black border-b border-slate-300 pb-1">البند الثاني: الراتب والبدلات المالية</h3>
-                <p>يستحق الطرف الثاني لقاء عمله راتباً أساسياً قدره <b>{printContract.basic_salary.toLocaleString()} ريال سعودي</b> شهرياً، بالإضافة لبدل سكن <b>{printContract.housing_allowance.toLocaleString()} ريال</b>، وبدل نقل <b>{printContract.transport_allowance.toLocaleString()} ريال</b>.</p>
+                <p>يستحق الطرف الثاني لقاء عمله راتباً أساسياً قدره <b>{(printContract.basic_salary || 0).toLocaleString()} ريال سعودي</b> شهرياً، بالإضافة لبدل سكن <b>{(printContract.housing_allowance || 0).toLocaleString()} ريال</b>، وبدل نقل <b>{(printContract.transport_allowance || 0).toLocaleString()} ريال</b>.</p>
 
                 <h3 className="font-black border-b border-slate-300 pb-1">البند الثالث: شروط وإحكام خاصة</h3>
                 <p className="whitespace-pre-line">{printContract.conditions || "يلتزم الموظف بلوائح العمل والتعليمات الداخلية للشركة والحفاظ على الممتلكات والعهد."}</p>
@@ -2362,7 +3024,7 @@ export const HRModule: React.FC<HRProps> = ({
                 </div>
               </div>
               <div className="text-xs text-amber-400 font-bold bg-white/5 p-3 rounded-xl border border-white/5 text-center">
-                إجمالي الاستحقاق التقريبي: {calculateJournalTotal(journalForm).toLocaleString()} ريال
+                إجمالي الاستحقاق التقريبي: {(calculateJournalTotal(journalForm) || 0).toLocaleString()} ريال
               </div>
             </div>
 
@@ -2385,11 +3047,124 @@ export const HRModule: React.FC<HRProps> = ({
         </div>
       )}
 
+      {/* Single Employee Salary Payment Modal */}
+      {paySalaryForm && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50">
+          <form onSubmit={handlePaySalary} className="bg-slate-900 border border-amber-500/20 rounded-2xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto space-y-4 text-right shadow-2xl">
+            <div className="flex items-center justify-between border-b border-white/5 pb-3">
+              <h3 className="text-md font-black text-amber-400 flex items-center gap-2">
+                <Coins className="w-5 h-5 text-amber-500" />
+                <span>صرف وتسديد راتب الموظف</span>
+              </h3>
+              <span className="text-xs text-slate-400 font-mono">شهر: {selectedMonth}</span>
+            </div>
+
+            <div className="bg-slate-950/60 p-4 rounded-xl border border-white/5 space-y-2">
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-slate-400">اسم الموظف:</span>
+                <span className="font-black text-white">{paySalaryForm.employee.name}</span>
+              </div>
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-slate-400">الفرع / المشروع:</span>
+                <span className="font-bold text-amber-400">{paySalaryForm.employee.project || "عام"}</span>
+              </div>
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-slate-400">طريقة الأجر:</span>
+                <span className="font-bold text-sky-400">{paySalaryForm.employee.payment_method === "monthly" ? "راتب شهري" : `يوميات (${paySalaryForm.employee.daily_rate} ريال)`}</span>
+              </div>
+            </div>
+
+            {/* Calculations Breakdown */}
+            <div className="space-y-1 bg-white/5 p-3 rounded-xl text-xs font-mono">
+              <div className="flex justify-between py-1 border-b border-white/5 text-slate-300">
+                <span>الراتب الأساسي + البدلات:</span>
+                <span>{((paySalaryForm?.basicSalary || 0) + (paySalaryForm?.allowances || 0)).toLocaleString()} ريال</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-white/5 text-amber-300">
+                <span>مستحق اليوميات المعتمدة:</span>
+                <span>+{(paySalaryForm?.journalsTotal || 0).toLocaleString()} ريال</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-white/5 text-rose-400">
+                <span>الخصميات والجزاءات:</span>
+                <span>-{(paySalaryForm?.deductionsTotal || 0).toLocaleString()} ريال</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-white/5 text-purple-400">
+                <span>أقساط السلف المستقطعة:</span>
+                <span>-{(paySalaryForm?.advancesTotal || 0).toLocaleString()} ريال</span>
+              </div>
+              <div className="flex justify-between py-2 font-black text-emerald-400 text-sm">
+                <span>صافي الراتب المستحق للصرف:</span>
+                <span>{(paySalaryForm?.netSalary || 0).toLocaleString()} ريال</span>
+              </div>
+            </div>
+
+            <div className="space-y-3 pt-2">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] text-amber-300 font-bold mb-1">اسم الخزنة (سند صرف) *</label>
+                  <select
+                    value={paySalaryForm.treasury}
+                    onChange={(e) => setPaySalaryForm({ ...paySalaryForm, treasury: e.target.value })}
+                    className="w-full bg-slate-950 border border-amber-500/30 px-3 py-2 rounded-xl text-xs text-white outline-none"
+                  >
+                    <option value="خزنة التحصيل">خزنة التحصيل الرئيسية</option>
+                    <option value="خزنة الشركة الرئيسية">خزنة الشركة الرئيسية</option>
+                    <option value="الخزنة البنكية">الخزنة البنكية / الحساب</option>
+                    <option value="خزنة العهدة">خزنة عهدة المشاريع</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] text-slate-400 mb-1">طريقة الصرف *</label>
+                  <select
+                    value={paySalaryForm.method}
+                    onChange={(e) => setPaySalaryForm({ ...paySalaryForm, method: e.target.value })}
+                    className="w-full bg-slate-950 border border-white/5 px-3 py-2 rounded-xl text-xs text-white outline-none"
+                  >
+                    <option value="نقداً">نقداً (كاش)</option>
+                    <option value="تحويل بنكي">تحويل بنكي مباشر</option>
+                    <option value="شيك">شيك مصرفي</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-slate-400 mb-1">ملاحظات أو رقم السند الخارجي</label>
+                <input
+                  type="text"
+                  placeholder="ملاحظات إضافية على عملية الصرف..."
+                  value={paySalaryForm.notes}
+                  onChange={(e) => setPaySalaryForm({ ...paySalaryForm, notes: e.target.value })}
+                  className="w-full bg-slate-950 border border-white/5 px-3 py-2 rounded-xl text-xs text-white outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4 border-t border-white/5">
+              <button
+                type="submit"
+                className="bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black text-xs px-5 py-2.5 rounded-xl shadow-lg transition-all"
+              >
+                تأكيد واعتماد سداد الراتب
+              </button>
+              <button
+                type="button"
+                onClick={() => setPaySalaryForm(null)}
+                className="bg-white/5 border border-white/5 text-slate-300 px-5 py-2.5 rounded-xl text-xs font-black"
+              >
+                إلغاء
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {/* Deduction Add Modal */}
       {deductionForm && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50">
           <form onSubmit={handleSaveDeduction} className="bg-slate-900 border border-white/10 rounded-2xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto space-y-4 text-right">
-            <h3 className="text-md font-black text-rose-400">تسجيل خصم مالي / جزاء إداري</h3>
+            <h3 className="text-md font-black text-rose-400">
+              {deductionForm.type === "سلفة" ? "تسجيل / استخراج سلفة مالية" : "تسجيل خصم مالي / جزاء إداري"}
+            </h3>
 
             <div className="space-y-3">
               <div>
@@ -2408,16 +3183,16 @@ export const HRModule: React.FC<HRProps> = ({
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[10px] text-slate-400 mb-1">نوع الخصم والجزاء *</label>
+                  <label className="block text-[10px] text-slate-400 mb-1">نوع العملية *</label>
                   <select
                     required
                     value={deductionForm.type || "غياب"}
                     onChange={(e) => setDeductionForm({ ...deductionForm, type: e.target.value as any })}
                     className="w-full bg-slate-950 border border-white/5 px-4 py-2 rounded-xl text-xs text-white outline-none"
                   >
+                    <option value="سلفة">سلفة مالية / قسط سلفة</option>
                     <option value="غياب">غياب بدون عذر</option>
                     <option value="تأخير">تأخير ساعات عمل</option>
-                    <option value="سلفة">خصم قسط سلفة مالي</option>
                     <option value="مخالفة">مخالفة إدارية</option>
                     <option value="تلف عهدة">تلف عهدة</option>
                     <option value="فقد عهدة">فقد عهدة</option>
@@ -2428,11 +3203,11 @@ export const HRModule: React.FC<HRProps> = ({
                   </select>
                 </div>
                 <div>
-                  <label className="block text-[10px] text-slate-400 mb-1">تاريخ الخصم *</label>
+                  <label className="block text-[10px] text-slate-400 mb-1">تاريخ الخصم/السلفة *</label>
                   <input
                     type="date"
                     required
-                    value={deductionForm.date || ""}
+                    value={deductionForm.date || new Date().toISOString().split("T")[0]}
                     onChange={(e) => setDeductionForm({ ...deductionForm, date: e.target.value })}
                     className="w-full bg-slate-950 border border-white/5 px-4 py-2 rounded-xl text-xs text-white outline-none"
                   />
@@ -2440,7 +3215,7 @@ export const HRModule: React.FC<HRProps> = ({
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[10px] text-slate-400 mb-1">مبلغ الخصم الفعلي *</label>
+                  <label className="block text-[10px] text-slate-400 mb-1">مبلغ الخصم / السلفة *</label>
                   <input
                     type="number"
                     required
@@ -2450,24 +3225,56 @@ export const HRModule: React.FC<HRProps> = ({
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] text-slate-400 mb-1">الشهر المستهدف للتطبيق (مثال: 2026-07) *</label>
+                  <label className="block text-[10px] text-slate-400 mb-1">الشهر المستهدف للاستقطاع (مثال: 2026-07) *</label>
                   <input
                     type="month"
                     required
-                    value={deductionForm.month_applied || ""}
+                    value={deductionForm.month_applied || selectedMonth}
                     onChange={(e) => setDeductionForm({ ...deductionForm, month_applied: e.target.value })}
                     className="w-full bg-slate-950 border border-white/5 px-4 py-2 rounded-xl text-xs text-white outline-none font-mono"
                   />
                 </div>
               </div>
+
+              {/* Extra Loan Cash Disburse Toggle */}
+              {deductionForm.type === "سلفة" && (
+                <div className="p-3 bg-purple-500/10 border border-purple-500/20 rounded-xl space-y-2">
+                  <label className="flex items-center gap-2 text-xs font-bold text-purple-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={deductionDisburseCash}
+                      onChange={(e) => setDeductionDisburseCash(e.target.checked)}
+                      className="rounded border-purple-500 text-purple-500 focus:ring-0"
+                    />
+                    <span>صرف مبلغ السلفة نقداً فوراً للموظف من الخزنة (إنشاء سند صرف)</span>
+                  </label>
+
+                  {deductionDisburseCash && (
+                    <div className="pt-2">
+                      <label className="block text-[10px] text-slate-400 mb-1">اختيار الخزنة المراد الخصم منها *</label>
+                      <select
+                        value={deductionTreasury}
+                        onChange={(e) => setDeductionTreasury(e.target.value)}
+                        className="w-full bg-slate-950 border border-purple-500/30 px-3 py-1.5 rounded-xl text-xs text-white outline-none"
+                      >
+                        <option value="خزنة التحصيل">خزنة التحصيل الرئيسية</option>
+                        <option value="خزنة الشركة الرئيسية">خزنة الشركة الرئيسية</option>
+                        <option value="الخزنة البنكية">الخزنة البنكية</option>
+                        <option value="خزنة العهدة">خزنة عهدة المشاريع</option>
+                      </select>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div>
-                <label className="block text-[10px] text-slate-400 mb-1">سبب الخصم والبيان</label>
+                <label className="block text-[10px] text-slate-400 mb-1">سبب الخصم/السلفة والبيان</label>
                 <textarea
                   value={deductionForm.reason || ""}
                   onChange={(e) => setDeductionForm({ ...deductionForm, reason: e.target.value })}
                   className="w-full bg-slate-950 border border-white/5 px-4 py-2 rounded-xl text-xs text-white outline-none"
                   rows={2}
-                  placeholder="مثال: خصم لتكرار التأخر الصباحي بدون عذر..."
+                  placeholder="مثال: سلفة علاجية طارئة / خصم لتكرار التأخر الصباحي..."
                 />
               </div>
             </div>
@@ -2477,7 +3284,7 @@ export const HRModule: React.FC<HRProps> = ({
                 type="submit"
                 className="bg-rose-500 hover:bg-rose-600 text-white font-black text-xs px-5 py-2.5 rounded-xl shadow-lg"
               >
-                تسجيل الخصم
+                {deductionForm.type === "سلفة" ? "استخراج السلفة" : "تسجيل الخصم"}
               </button>
               <button
                 type="button"

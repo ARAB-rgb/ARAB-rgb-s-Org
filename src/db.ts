@@ -661,8 +661,15 @@ export function awGetSafeCapitalOutflow(notes: string, safeName: string): number
   return 0;
 }
 
+export function awExtractAttachment(notes: string): string | null {
+  const match = String(notes || "").match(/\[مرفق:\s*([^\]]+)\]/);
+  return match ? match[1].trim() : null;
+}
+
 export function awCleanNotes(notes: string): string {
   return String(notes || "")
+    .replace(/\s*\[المرفق:\s*[^\]]+\]\s*/g, " ")
+    .replace(/\s*\[مرفق:\s*[^\]]+\]\s*/g, " ")
     .replace(/\s*\[الإدارة:\s*[^\]]+\]\s*/g, " ")
     .replace(/\s*\[الخزنة:\s*[^\]]+\]\s*/g, " ")
     .replace(/\s*\[نوع_المستفيد:\s*[^\]]+\]\s*/g, " ")

@@ -14,7 +14,7 @@ import {
 
 import { User as AuthUser, Installment, Quote, Receipt, Payment, Expense, Project, Worker, DbSession, Company, Extract, AttendanceRecord } from "./types";
 import {
-  sb, logSession, getContractTiming, awExtractRegion, awCleanNotes,
+  sb, logSession, getContractTiming, awExtractRegion, awCleanNotes, awExtractAttachment,
   awBuildNotesWithRegion, awBuildNotesWithRegionAndTreasury, awBuildNotesWithRegionAndTreasuryAndCapital, awExtractTreasury, awExtractCapital, generateNextNo,
   awExtractCapitalSource, awExtractCapitalCompany, awExtractCapitalCollection,
   awExtractWorkerContract, awExtractWorkerLeaves, awBuildWorkerNotes, awCleanWorkerNotes,
@@ -36,6 +36,151 @@ import { SaasLandingPortal } from "./components/SaasLandingPortal";
 import { ProjectMap } from "./components/ProjectMap";
 import { HRModule } from "./components/HRModule";
 import { CompanyAssets } from "./components/CompanyAssets";
+
+const compressAndResizeImage = (file: File, maxWidth = 800, maxHeight = 800, quality = 0.7): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx?.drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL("image/jpeg", quality);
+        resolve(dataUrl);
+      };
+      img.onerror = (err) => reject(err);
+    };
+    reader.onerror = (err) => reject(err);
+  });
+};
+
+interface ImageUploaderProps {
+  value: string;
+  onChange: (val: string) => void;
+  label: string;
+  placeholder?: string;
+  id: string;
+}
+
+const ImageUploader: React.FC<ImageUploaderProps> = ({ value, onChange, label, placeholder = "قم بسحب وإفلات الصورة هنا، أو انقر للاختيار", id }) => {
+  const [isDragActive, setIsDragActive] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const processFile = async (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      setError("عذراً، يجب اختيار ملف صورة فقط (PNG, JPG, WebP...)");
+      return;
+    }
+    setError(null);
+    try {
+      const compressedBase64 = await compressAndResizeImage(file);
+      onChange(compressedBase64);
+    } catch (err) {
+      console.error("Image compression failed:", err);
+      setError("فشل تحميل الصورة وضغطها، يرجى المحاولة مرة أخرى.");
+    }
+  };
+
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setIsDragActive(true);
+    } else if (e.type === "dragleave") {
+      setIsDragActive(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragActive(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      processFile(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      processFile(e.target.files[0]);
+    }
+  };
+
+  return (
+    <div className="space-y-1">
+      <label className="text-[10px] text-slate-400 font-bold block">{label}</label>
+      
+      {value ? (
+        <div className="relative rounded-xl border border-slate-800 bg-slate-950/40 p-3 flex items-center justify-between gap-3 overflow-hidden">
+          <div className="flex items-center gap-3">
+            <img
+              src={value}
+              alt="Preview"
+              referrerPolicy="no-referrer"
+              className="w-12 h-12 object-contain bg-slate-900 rounded-lg border border-slate-800"
+            />
+            <div className="text-right">
+              <span className="text-[10px] text-slate-400 block font-sans">تم تحميل الصورة بنجاح</span>
+              <span className="text-[9px] text-emerald-400 font-mono block">حجم محسن تلقائياً</span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => onChange("")}
+            className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg text-[10px] font-bold transition-all shrink-0"
+          >
+            حذف 🗑️
+          </button>
+        </div>
+      ) : (
+        <div
+          onDragEnter={handleDrag}
+          onDragOver={handleDrag}
+          onDragLeave={handleDrag}
+          onDrop={handleDrop}
+          className={`relative rounded-xl border-2 border-dashed transition-all p-4 text-center cursor-pointer flex flex-col items-center justify-center gap-1.5 ${
+            isDragActive
+              ? "border-amber-500 bg-amber-500/5"
+              : "border-slate-800 bg-slate-950/20 hover:border-slate-700 hover:bg-slate-950/40"
+          }`}
+          onClick={() => document.getElementById(id)?.click()}
+        >
+          <input
+            id={id}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleFileChange}
+          />
+          <span className="text-lg">🖼️</span>
+          <p className="text-[10px] font-bold text-slate-300 leading-normal">{placeholder}</p>
+          <span className="text-[8px] text-slate-500 font-sans block">يدعم السحب والإفلات أو النقر (JPG, PNG, WebP)</span>
+          {error && <p className="text-[9px] text-rose-400 font-bold mt-1">{error}</p>}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const getStoredTreasuries = (companyId?: string | null, companiesList?: Company[]): string[] => {
   const defaults = ["خزنة الشركة", "خزنة التحصيل", "خزنة التحويل", "نقاط البيع", "خزنة المقاولات"];
@@ -444,6 +589,11 @@ export default function App() {
   const [cPhone, setCPhone] = useState("");
   const [cAddress, setCAddress] = useState("");
   const [cLogoUrl, setCLogoUrl] = useState("");
+
+  // Attachments base64 strings
+  const [rAttachment, setRAttachment] = useState("");
+  const [payAttachment, setPayAttachment] = useState("");
+  const [eAttachment, setEAttachment] = useState("");
 
   // 8. Extracts Forms
   const [exCompanyId, setExCompanyId] = useState("");
@@ -1885,6 +2035,11 @@ export default function App() {
     const x = installments.find((a) => a.id === id);
     if (!x) return;
 
+    const assocCompanyId = x.company_id || "arab_world";
+    const compLogo = localStorage.getItem(`aw_company_logo_${assocCompanyId}`) || "";
+    const compName = companies.find((c) => c.id === assocCompanyId)?.name || "شركة عرب وورلد";
+    const attachment = awExtractAttachment(x.notes || "");
+
     const clientContracts = installments.filter(
       (a) =>
         (a.identity && x.identity && a.identity === x.identity) ||
@@ -1972,8 +2127,10 @@ td{border:1px solid #d8dee9;padding:8px;text-align:center;font-weight:600}
 </div>
 <div class="page">
   <div class="head">
-    <div style="width:120px;text-align:center"><div class="logo"></div></div>
-    <div class="brand"><h1>شركة عرب وورلد</h1><p>نظام عقود وتقسيط وسندات</p></div>
+    <div style="width:120px;text-align:center;display:flex;align-items:center;justify-content:center">
+      ${compLogo ? `<img src="${compLogo}" style="max-height:65px;max-width:120px;object-fit:contain" referrerPolicy="no-referrer" />` : `<div class="logo"></div>`}
+    </div>
+    <div class="brand"><h1>${compName}</h1><p>نظام عقود وتقسيط وسندات</p></div>
     <div style="width:120px;font-size:11px;line-height:1.7"><b>التاريخ:</b><br>${new Date().toLocaleDateString("ar-SA")}<br><b>رقم العقد:</b><br>${x.no || ""}</div>
   </div>
   <div class="title">ورقة اتفاقية عقد مالي وسياق التزام</div>
@@ -2000,9 +2157,25 @@ td{border:1px solid #d8dee9;padding:8px;text-align:center;font-weight:600}
   </div>
   <h3>كافة العقود والاتفاقيات الجارية للطرف العميل</h3>
   <table><thead><tr><th>رقم العقد</th><th>مشروع العمل</th><th>موقع المشغل</th><th>المبلغ الكلي</th><th>المستلم</th><th>المتبقي المعلق</th><th>القسط اليومي</th><th>أيام الأقساط</th><th>الوضعية</th></tr></thead><tbody>${rowsHtml}</tbody></table>
-  <div class="signs"><div class="sign">بصمة وتوقيع العميل الضامن</div><div class="sign">اعتماد وختم شركة عرب وورلد للحلول العقارية</div></div>
+  <div class="signs"><div class="sign">بصمة وتوقيع العميل الضامن</div><div class="sign">اعتماد وختم ${compName}</div></div>
   <div class="footer">تم تحرير مستندات العقد ومراجعته ماليًا في فرع السداد وتوثيق التوقيعات إبراء للذمة</div>
 </div>
+${attachment ? `
+<div class="page" style="page-break-before: always; margin-top: 30px; text-align: center;">
+  <div class="head">
+    <div style="width:120px;text-align:center;display:flex;align-items:center;justify-content:center">
+      ${compLogo ? `<img src="${compLogo}" style="max-height:65px;max-width:120px;object-fit:contain" referrerPolicy="no-referrer" />` : `<div class="logo"></div>`}
+    </div>
+    <div class="brand"><h1>${compName}</h1><p>مرفقات ومستندات العقد الإثباتية</p></div>
+    <div style="width:120px;font-size:11px;line-height:1.7"><b>رقم العقد:</b><br>${x.no || ""}</div>
+  </div>
+  <div class="title" style="margin-bottom: 30px;">ملحق إثبات الوثيقة والمرفقات المرفوعة</div>
+  <div style="border: 2px dashed #cbd5e1; border-radius: 16px; padding: 15px; background: #fff; display: inline-block; max-width: 100%;">
+    <img src="${attachment}" style="max-width: 100%; max-height: 180mm; object-fit: contain; border-radius: 8px;" referrerPolicy="no-referrer" />
+  </div>
+  <div class="footer">المرفق الإلكتروني المعتمد لعقد التقسيط رقم ${x.no || ""}</div>
+</div>
+` : ""}
 </body>
 </html>`);
     w.document.close();
@@ -2011,6 +2184,11 @@ td{border:1px solid #d8dee9;padding:8px;text-align:center;font-weight:600}
   const onPrintReceipt = (id: string) => {
     const r = receipts.find((a) => a.id === id);
     if (!r) return;
+
+    const assocCompanyId = r.company_id || "arab_world";
+    const compLogo = localStorage.getItem(`aw_company_logo_${assocCompanyId}`) || "";
+    const compName = companies.find((c) => c.id === assocCompanyId)?.name || "شركة عرب وورلد";
+    const attachment = awExtractAttachment(r.notes || "");
 
     setPrintingReceiptId(id);
 
@@ -2064,8 +2242,10 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
 </div>
 <div class="page">
   <div class="head">
-    <div style="width:120px;text-align:center"><div class="logo"></div></div>
-    <div class="brand"><h1>شركة عرب وورلد</h1><p>سندات القبض المالي والحسابات الرقمية</p></div>
+    <div style="width:120px;text-align:center;display:flex;align-items:center;justify-content:center">
+      ${compLogo ? `<img src="${compLogo}" style="max-height:65px;max-width:120px;object-fit:contain" referrerPolicy="no-referrer" />` : `<div class="logo"></div>`}
+    </div>
+    <div class="brand"><h1>${compName}</h1><p>سندات القبض المالي والحسابات الرقمية</p></div>
     <div style="width:120px;font-size:11px;line-height:1.7"><b>رقم السند:</b><br>${r.no}<br><b>التاريخ:</b><br>${r.date}</div>
   </div>
   <div class="title">سند قبض مالي مقيد محاسبيًا</div>
@@ -2087,13 +2267,29 @@ body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
   </div>
   <div class="signs">
     <div class="sign">أمين صندوق التحصيل</div>
-    <div class="sign">الحسابات والتدقيق المالي</div>
+    <div class="sign">الحسابات والتدقيق المالي لدى ${compName}</div>
     <div class="sign">توقيع أو بصمة المسدد</div>
   </div>
   <div class="footer">
-    تم ترحيل وقيد سند القبض ماليًا في الدفتر اليومي العام وإصدار مقتضى إثبات السداد وتوثيق المستندات إلكترونيًا.
+    تم ترحيل وقيد سند القبض ماليًا في الدفتر اليومي العام وإصدار مقتضى إثبات السداد وتوثيق المستندات إلكترونيًا لدى ${compName}.
   </div>
 </div>
+${attachment ? `
+<div class="page" style="page-break-before: always; margin-top: 30px; text-align: center;">
+  <div class="head">
+    <div style="width:120px;text-align:center;display:flex;align-items:center;justify-content:center">
+      ${compLogo ? `<img src="${compLogo}" style="max-height:65px;max-width:120px;object-fit:contain" referrerPolicy="no-referrer" />` : `<div class="logo"></div>`}
+    </div>
+    <div class="brand"><h1>${compName}</h1><p>مرفقات ومستندات السند الإثباتية</p></div>
+    <div style="width:120px;font-size:11px;line-height:1.7"><b>رقم السند:</b><br>${r.no}</div>
+  </div>
+  <div class="title" style="margin-bottom: 30px;">ملحق إثبات المعاملة والمرفقات المرفوعة</div>
+  <div style="border: 2px dashed #cbd5e1; border-radius: 16px; padding: 15px; background: #fff; display: inline-block; max-width: 100%;">
+    <img src="${attachment}" style="max-width: 100%; max-height: 180mm; object-fit: contain; border-radius: 8px;" referrerPolicy="no-referrer" />
+  </div>
+  <div class="footer">المرفق الإلكتروني المعتمد لسند القبض رقم ${r.no}</div>
+</div>
+` : ""}
 </body>
 </html>`);
       w.document.close();
@@ -2389,7 +2585,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       method: rMethod,
       date: rDate,
       project: rProject,
-      notes: notesAppended,
+      notes: rAttachment ? `${notesAppended} [مرفق: ${rAttachment}]` : notesAppended,
       installment_id: linked ? linked.id : null,
       contract_no: linked ? linked.no : "",
       identity: linked ? linked.identity : "",
@@ -2436,6 +2632,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       setRAmount("");
       setRProject("");
       setRNotes("");
+      setRAttachment("");
       setRTreasury("خزنة التحصيل");
       setRExternalNo("");
       setReceiptCompanyId("");
@@ -2517,7 +2714,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       method: payMethod,
       date: payDate,
       project: payProject.trim(),
-      notes: notesAppended,
+      notes: payAttachment ? `${notesAppended} [مرفق: ${payAttachment}]` : notesAppended,
       company_id: getTargetCompanyId(paymentCompanyId),
       worker_id: payWorkerId || null,
     };
@@ -2599,6 +2796,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       setPayAmount("");
       setPayProject("");
       setPayNotes("");
+      setPayAttachment("");
       setPayTreasury("خزنة الشركة");
       setPaymentCompanyId("");
       setPayWorkerId("");
@@ -2676,7 +2874,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       date: eDate,
       project: eProject.trim(),
       supplier: eSupplier.trim(),
-      notes: notesAppended,
+      notes: eAttachment ? `${notesAppended} [مرفق: ${eAttachment}]` : notesAppended,
       company_id: getTargetCompanyId(expenseCompanyId),
     };
 
@@ -2706,6 +2904,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       setEProject("");
       setESupplier("");
       setENotes("");
+      setEAttachment("");
       setETreasury("خزنة الشركة");
       setExpenseCompanyId("");
       await loadEverything();
@@ -3928,11 +4127,11 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
         <Toast toasts={toasts} removeToast={removeToast} />
         
         {/* Absolute Decorative Golden Ambient Lights */}
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-amber-500/10 rounded-full blur-[120px] pointer-events-none animate-pulse"></div>
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-indigo-500/10 rounded-full blur-[120px] pointer-events-none animate-pulse"></div>
+        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-amber-500/15 rounded-full blur-[120px] pointer-events-none animate-pulse"></div>
+        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-blue-600/25 rounded-full blur-[120px] pointer-events-none animate-pulse"></div>
         
         {/* Core Luxury Card */}
-        <div className="w-full max-w-md bg-slate-950/40 backdrop-blur-2xl border border-amber-500/25 p-10 rounded-[32px] space-y-8 relative shadow-[0_0_50px_-5px_rgba(245,158,11,0.15)] overflow-hidden before:absolute before:inset-0 before:bg-gradient-to-b before:from-amber-500/5 before:to-transparent before:pointer-events-none">
+        <div className="w-full max-w-md bg-[#0e172c]/95 backdrop-blur-2xl border border-amber-500/35 p-10 rounded-[32px] space-y-8 relative shadow-[0_0_60px_rgba(11,19,43,0.9),0_0_30px_rgba(245,158,11,0.2)] overflow-hidden before:absolute before:inset-0 before:bg-gradient-to-b before:from-amber-500/5 before:to-transparent before:pointer-events-none">
           
           {/* Back to main portal button */}
           <button
@@ -4725,11 +4924,21 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                     <label className="text-[10px] font-black text-slate-400">البيان وشرائح الملاحظة</label>
                     <textarea placeholder="شرائح قسط يومي..." value={rNotes} onChange={(e) => setRNotes(e.target.value)} className="w-full px-3 py-1.5 h-[41px] bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none" />
                   </div>
+
+                  <div className="sm:col-span-2 mt-1">
+                    <ImageUploader
+                      id="receipt-attachment-uploader"
+                      label="مرفق السند (إثبات، إيصال تحويل أو شيك صادر)"
+                      placeholder="قم بسحب وإفلات صورة المرفق هنا، أو انقر للاختيار"
+                      value={rAttachment}
+                      onChange={(val) => setRAttachment(val)}
+                    />
+                  </div>
                 </div>
 
                 <div className="flex gap-2 justify-end">
                   {editReceiptId && (
-                    <button type="button" onClick={() => { setEditReceiptId(null); setRContractQuery(""); setRSelectedInstallment(null); setRFrom(""); setRAmount(""); setRProject(""); setRNotes(""); setRTreasury("خزنة التحصيل"); setRExternalNo(""); setReceiptCompanyId(""); setRType("وارد"); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
+                    <button type="button" onClick={() => { setEditReceiptId(null); setRContractQuery(""); setRSelectedInstallment(null); setRFrom(""); setRAmount(""); setRProject(""); setRNotes(""); setRAttachment(""); setRTreasury("خزنة التحصيل"); setRExternalNo(""); setReceiptCompanyId(""); setRType("وارد"); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
                   )}
                   <button type="submit" className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black">{editReceiptId ? "استبدال السند" : "حفظ وقيد سند القبض ماليًا"}</button>
                 </div>
@@ -4861,6 +5070,14 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                                 <div className="flex flex-wrap gap-1.5 items-center mt-0.5">
                                   <span className="text-[9px] text-amber-500 font-sans font-extrabold">{awExtractRegion(r.notes || "")}</span>
                                   <span className="text-[9px] text-cyan-400 font-sans font-extrabold bg-cyan-950/45 px-1.5 py-0.5 rounded border border-cyan-850">🏦 {awExtractTreasury(r.notes || "") || "خزنة التحصيل"}</span>
+                                  {(() => {
+                                    const rAttachment = awExtractAttachment(r.notes || "");
+                                    return rAttachment ? (
+                                      <a href={rAttachment} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-[9px] text-emerald-400 font-sans font-extrabold bg-emerald-950/45 px-1.5 py-0.5 rounded border border-emerald-850" title="عرض المرفق المرفوع">
+                                        📎 عرض المرفق
+                                      </a>
+                                    ) : null;
+                                  })()}
                                 </div>
                               </td>
                               <td className="py-3 px-3 font-black text-emerald-400 font-mono">+{Number(r.amount || 0).toLocaleString()} ريال</td>
@@ -4871,7 +5088,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                               </td>
                               <td className="py-3 px-3 text-center flex items-center justify-center gap-1">
                                 <button onClick={() => onPrintReceipt(r.id)} className="p-1 text-emerald-400 hover:text-white" title="طباعة سند القبض"><Printer className="w-3.5 h-3.5" /></button>
-                                <button onClick={() => { setEditReceiptId(r.id); handleAutoFillReceipt(r.contract_no || ""); setRFrom(r.from_name || ""); setRAmount(r.amount || ""); setRMethod(r.method || ""); setRDate(r.date || ""); setRProject(r.project || ""); setRNotes(awCleanNotes(r.notes || "")); setRTreasury(awExtractTreasury(r.notes || "") || "خزنة التحصيل"); setRExternalNo(awExtractExternalNo(r.notes || "")); setReceiptCompanyId(r.company_id || ""); document.getElementById("receipts-tab-view")?.scrollIntoView({ behavior: "smooth" }); }} className="p-1 text-blue-400 hover:text-white" title="تعديل"><Edit2 className="w-3.5 h-3.5" /></button>
+                                <button onClick={() => { setEditReceiptId(r.id); handleAutoFillReceipt(r.contract_no || ""); setRFrom(r.from_name || ""); setRAmount(r.amount || ""); setRMethod(r.method || ""); setRDate(r.date || ""); setRProject(r.project || ""); setRNotes(awCleanNotes(r.notes || "")); setRAttachment(awExtractAttachment(r.notes || "") || ""); setRTreasury(awExtractTreasury(r.notes || "") || "خزنة التحصيل"); setRExternalNo(awExtractExternalNo(r.notes || "")); setReceiptCompanyId(r.company_id || ""); document.getElementById("receipts-tab-view")?.scrollIntoView({ behavior: "smooth" }); }} className="p-1 text-blue-400 hover:text-white" title="تعديل"><Edit2 className="w-3.5 h-3.5" /></button>
                                 <button onClick={() => deleteReceiptLogic(r.id, r.installment_id)} className="p-1 text-rose-400 hover:text-rose-500" title="حذف"><Trash2 className="w-3.5 h-3.5" /></button>
                               </td>
                             </tr>
@@ -5060,10 +5277,20 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                     <label className="text-[10px] font-black text-slate-400">البيان والتفاصيل</label>
                     <textarea placeholder="البيان" value={payNotes} onChange={(e) => setPayNotes(e.target.value)} className="w-full px-3 py-2 h-[45px] bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 transition-colors" />
                   </div>
+                  
+                  <div className="space-y-1 sm:col-span-2 md:col-span-4 mt-1">
+                    <ImageUploader
+                      id="payment-attachment-uploader"
+                      label="مرفق سند الصرف الصادر (شيك، صورة الحوالة، أو إيصال استلام)"
+                      placeholder="قم بسحب وإفلات صورة المرفق هنا، أو انقر للاختيار"
+                      value={payAttachment}
+                      onChange={(val) => setPayAttachment(val)}
+                    />
+                  </div>
                 </div>
                 <div className="flex gap-2 justify-end">
                   {editPaymentId && (
-                    <button type="button" onClick={() => { setEditPaymentId(null); setPayTo(""); setPayAmount(""); setPayProject(""); setPayNotes(""); setPayTreasury("خزنة الشركة"); setPaymentCompanyId(""); setPayWorkerId(""); setPayContractQuery(""); setPaySelectedInstallment(null); setPayBeneficiaryType("شخص"); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
+                    <button type="button" onClick={() => { setEditPaymentId(null); setPayTo(""); setPayAmount(""); setPayProject(""); setPayNotes(""); setPayAttachment(""); setPayTreasury("خزنة الشركة"); setPaymentCompanyId(""); setPayWorkerId(""); setPayContractQuery(""); setPaySelectedInstallment(null); setPayBeneficiaryType("شخص"); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
                   )}
                   <button type="submit" className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-black">{editPaymentId ? "استبدال وصيغة السند" : "قيد سند الصرف ماليًا"}</button>
                 </div>
@@ -5278,15 +5505,25 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                                       </span>
                                     </div>
                                   </td>
-                                  <td className="py-3 px-3 font-black text-rose-400 font-mono">-{p.amount.toLocaleString()} ريال</td>
+                                  <td className="py-3 px-3 font-black text-rose-400 font-mono">-{Number(p.amount || 0).toLocaleString()} ريال</td>
                                   <td className="py-3 px-3 font-bold text-slate-200">{p.method}</td>
                                   <td className="py-3 px-3">
                                     <span className="block font-bold text-slate-200">{p.project}</span>
                                     <span className="block text-[10px] text-slate-400 max-w-xs truncate">{awCleanNotes(p.notes || "")}</span>
-                                    <span className="inline-block text-[9px] text-cyan-400 font-sans font-extrabold bg-cyan-950/45 px-1.5 py-0.5 rounded border border-cyan-850 mt-1">🏦 {awExtractTreasury(p.notes || "") || "خزنة الشركة"}</span>
+                                    <div className="flex flex-wrap gap-1 mt-1">
+                                      <span className="inline-block text-[9px] text-cyan-400 font-sans font-extrabold bg-cyan-950/45 px-1.5 py-0.5 rounded border border-cyan-850">🏦 {awExtractTreasury(p.notes || "") || "خزنة الشركة"}</span>
+                                      {(() => {
+                                        const pAttachment = awExtractAttachment(p.notes || "");
+                                        return pAttachment ? (
+                                          <a href={pAttachment} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-[9px] text-emerald-400 font-sans font-extrabold bg-emerald-950/45 px-1.5 py-0.5 rounded border border-emerald-850" title="عرض المرفق المرفوع">
+                                            📎 عرض المرفق
+                                          </a>
+                                        ) : null;
+                                      })()}
+                                    </div>
                                   </td>
                                   <td className="py-3 px-3 text-center space-x-1">
-                                    <button onClick={() => { setEditPaymentId(p.id); setPayTo(p.to_name || ""); setPayAmount(p.amount || ""); setPayDate(p.date || ""); setPayProject(p.project || ""); setPayMethod(p.method || ""); setPayNotes(awCleanNotes(p.notes || "")); setPayTreasury(awExtractTreasury(p.notes || "") || "خزنة الشركة"); setPaymentCompanyId(p.company_id || ""); setPayWorkerId(p.worker_id || ""); setPayBeneficiaryType(awExtractBeneficiaryType(p.notes || "", p.worker_id, p.to_name)); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
+                                    <button onClick={() => { setEditPaymentId(p.id); setPayTo(p.to_name || ""); setPayAmount(p.amount || ""); setPayDate(p.date || ""); setPayProject(p.project || ""); setPayMethod(p.method || ""); setPayNotes(awCleanNotes(p.notes || "")); setPayAttachment(awExtractAttachment(p.notes || "") || ""); setPayTreasury(awExtractTreasury(p.notes || "") || "خزنة الشركة"); setPaymentCompanyId(p.company_id || ""); setPayWorkerId(p.worker_id || ""); setPayBeneficiaryType(awExtractBeneficiaryType(p.notes || "", p.worker_id, p.to_name)); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
                                     <button
                                       onClick={() => {
                                         if (currentUser?.role !== "admin" && currentUser?.role !== "supervisor" && !can("payments")) {
@@ -5440,10 +5677,20 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                     </select>
                   )}
                   <textarea placeholder="ملاحظات" value={eNotes} onChange={(e) => setENotes(e.target.value)} className="w-full px-3 py-1.5 h-[41px] bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none" />
+                  
+                  <div className="sm:col-span-2 mt-1">
+                    <ImageUploader
+                      id="expense-attachment-uploader"
+                      label="مرفق المصروف (فاتورة، إيصال، أو سند استلام)"
+                      placeholder="قم بسحب وإفلات صورة المرفق هنا، أو انقر للاختيار"
+                      value={eAttachment}
+                      onChange={(val) => setEAttachment(val)}
+                    />
+                  </div>
                 </div>
                 <div className="flex gap-2 justify-end">
                   {editExpenseId && (
-                    <button type="button" onClick={() => { setEditExpenseId(null); setEName(""); setEAmount(""); setEProject(""); setESupplier(""); setENotes(""); setETreasury("خزنة الشركة"); setExpenseCompanyId(""); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
+                    <button type="button" onClick={() => { setEditExpenseId(null); setEName(""); setEAmount(""); setEProject(""); setESupplier(""); setENotes(""); setEAttachment(""); setETreasury("خزنة الشركة"); setExpenseCompanyId(""); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black">إلغاء</button>
                   )}
                   <button type="submit" className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-black">{editExpenseId ? "تعديل القيّد" : "قيد المصروف ماليًا"}</button>
                 </div>
@@ -5627,17 +5874,27 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                                   <span className="block font-black text-white">{e.name}</span>
                                   <span className="block text-[10px] text-amber-500 mt-0.5 font-bold">فئة: {e.category}</span>
                                 </td>
-                                <td className="py-3 px-3 font-black text-rose-400 font-mono">-{e.amount.toLocaleString()} ريال</td>
+                                <td className="py-3 px-3 font-black text-rose-400 font-mono">-{Number(e.amount || 0).toLocaleString()} ريال</td>
                                 <td className="py-3 px-3">
                                   <span className="block font-bold text-slate-200">{e.supplier || "مورد كلي"}</span>
                                   <span className="block text-[10px] text-slate-400 font-bold mt-0.5">{e.project}</span>
                                 </td>
                                 <td className="py-3 px-3">
                                   <span className="block text-slate-400 max-w-xs truncate">{awCleanNotes(e.notes || "")}</span>
-                                  <span className="inline-block text-[9px] text-cyan-400 font-sans font-extrabold bg-cyan-950/45 px-1.5 py-0.5 rounded border border-cyan-850 mt-1">🏦 {awExtractTreasury(e.notes || "") || "خزنة الشركة"}</span>
+                                  <div className="flex flex-wrap gap-1 mt-1">
+                                    <span className="inline-block text-[9px] text-cyan-400 font-sans font-extrabold bg-cyan-950/45 px-1.5 py-0.5 rounded border border-cyan-850">🏦 {awExtractTreasury(e.notes || "") || "خزنة الشركة"}</span>
+                                    {(() => {
+                                      const eAttachment = awExtractAttachment(e.notes || "");
+                                      return eAttachment ? (
+                                        <a href={eAttachment} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-[9px] text-emerald-400 font-sans font-extrabold bg-emerald-950/45 px-1.5 py-0.5 rounded border border-emerald-850" title="عرض المرفق المرفوع">
+                                          📎 عرض المرفق
+                                        </a>
+                                      ) : null;
+                                    })()}
+                                  </div>
                                 </td>
                                 <td className="py-3 px-3 text-center space-x-1">
-                                  <button onClick={() => { setEditExpenseId(e.id); setEName(e.name || ""); setECategory(e.category || ""); setEAmount(e.amount || ""); setEDate(e.date || ""); setEProject(e.project || ""); setESupplier(e.supplier || ""); setENotes(awCleanNotes(e.notes || "")); setETreasury(awExtractTreasury(e.notes || "") || "خزنة الشركة"); setExpenseCompanyId(e.company_id || ""); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
+                                  <button onClick={() => { setEditExpenseId(e.id); setEName(e.name || ""); setECategory(e.category || ""); setEAmount(e.amount || ""); setEDate(e.date || ""); setEProject(e.project || ""); setESupplier(e.supplier || ""); setENotes(awCleanNotes(e.notes || "")); setEAttachment(awExtractAttachment(e.notes || "") || ""); setETreasury(awExtractTreasury(e.notes || "") || "خزنة الشركة"); setExpenseCompanyId(e.company_id || ""); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
                                   <button
                                     onClick={() => {
                                       if (currentUser?.role !== "admin" && currentUser?.role !== "supervisor" && !can("expenses")) {
@@ -6737,16 +6994,12 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                     </div>
 
                     <div className="space-y-1">
-                      <label className="text-[10px] text-slate-400 font-bold flex items-center gap-1">
-                        <span>🖼️</span>
-                        <span>رابط شعار الشركة (Logo URL)</span>
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="مثال: https://example.com/logo.png"
+                      <ImageUploader
+                        id="company-logo-uploader"
+                        label="شعار الشركة المرفوع"
+                        placeholder="قم بسحب وإفلات الشعار هنا، أو انقر للاختيار"
                         value={cLogoUrl}
-                        onChange={(e) => setCLogoUrl(e.target.value)}
-                        className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 font-mono"
+                        onChange={(val) => setCLogoUrl(val)}
                       />
                     </div>
 
@@ -6820,11 +7073,31 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                             <div key={comp.id} className="bg-slate-950/40 p-4 rounded-2xl border border-slate-800 hover:border-amber-500/20 transition-all flex flex-col justify-between relative overflow-hidden before:absolute before:inset-x-0 before:top-0 before:h-[2px] before:bg-gradient-to-r before:from-amber-500/20 before:via-transparent before:to-transparent">
                               <div className="space-y-3">
                                 <div className="flex justify-between items-start">
-                                  <div>
-                                    <h4 className="text-xs font-extrabold text-white font-sans">{comp.name}</h4>
-                                    {comp.commercial_register && (
-                                      <span className="text-[9px] text-slate-400 block mt-0.5 font-mono">سجل: {comp.commercial_register}</span>
-                                    )}
+                                  <div className="flex gap-2.5 items-center">
+                                    {(() => {
+                                      const logo = localStorage.getItem(`aw_company_logo_${comp.id}`);
+                                      if (logo) {
+                                        return (
+                                          <img
+                                            src={logo}
+                                            alt="Logo"
+                                            referrerPolicy="no-referrer"
+                                            className="w-10 h-10 object-contain bg-slate-900 rounded-lg border border-slate-850 p-1 shrink-0"
+                                          />
+                                        );
+                                      }
+                                      return (
+                                        <div className="w-10 h-10 bg-amber-500/10 border border-amber-500/20 rounded-lg flex items-center justify-center text-amber-400 font-black text-sm shrink-0">
+                                          {comp.name ? comp.name[0] : "🏢"}
+                                        </div>
+                                      );
+                                    })()}
+                                    <div>
+                                      <h4 className="text-xs font-extrabold text-white font-sans">{comp.name}</h4>
+                                      {comp.commercial_register && (
+                                        <span className="text-[9px] text-slate-400 block mt-0.5 font-mono">سجل: {comp.commercial_register}</span>
+                                      )}
+                                    </div>
                                   </div>
                                   <div className="flex gap-1.5 shrink-0">
                                     <button

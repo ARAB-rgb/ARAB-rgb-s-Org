@@ -251,5 +251,10 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow create, update, delete: if isSignedIn() && isValidId(id);
     }
+
+    match /hr_payrolls/{id} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isSignedIn() && isValidId(id);
+    }
   }
 }

@@ -426,6 +426,33 @@
         "created_at": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "company_id", "name", "type", "status"]
+    },
+    "HrPayroll": {
+      "title": "HrPayroll",
+      "description": "HR Employee monthly salary disbursement record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "company_id": { "type": "string" },
+        "month": { "type": "string" },
+        "employee_id": { "type": "string" },
+        "employee_name": { "type": "string" },
+        "basic_salary": { "type": "number" },
+        "allowances": { "type": "number" },
+        "journals_total": { "type": "number" },
+        "deductions_total": { "type": "number" },
+        "advances_total": { "type": "number" },
+        "net_salary": { "type": "number" },
+        "payment_method": { "type": "string" },
+        "treasury": { "type": "string" },
+        "voucher_no": { "type": "string" },
+        "status": { "type": "string" },
+        "paid_at": { "type": "string" },
+        "paid_by": { "type": "string" },
+        "notes": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "company_id", "month", "employee_id", "net_salary"]
     }
   },
   "firestore": {
@@ -500,6 +527,10 @@
     "company_assets": {
       "schema": "CompanyAsset",
       "description": "Company assets like vehicles, real estates, etc"
+    },
+    "hr_payrolls": {
+      "schema": "HrPayroll",
+      "description": "HR Employee monthly salary disbursement records"
     }
   }
 }

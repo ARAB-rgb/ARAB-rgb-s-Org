@@ -130,10 +130,10 @@ export function SaasLandingPortal({
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-right text-slate-100 font-sans selection:bg-amber-500/30 overflow-hidden flex flex-col justify-center items-center relative p-4 sm:p-6" dir="rtl">
-      {/* Royal Background decorations */}
-      <div className="absolute top-1/4 left-1/4 w-[500px] h-[500px] bg-amber-500/10 rounded-full blur-[160px] pointer-events-none animate-pulse"></div>
-      <div className="absolute bottom-1/4 right-1/4 w-[500px] h-[500px] bg-blue-900/10 rounded-full blur-[160px] pointer-events-none animate-pulse"></div>
+    <div className="min-h-screen mesh-gradient text-right text-slate-100 font-sans selection:bg-amber-500/30 overflow-hidden flex flex-col justify-center items-center relative p-4 sm:p-6" dir="rtl">
+      {/* Royal Background decorations - Vibrant Yellow & Royal Blue */}
+      <div className="absolute top-1/4 left-1/4 w-[500px] h-[500px] bg-amber-500/15 rounded-full blur-[160px] pointer-events-none animate-pulse"></div>
+      <div className="absolute bottom-1/4 right-1/4 w-[500px] h-[500px] bg-blue-600/25 rounded-full blur-[160px] pointer-events-none animate-pulse"></div>
 
       {/* Main Login layout */}
       <div className="w-full max-w-md relative z-10 space-y-8 my-auto">
@@ -142,19 +142,19 @@ export function SaasLandingPortal({
         <div className="text-center space-y-4">
           <div className="relative w-24 h-24 mx-auto flex items-center justify-center">
             {/* Elegant rotating external ring */}
-            <div className="absolute inset-0 rounded-full border border-amber-500/20 animate-[spin_16s_linear_infinite]"></div>
-            <div className="absolute inset-2 rounded-full border-2 border-dashed border-amber-500/40"></div>
-            <div className="absolute inset-4 bg-gradient-to-tr from-amber-500 via-amber-600 to-yellow-500 rounded-full shadow-[0_0_30px_rgba(245,158,11,0.35)] flex items-center justify-center">
+            <div className="absolute inset-0 rounded-full border border-amber-500/30 animate-[spin_16s_linear_infinite]"></div>
+            <div className="absolute inset-2 rounded-full border-2 border-dashed border-amber-500/50"></div>
+            <div className="absolute inset-4 bg-gradient-to-tr from-amber-500 via-yellow-400 to-amber-500 rounded-full shadow-[0_0_35px_rgba(245,158,11,0.45)] flex items-center justify-center">
               <Sparkles className="w-9 h-9 text-slate-950 animate-pulse" />
             </div>
           </div>
 
           <div className="space-y-1">
-            <span className="text-[10px] tracking-[0.3em] font-black text-amber-500/90 uppercase font-mono">ARAB WORLD CLOUD SERVICE</span>
+            <span className="text-[10px] tracking-[0.3em] font-black text-amber-400 uppercase font-mono">ARAB WORLD CLOUD SERVICE</span>
             <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight leading-tight">
-              بوابة <span className="text-amber-500">عرب وورلد</span> الموحدة
+              بوابة <span className="text-amber-400 drop-shadow-[0_2px_10px_rgba(245,158,11,0.3)]">عرب وورلد</span> الموحدة
             </h1>
-            <p className="text-[11px] text-slate-400 font-medium max-w-sm mx-auto leading-relaxed">
+            <p className="text-[11px] text-slate-300 font-medium max-w-sm mx-auto leading-relaxed">
               منظومة الـ ERP السحابية المتكاملة لإدارة المشاريع والمقاولات وعقود التقسيط والحسابات الموحدة
             </p>
           </div>
@@ -165,7 +165,7 @@ export function SaasLandingPortal({
           initial={{ opacity: 0, y: 15 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
-          className="bg-slate-900/60 backdrop-blur-2xl border border-amber-500/20 p-8 sm:p-10 rounded-[32px] shadow-[0_0_50px_rgba(245,158,11,0.08)] relative overflow-hidden"
+          className="bg-[#0e172c]/95 backdrop-blur-2xl border border-amber-500/35 p-8 sm:p-10 rounded-[32px] shadow-[0_0_60px_rgba(11,19,43,0.9),0_0_30px_rgba(245,158,11,0.2)] relative overflow-hidden"
         >
           {/* Top/Bottom luxury accents */}
           <div className="absolute top-0 right-0 w-16 h-16 border-t-2 border-r-2 border-amber-500/25 rounded-tr-[32px] pointer-events-none"></div>
