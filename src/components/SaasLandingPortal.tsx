@@ -17,6 +17,21 @@ interface SaasLandingPortalProps {
     adminCode: string;
     adminPass: string;
   }) => Promise<boolean>;
+  onRegisterPendingUser?: (data: {
+    name: string;
+    email: string;
+    google_id?: string;
+    phone: string;
+    company_id?: string;
+    requested_company_name?: string;
+    requested_company_slug?: string;
+    requested_company_manager?: string;
+    requested_company_phone?: string;
+    requested_company_capital?: number;
+    requested_company_address?: string;
+    requested_company_record_no?: string;
+    requested_company_tax_no?: string;
+  }) => Promise<boolean>;
   onNavigateToSlug: (slug: string) => void;
   showToast: (message: string, type?: "success" | "error" | "info") => void;
 
@@ -39,6 +54,7 @@ interface SaasLandingPortalProps {
 export function SaasLandingPortal({
   companies,
   onRegisterCompany,
+  onRegisterPendingUser,
   onNavigateToSlug,
   showToast,
   loginCode,
@@ -56,6 +72,76 @@ export function SaasLandingPortal({
 }: SaasLandingPortalProps) {
   const [showRegisterForm, setShowRegisterForm] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Google Flow Tab Mode: "new_reg" | "link"
+  const [googleTab, setGoogleTab] = useState<"new_reg" | "link">("new_reg");
+
+  // New Google Pending Registration States
+  const [gRegName, setGRegName] = useState("");
+  const [gRegPhone, setGRegPhone] = useState("");
+  const [gReqMode, setGReqMode] = useState<"new_company" | "existing">("new_company");
+  const [gSelectedCompId, setGSelectedCompId] = useState(companies[0]?.id || "arab_world");
+  const [gReqCompName, setGReqCompName] = useState("");
+  const [gReqCompSlug, setGReqCompSlug] = useState("");
+  const [gReqCompManager, setGReqCompManager] = useState("");
+  const [gReqCompPhone, setGReqCompPhone] = useState("");
+  const [gReqCompCapital, setGReqCompCapital] = useState<number | "">("");
+
+  // Auto initialize Google display name if available
+  React.useEffect(() => {
+    if (googleUser?.displayName) {
+      setGRegName(googleUser.displayName);
+      setGReqCompManager(googleUser.displayName);
+    }
+  }, [googleUser]);
+
+  const handleGoogleRegisterSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!googleUser) return;
+
+    const nameToSubmit = gRegName.trim() || googleUser.displayName || "مستخدم قوقل";
+    if (!gRegPhone.trim()) {
+      showToast("يرجى إدخال رقم الجوال لمتابعة الطلب!", "error");
+      return;
+    }
+
+    if (gReqMode === "new_company") {
+      if (!gReqCompName.trim() || !gReqCompSlug.trim()) {
+        showToast("يرجى تحديد اسم الشركة ورابطها المخصص للإنشاء!", "error");
+        return;
+      }
+    }
+
+    setIsSubmitting(true);
+    try {
+      const success = await onRegisterPendingUser?.({
+        name: nameToSubmit,
+        email: googleUser.email,
+        google_id: googleUser.uid,
+        phone: gRegPhone.trim(),
+        company_id: gReqMode === "existing" ? gSelectedCompId : undefined,
+        requested_company_name: gReqMode === "new_company" ? gReqCompName.trim() : undefined,
+        requested_company_slug: gReqMode === "new_company" ? gReqCompSlug.trim() : undefined,
+        requested_company_manager: gReqMode === "new_company" ? (gReqCompManager.trim() || nameToSubmit) : undefined,
+        requested_company_phone: gReqMode === "new_company" ? (gReqCompPhone.trim() || gRegPhone.trim()) : undefined,
+        requested_company_capital: gReqMode === "new_company" ? Number(gReqCompCapital || 0) : undefined,
+      });
+
+      if (success) {
+        setGRegName("");
+        setGRegPhone("");
+        setGReqCompName("");
+        setGReqCompSlug("");
+        setGReqCompManager("");
+        setGReqCompPhone("");
+        setGReqCompCapital("");
+      }
+    } catch (err: any) {
+      showToast("حدث خطأ أثناء إرسال طلب التسجيل: " + (err.message || err), "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   // Registration Form States
   const [name, setName] = useState("");
@@ -173,88 +259,287 @@ export function SaasLandingPortal({
 
           {googleUser ? (
             <>
-              <div className="text-center mb-6">
-                <div className="mx-auto w-12 h-12 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-xl text-amber-500 mb-2">
-                  🔐
+              <div className="text-center mb-5">
+                <div className="mx-auto w-12 h-12 rounded-full bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-xl text-blue-400 mb-2">
+                  🔵
                 </div>
                 <h3 className="text-sm font-black text-white">
-                  <span>ربط حساب Google الآمن</span>
+                  <span>المتابعة باستخدام Google</span>
                 </h3>
-                <p className="text-[10px] text-amber-400 mt-1 font-mono font-bold bg-amber-500/10 py-1 px-2.5 rounded-lg inline-block">{googleUser.email}</p>
-                <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">
-                  أدخل بيانات المنشأة وكود الموظف أدناه لتأكيد ربط هذا الحساب بالمنظومة السحابية لمرة واحدة فقط دون المساس بأي بيانات سابقة
-                </p>
+                <p className="text-[10px] text-blue-300 mt-1 font-mono font-bold bg-blue-500/10 py-1 px-3 rounded-lg inline-block border border-blue-500/20">{googleUser.email}</p>
               </div>
 
-              <form onSubmit={handleLinkGoogle} className="space-y-5">
-                {/* 2. Employee Code */}
-                <div className="space-y-1.5">
-                  <div className="flex justify-between items-center px-1">
-                    <label className="text-[10px] font-black text-slate-300">كود الموظف / اسم المستخدم</label>
-                    <span className="text-[9px] text-slate-500 font-mono">USER CODE</span>
-                  </div>
-                  <div className="relative h-11">
-                    <User className="absolute right-4 top-3.5 w-4 h-4 text-amber-500/70" />
+              {/* Navigation Tabs between New Request & Link Account */}
+              <div className="flex bg-slate-950 p-1 rounded-2xl border border-slate-800 mb-5">
+                <button
+                  type="button"
+                  onClick={() => setGoogleTab("new_reg")}
+                  className={`flex-1 py-2 text-[11px] font-black rounded-xl transition-all cursor-pointer ${
+                    googleTab === "new_reg"
+                      ? "bg-amber-500 text-slate-950 shadow-md"
+                      : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  🚀 تسجيل جديد وطلب شركة
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGoogleTab("link")}
+                  className={`flex-1 py-2 text-[11px] font-black rounded-xl transition-all cursor-pointer ${
+                    googleTab === "link"
+                      ? "bg-amber-500 text-slate-950 shadow-md"
+                      : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  🔗 ربط بكود موظف سابق
+                </button>
+              </div>
+
+              {googleTab === "new_reg" ? (
+                <form onSubmit={handleGoogleRegisterSubmit} className="space-y-4">
+                  <p className="text-[10px] text-slate-400 leading-relaxed text-center bg-slate-950/60 p-2.5 rounded-xl border border-slate-800">
+                    أكمل تسجيل بياناتك وطلب منشأتك ليصل مباشرة للأدمن العام للموافقة وتفعيل الصلاحيات.
+                  </p>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-300 block">الاسم الكامل <span className="text-rose-500">*</span></label>
                     <input
                       required
                       type="text"
-                      placeholder="أدخل كود الموظف أو اسم المستخدم..."
-                      value={loginCode}
-                      onChange={(e) => setLoginCode(e.target.value)}
-                      className="w-full h-full pl-4 pr-11 py-2.5 bg-slate-950/80 border border-slate-800 rounded-2xl text-xs font-bold text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 transition-all text-right"
+                      placeholder="اسم المستخدم أو الموظف"
+                      value={gRegName}
+                      onChange={(e) => setGRegName(e.target.value)}
+                      className="w-full h-10 px-3 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500"
                     />
                   </div>
-                </div>
 
-                {/* 3. Password */}
-                <div className="space-y-1.5">
-                  <div className="flex justify-between items-center px-1">
-                    <label className="text-[10px] font-black text-slate-300">الرمز السري المالي / كلمة المرور</label>
-                    <span className="text-[9px] text-slate-500 font-mono">SECURE PASSWORD</span>
-                  </div>
-                  <div className="relative h-11">
-                    <Key className="absolute right-4 top-3.5 w-4 h-4 text-amber-500/70" />
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-300 block">رقم الجوال للتواصل والاعتماد <span className="text-rose-500">*</span></label>
                     <input
                       required
-                      type="password"
-                      placeholder="أدخل الرمز السري..."
-                      value={loginPass}
-                      onChange={(e) => setLoginPass(e.target.value)}
-                      className="w-full h-full pl-4 pr-11 py-2.5 bg-slate-950/80 border border-slate-800 rounded-2xl text-xs font-mono font-bold text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 transition-all text-left"
+                      type="text"
+                      placeholder="05xxxxxxxx"
+                      value={gRegPhone}
+                      onChange={(e) => setGRegPhone(e.target.value)}
+                      className="w-full h-10 px-3 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono font-bold text-white focus:outline-none focus:border-amber-500 text-left"
                       dir="ltr"
                     />
                   </div>
-                </div>
 
-                {/* Submit buttons for Google linkage */}
-                <div className="space-y-3 pt-2">
-                  <button
-                    disabled={isLoading}
-                    type="submit"
-                    className="w-full h-12 bg-gradient-to-l from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black rounded-2xl text-xs transition-all flex items-center justify-center gap-2 shadow-lg shadow-amber-500/10 cursor-pointer disabled:opacity-50"
-                  >
-                    {isLoading ? (
-                      <>
-                        <span className="w-4 h-4 rounded-full border-2 border-slate-950 border-t-transparent animate-spin"></span>
-                        <span>جاري التحقق وحفظ الارتباط...</span>
-                      </>
+                  {/* Company Request Selection */}
+                  <div className="space-y-2 pt-1 border-t border-slate-800/80">
+                    <label className="text-[10px] font-black text-amber-400 block">نوع الطلب والمنشأة</label>
+                    
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setGReqMode("new_company")}
+                        className={`p-2.5 rounded-xl border text-right text-[10px] font-bold transition-all cursor-pointer ${
+                          gReqMode === "new_company"
+                            ? "bg-amber-500/15 border-amber-500/40 text-amber-300"
+                            : "bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-300"
+                        }`}
+                      >
+                        🏢 طلب تأسيس شركة جديدة
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setGReqMode("existing")}
+                        className={`p-2.5 rounded-xl border text-right text-[10px] font-bold transition-all cursor-pointer ${
+                          gReqMode === "existing"
+                            ? "bg-amber-500/15 border-amber-500/40 text-amber-300"
+                            : "bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-300"
+                        }`}
+                      >
+                        🤝 انضمام لشركة قائمة
+                      </button>
+                    </div>
+
+                    {gReqMode === "new_company" ? (
+                      <div className="space-y-2.5 p-3 bg-slate-950/80 border border-amber-500/20 rounded-2xl mt-2">
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-slate-300">اسم الشركة المطلوب تأسيسها <span className="text-rose-500">*</span></label>
+                          <input
+                            required
+                            type="text"
+                            placeholder="مثال: شركة الفنار للخدمات اللوجستية"
+                            value={gReqCompName}
+                            onChange={(e) => setGReqCompName(e.target.value)}
+                            className="w-full h-9 px-3 bg-slate-900 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-slate-300">الرابط المخصص (Slug) <span className="text-rose-500">*</span></label>
+                            <input
+                              required
+                              type="text"
+                              placeholder="alfanar"
+                              value={gReqCompSlug}
+                              onChange={(e) => setGReqCompSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))}
+                              className="w-full h-9 px-3 bg-slate-900 border border-slate-800 rounded-xl text-xs font-mono font-bold text-amber-400 focus:outline-none focus:border-amber-500 text-left"
+                              dir="ltr"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-slate-300">اسم مدير المنشأة</label>
+                            <input
+                              type="text"
+                              placeholder="المدير المسؤول"
+                              value={gReqCompManager}
+                              onChange={(e) => setGReqCompManager(e.target.value)}
+                              className="w-full h-9 px-3 bg-slate-900 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-slate-300">هاتف الشركة</label>
+                            <input
+                              type="text"
+                              placeholder="05xxxxxxxx"
+                              value={gReqCompPhone}
+                              onChange={(e) => setGReqCompPhone(e.target.value)}
+                              className="w-full h-9 px-3 bg-slate-900 border border-slate-800 rounded-xl text-xs font-mono font-bold text-white focus:outline-none focus:border-amber-500 text-left"
+                              dir="ltr"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-slate-300">رأس المال المقدر (ريال)</label>
+                            <input
+                              type="number"
+                              placeholder="100000"
+                              value={gReqCompCapital}
+                              onChange={(e) => setGReqCompCapital(e.target.value === "" ? "" : Number(e.target.value))}
+                              className="w-full h-9 px-3 bg-slate-900 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500"
+                            />
+                          </div>
+                        </div>
+                      </div>
                     ) : (
-                      <>
-                        <span>🔗 تأكيد ربط الحساب وتخويل الدخول</span>
-                        <ArrowRight className="w-4 h-4 text-slate-950" />
-                      </>
+                      <div className="space-y-1 mt-2">
+                        <label className="text-[10px] font-bold text-slate-300">اختر الشركة المراد الانضمام لها</label>
+                        <select
+                          value={gSelectedCompId}
+                          onChange={(e) => setGSelectedCompId(e.target.value)}
+                          className="w-full h-10 px-3 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-amber-400 focus:outline-none cursor-pointer text-slate-950 bg-white"
+                        >
+                          {companies.map((c) => (
+                            <option key={c.id} value={c.id} className="text-slate-950">
+                              🏢 {c.name} ({c.slug})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     )}
-                  </button>
+                  </div>
 
-                  <button
-                    type="button"
-                    onClick={() => setGoogleUser?.(null)}
-                    className="w-full h-11 bg-slate-950 hover:bg-slate-900 border border-slate-800 text-slate-400 hover:text-white rounded-2xl text-xs font-bold transition-all cursor-pointer text-center"
-                  >
-                    إلغاء والعودة للدخول المعتاد
-                  </button>
-                </div>
-              </form>
+                  <div className="space-y-2 pt-3">
+                    <button
+                      disabled={isSubmitting}
+                      type="submit"
+                      className="w-full h-11 bg-gradient-to-l from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black rounded-2xl text-xs transition-all flex items-center justify-center gap-2 shadow-lg shadow-amber-500/10 cursor-pointer disabled:opacity-50"
+                    >
+                      {isSubmitting ? (
+                        <>
+                          <span className="w-4 h-4 rounded-full border-2 border-slate-950 border-t-transparent animate-spin"></span>
+                          <span>جاري إرسال الطلب للأدمن...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>🚀 تقديم طلب التسجيل والشركة للأدمن</span>
+                          <ArrowRight className="w-4 h-4 text-slate-950" />
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setGoogleUser?.(null)}
+                      className="w-full h-10 bg-slate-950 hover:bg-slate-900 border border-slate-800 text-slate-400 hover:text-white rounded-2xl text-xs font-bold transition-all cursor-pointer text-center"
+                    >
+                      إلغاء والعودة للدخول المعتاد
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <form onSubmit={handleLinkGoogle} className="space-y-5">
+                  <p className="text-[10px] text-slate-400 leading-relaxed text-center bg-slate-950/60 p-2.5 rounded-xl border border-slate-800">
+                    أدخل كود الموظف وكلمة المرور المسجلة مسبقاً لربط حساب Google بحسابك الحالي فوراً.
+                  </p>
+
+                  {/* 2. Employee Code */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center px-1">
+                      <label className="text-[10px] font-black text-slate-300">كود الموظف / اسم المستخدم</label>
+                      <span className="text-[9px] text-slate-500 font-mono">USER CODE</span>
+                    </div>
+                    <div className="relative h-11">
+                      <User className="absolute right-4 top-3.5 w-4 h-4 text-amber-500/70" />
+                      <input
+                        required
+                        type="text"
+                        placeholder="أدخل كود الموظف أو اسم المستخدم..."
+                        value={loginCode}
+                        onChange={(e) => setLoginCode(e.target.value)}
+                        className="w-full h-full pl-4 pr-11 py-2.5 bg-slate-950/80 border border-slate-800 rounded-2xl text-xs font-bold text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 transition-all text-right"
+                      />
+                    </div>
+                  </div>
+
+                  {/* 3. Password */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center px-1">
+                      <label className="text-[10px] font-black text-slate-300">الرمز السري المالي / كلمة المرور</label>
+                      <span className="text-[9px] text-slate-500 font-mono">SECURE PASSWORD</span>
+                    </div>
+                    <div className="relative h-11">
+                      <Key className="absolute right-4 top-3.5 w-4 h-4 text-amber-500/70" />
+                      <input
+                        required
+                        type="password"
+                        placeholder="أدخل الرمز السري..."
+                        value={loginPass}
+                        onChange={(e) => setLoginPass(e.target.value)}
+                        className="w-full h-full pl-4 pr-11 py-2.5 bg-slate-950/80 border border-slate-800 rounded-2xl text-xs font-mono font-bold text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 transition-all text-left"
+                        dir="ltr"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Submit buttons for Google linkage */}
+                  <div className="space-y-3 pt-2">
+                    <button
+                      disabled={isLoading}
+                      type="submit"
+                      className="w-full h-12 bg-gradient-to-l from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black rounded-2xl text-xs transition-all flex items-center justify-center gap-2 shadow-lg shadow-amber-500/10 cursor-pointer disabled:opacity-50"
+                    >
+                      {isLoading ? (
+                        <>
+                          <span className="w-4 h-4 rounded-full border-2 border-slate-950 border-t-transparent animate-spin"></span>
+                          <span>جاري التحقق وحفظ الارتباط...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>🔗 تأكيد ربط الحساب وتخويل الدخول</span>
+                          <ArrowRight className="w-4 h-4 text-slate-950" />
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setGoogleUser?.(null)}
+                      className="w-full h-11 bg-slate-950 hover:bg-slate-900 border border-slate-800 text-slate-400 hover:text-white rounded-2xl text-xs font-bold transition-all cursor-pointer text-center"
+                    >
+                      إلغاء والعودة للدخول المعتاد
+                    </button>
+                  </div>
+                </form>
+              )}
             </>
           ) : (
             <>

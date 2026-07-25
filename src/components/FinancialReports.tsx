@@ -17,14 +17,59 @@ import {
   Printer,
   Download,
   DollarSign,
-  PieChart,
+  PieChart as PieChartIcon,
   ChevronDown,
   ChevronUp,
   Filter,
   RefreshCw,
   Info
 } from "lucide-react";
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { Receipt, Payment, Expense, Installment, Project, Company, Extract, User as AuthUser } from "../types";
+
+const EXPENSE_CATEGORY_COLORS: Record<string, string> = {
+  "مواد": "#f59e0b",
+  "عمالة": "#3b82f6",
+  "نقل": "#10b981",
+  "إيجار": "#ec4899",
+  "وقود": "#8b5cf6",
+  "إعاشة": "#06b6d4",
+  "سيارات": "#f43f5e",
+  "عدة": "#eab308",
+  "بنزين": "#a855f7",
+  "تغيير زيت": "#14b8a6",
+  "صيانة": "#f97316",
+  "اتصالات": "#6366f1",
+  "أخرى": "#64748b",
+};
+
+const COLOR_PALETTE = [
+  "#f59e0b", "#3b82f6", "#10b981", "#ec4899", "#8b5cf6",
+  "#06b6d4", "#f43f5e", "#eab308", "#a855f7", "#14b8a6",
+  "#f97316", "#6366f1", "#64748b"
+];
+
+const ExpenseChartTooltip = ({ active, payload, total }: any) => {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    const percentage = total > 0 ? ((data.value / total) * 100).toFixed(1) : "0";
+    return (
+      <div className="bg-slate-950/95 border border-slate-800/80 p-3 rounded-2xl shadow-2xl text-right z-50 font-sans">
+        <p className="text-xs font-black text-white mb-1 flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ backgroundColor: payload[0].color || "#f59e0b" }}></span>
+          <span>{data.name}</span>
+        </p>
+        <p className="text-sm font-black text-amber-400 font-mono">
+          {Number(data.value).toLocaleString()} <span className="text-[10px] font-bold text-slate-400">ريال سعودي</span>
+        </p>
+        <p className="text-[10px] text-slate-400 font-bold mt-0.5">
+          النسبة: <span className="text-emerald-400">{percentage}%</span> من إجمالي المصروفات
+        </p>
+      </div>
+    );
+  }
+  return null;
+};
 import { awExtractRegion, awExtractCapital } from "../db";
 
 interface FinancialReportsProps {
@@ -123,8 +168,12 @@ export const FinancialReports: React.FC<FinancialReportsProps> = ({
 
     // 2. Company / Branch filter
     const matchesCompany = (compId?: string) => {
-      if (selectedCompanyId === "all") return true;
       const itemComp = compId || "arab_world";
+      if (currentUser?.role !== "admin") {
+        const userComp = currentUser?.company_id || "arab_world";
+        if (itemComp !== userComp) return false;
+      }
+      if (selectedCompanyId === "all") return true;
       return itemComp === selectedCompanyId;
     };
 
@@ -207,6 +256,23 @@ export const FinancialReports: React.FC<FinancialReportsProps> = ({
       extracts: filteredExtracts
     };
   }, [receipts, payments, expenses, installments, extracts, projects, fromDate, toDate, selectedCompanyId, selectedProjectId, selectedClientName, searchQuery]);
+
+  // Expenses grouped by category for Recharts Pie Chart
+  const expensesByCategory = useMemo(() => {
+    const map: Record<string, number> = {};
+    filteredData.expenses.forEach((e) => {
+      const cat = e.category?.trim() || "أخرى";
+      map[cat] = (map[cat] || 0) + Number(e.amount || 0);
+    });
+    return Object.entries(map)
+      .map(([name, value]) => ({ name, value }))
+      .filter((item) => item.value > 0)
+      .sort((a, b) => b.value - a.value);
+  }, [filteredData.expenses]);
+
+  const totalExpensesFromChart = useMemo(() => {
+    return expensesByCategory.reduce((sum, item) => sum + item.value, 0);
+  }, [expensesByCategory]);
 
   // Report conversion calculations
   const reportTotals = useMemo(() => {
@@ -391,7 +457,7 @@ export const FinancialReports: React.FC<FinancialReportsProps> = ({
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-900/60 p-5 rounded-3xl border border-white/5 backdrop-blur-md print:hidden">
         <div>
           <h1 className="text-xl font-black text-white flex items-center gap-2">
-            <PieChart className="w-5 h-5 text-amber-400" />
+            <PieChartIcon className="w-5 h-5 text-amber-400" />
             <span>نظام التقارير المالية والقوائم الختامية</span>
           </h1>
           <p className="text-[10px] font-bold text-slate-400 mt-1">
@@ -773,6 +839,105 @@ export const FinancialReports: React.FC<FinancialReportsProps> = ({
                 <span className="block text-[9px] mt-1 text-slate-400">مخصوماً منها الزكاة المقدرة (2.5%)</span>
               </div>
 
+            </div>
+
+            {/* Expenses by Category Pie Chart Section */}
+            <div className="p-6 rounded-3xl bg-slate-900/60 border border-white/5 space-y-4 print:border-slate-300">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/5 pb-3">
+                <div>
+                  <h3 className="text-xs font-black text-white flex items-center gap-2 font-sans print:text-black">
+                    <PieChartIcon className="w-4 h-4 text-amber-400" />
+                    <span>توزيع المصروفات حسب الفئة (Expenses Breakdown)</span>
+                  </h3>
+                  <p className="text-[10px] text-slate-400 font-medium mt-0.5 print:text-slate-600">
+                    رسم بياني دائري تفاعلي يوضح توزيع وتناسب التكاليف والمصروفات المسجلة حسب التصنيف
+                  </p>
+                </div>
+                <div className="bg-amber-500/10 border border-amber-500/20 px-3.5 py-1.5 rounded-xl text-left self-start sm:self-auto print:border-slate-300">
+                  <span className="block text-[9px] font-bold text-slate-400 print:text-slate-600">إجمالي المصروفات المصنفة</span>
+                  <span className="block text-xs font-black text-amber-400 font-mono print:text-black">
+                    {totalExpensesFromChart.toLocaleString()} ر.س
+                  </span>
+                </div>
+              </div>
+
+              {expensesByCategory.length === 0 ? (
+                <div className="text-center py-10 text-slate-500 text-xs font-bold">
+                  لا توجد مصروفات مسجلة في هذا النطاق أو التصفية الحالية
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+                  
+                  {/* Recharts Pie Chart Canvas */}
+                  <div className="lg:col-span-6 h-64 relative flex items-center justify-center">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={expensesByCategory}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={60}
+                          outerRadius={92}
+                          paddingAngle={3}
+                          dataKey="value"
+                          nameKey="name"
+                        >
+                          {expensesByCategory.map((entry, index) => (
+                            <Cell
+                              key={`cell-${index}`}
+                              fill={
+                                EXPENSE_CATEGORY_COLORS[entry.name] ||
+                                COLOR_PALETTE[index % COLOR_PALETTE.length]
+                              }
+                              stroke="#0f172a"
+                              strokeWidth={2}
+                            />
+                          ))}
+                        </Pie>
+                        <Tooltip content={<ExpenseChartTooltip total={totalExpensesFromChart} />} />
+                      </PieChart>
+                    </ResponsiveContainer>
+
+                    {/* Donut Center Label */}
+                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center">
+                      <span className="text-[9px] font-bold text-slate-400">عدد الفئات</span>
+                      <span className="text-lg font-black text-white font-mono print:text-black">{expensesByCategory.length}</span>
+                    </div>
+                  </div>
+
+                  {/* Category Legend Badges & Amounts */}
+                  <div className="lg:col-span-6 space-y-2 max-h-64 overflow-y-auto pr-1">
+                    {expensesByCategory.map((item, idx) => {
+                      const color =
+                        EXPENSE_CATEGORY_COLORS[item.name] ||
+                        COLOR_PALETTE[idx % COLOR_PALETTE.length];
+                      const pct = totalExpensesFromChart > 0
+                        ? ((item.value / totalExpensesFromChart) * 100).toFixed(1)
+                        : "0";
+
+                      return (
+                        <div
+                          key={item.name}
+                          className="flex items-center justify-between p-2.5 rounded-xl bg-white/5 border border-white/5 hover:border-white/10 transition-all text-xs print:border-slate-200 print:bg-slate-50"
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <span
+                              className="w-3 h-3 rounded-full shrink-0"
+                              style={{ backgroundColor: color }}
+                            ></span>
+                            <span className="font-bold text-slate-200 print:text-black">{item.name}</span>
+                          </div>
+                          <div className="flex items-center gap-3 font-mono">
+                            <span className="text-slate-400 text-[10px] print:text-slate-600">{pct}%</span>
+                            <span className="font-black text-amber-400 print:text-black">{item.value.toLocaleString()} ر.س</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                </div>
+              )}
             </div>
 
             {/* Detailed Accounting Ledger Sheet */}

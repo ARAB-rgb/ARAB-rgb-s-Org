@@ -26,6 +26,9 @@ export interface UserPerms {
   dashLateClients: boolean;
   dashLastReceipts: boolean;
   dashUpcomingPaid: boolean;
+  dashboard?: boolean;
+  attendance?: boolean;
+  financial_reports?: boolean;
   is_authorized?: boolean;
   use_global?: boolean;
   worker_id?: string | null;
@@ -62,6 +65,15 @@ export interface User {
   created_at?: string;
   email?: string;
   google_id?: string;
+  phone?: string;
+  requested_company_name?: string;
+  requested_company_slug?: string;
+  requested_company_manager?: string;
+  requested_company_phone?: string;
+  requested_company_capital?: number;
+  requested_company_address?: string;
+  requested_company_record_no?: string;
+  requested_company_tax_no?: string;
 }
 
 export interface Installment {

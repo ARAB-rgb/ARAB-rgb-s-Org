@@ -43,6 +43,7 @@ interface DashboardProps {
   sbStatus?: "checking" | "connected" | "fallback";
   companies?: any[];
   selectedCompanyId?: string;
+  currentUser?: any;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -53,7 +54,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onNavigateToContracts,
   sbStatus = "connected",
   companies = [],
-  selectedCompanyId = "all"
+  selectedCompanyId = "all",
+  currentUser,
 }) => {
   const [showCapitalExplanation, setShowCapitalExplanation] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
@@ -261,9 +263,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // --- CALCULATE COMPANIES ---
   const companyStats = React.useMemo(() => {
     // Determine which companies should be processed (only authorized ones)
+    const userCompId = currentUser?.company_id || "arab_world";
+    const allowedCompanies = currentUser?.role === "admin"
+      ? companies
+      : companies.filter(c => c.id === userCompId);
+
     const visibleCompanies = selectedCompanyId === "all" 
-      ? companies 
-      : companies.filter(c => c.id === selectedCompanyId);
+      ? allowedCompanies 
+      : allowedCompanies.filter(c => c.id === selectedCompanyId);
 
     return visibleCompanies.map(comp => {
       const compId = comp.id || "arab_world";

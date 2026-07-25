@@ -12,7 +12,7 @@ import {
   PieChart, ShieldAlert, ShieldCheck, List, Map as MapIcon, Filter
 } from "lucide-react";
 
-import { User as AuthUser, Installment, Quote, Receipt, Payment, Expense, Project, Worker, DbSession, Company, Extract, AttendanceRecord } from "./types";
+import { User as AuthUser, UserPerms, Installment, Quote, Receipt, Payment, Expense, Project, Worker, DbSession, Company, Extract, AttendanceRecord } from "./types";
 import {
   sb, logSession, getContractTiming, awExtractRegion, awCleanNotes, awExtractAttachment,
   awBuildNotesWithRegion, awBuildNotesWithRegionAndTreasury, awBuildNotesWithRegionAndTreasuryAndCapital, awExtractTreasury, awExtractCapital, generateNextNo,
@@ -217,6 +217,143 @@ const getStoredTreasuries = (companyId?: string | null, companiesList?: Company[
   } catch {}
   return defaults;
 };
+
+function PendingUserApprovalCard({
+  pendingUser,
+  companies,
+  onApprove,
+  onReject,
+}: {
+  key?: React.Key;
+  pendingUser: AuthUser;
+  companies: Company[];
+  onApprove: (userId: string, companyId: string, role: "admin" | "supervisor" | "employee", perms?: UserPerms) => Promise<void>;
+  onReject: (userId: string) => Promise<void>;
+}) {
+  const [selectedCompId, setSelectedCompId] = useState<string>(
+    pendingUser.requested_company_name ? "CREATE_NEW" : (pendingUser.company_id || companies[0]?.id || "arab_world")
+  );
+  const [selectedRole, setSelectedRole] = useState<"admin" | "supervisor" | "employee">(
+    pendingUser.role || (pendingUser.requested_company_name ? "admin" : "employee")
+  );
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  return (
+    <div className="bg-slate-950/90 border-2 border-amber-500/30 rounded-2xl p-5 space-y-4 shadow-xl relative" dir="rtl">
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 border-b border-slate-800 pb-3">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-black text-white">{pendingUser.name}</span>
+            {pendingUser.google_id && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-blue-500/20 text-blue-400 px-2.5 py-0.5 rounded-md border border-blue-500/30">
+                🔵 موثق عبر Google
+              </span>
+            )}
+            <span className="text-[10px] font-bold bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded-md border border-amber-500/20 font-mono">
+              كود الموظف: {pendingUser.code}
+            </span>
+          </div>
+          <div className="text-xs text-slate-400 flex items-center gap-3 flex-wrap mt-1">
+            <span>📧 {pendingUser.email || "دون بريد"}</span>
+            <span>📱 {pendingUser.phone || "دون جوال"}</span>
+            <span className="text-[10px] text-slate-500 font-mono">📅 {pendingUser.created_at ? new Date(pendingUser.created_at).toLocaleDateString("ar-SA") : "الآن"}</span>
+          </div>
+        </div>
+
+        {/* Requested company metadata display */}
+        <div className="bg-slate-900/90 border border-slate-800 p-3 rounded-xl max-w-lg w-full">
+          {pendingUser.requested_company_name ? (
+            <div className="space-y-1">
+              <span className="text-xs font-black text-amber-400 flex items-center gap-1">
+                🚀 طلب تأسيس شركة جديدة: <span className="text-white underline">{pendingUser.requested_company_name}</span>
+              </span>
+              <div className="text-[10px] text-slate-300 grid grid-cols-2 gap-1 font-mono">
+                <span>الرابط: /{pendingUser.requested_company_slug}</span>
+                <span>المدير: {pendingUser.requested_company_manager || pendingUser.name}</span>
+                <span>الهاتف: {pendingUser.requested_company_phone || pendingUser.phone || "-"}</span>
+                <span>رأس المال: {pendingUser.requested_company_capital ? Number(pendingUser.requested_company_capital).toLocaleString('ar-SA') : 0} ر.س</span>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-1">
+              <span className="text-xs font-bold text-indigo-300">
+                🏢 طلب انضمام لشركة قائمة: <span className="text-white font-black">{companies.find(c => c.id === pendingUser.company_id)?.name || "شركة عرب وورلد"}</span>
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Decision assignment controls */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 bg-slate-900/60 p-3.5 rounded-xl border border-slate-800/80">
+        <div className="space-y-1">
+          <label className="text-[10px] font-bold text-slate-300 block">إسناد وتعيين الشركة</label>
+          <select
+            value={selectedCompId}
+            onChange={(e) => setSelectedCompId(e.target.value)}
+            className="w-full h-9 px-3 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-amber-400 focus:outline-none cursor-pointer text-slate-950 bg-white"
+          >
+            {pendingUser.requested_company_name && (
+              <option value="CREATE_NEW" className="text-slate-950 font-bold">
+                ✨ تأسيس واعتماد الشركة الجديدة ({pendingUser.requested_company_name})
+              </option>
+            )}
+            {companies.map((c) => (
+              <option key={c.id} value={c.id} className="text-slate-950">
+                🏢 {c.name} ({c.slug})
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-[10px] font-bold text-slate-300 block">الدور والمستوى الإداري</label>
+          <select
+            value={selectedRole}
+            onChange={(e: any) => setSelectedRole(e.target.value)}
+            className="w-full h-9 px-3 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none cursor-pointer text-slate-950 bg-white"
+          >
+            <option value="admin" className="text-slate-950">👑 أدمن مكتب عام / مدير منشأة</option>
+            <option value="supervisor" className="text-slate-950">🕵️‍♂️ مشرف مكتب عام / رئيسي</option>
+            <option value="employee" className="text-slate-950">👨‍💼 موظف فرع محدود</option>
+          </select>
+        </div>
+
+        <div className="flex items-end gap-2">
+          <button
+            disabled={isSubmitting}
+            onClick={async () => {
+              setIsSubmitting(true);
+              try {
+                await onApprove(pendingUser.id, selectedCompId, selectedRole);
+              } finally {
+                setIsSubmitting(false);
+              }
+            }}
+            className="flex-1 h-9 bg-gradient-to-l from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 font-black rounded-xl text-xs transition-all flex items-center justify-center gap-1 shadow-md shadow-emerald-500/10 cursor-pointer disabled:opacity-50"
+          >
+            {isSubmitting ? "جاري الاعتماد..." : "✅ قبول واعتماد الحساب والصلاحيات"}
+          </button>
+
+          <button
+            disabled={isSubmitting}
+            onClick={async () => {
+              setIsSubmitting(true);
+              try {
+                await onReject(pendingUser.id);
+              } finally {
+                setIsSubmitting(false);
+              }
+            }}
+            className="h-9 px-3 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-400 font-bold rounded-xl text-xs transition-all flex items-center justify-center cursor-pointer disabled:opacity-50"
+          >
+            ❌ رفض
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   const [activeSection, setActiveSection] = useState<string>("dashboard");
@@ -843,26 +980,36 @@ export default function App() {
 
       if (existingUser) {
         const user: AuthUser = existingUser as AuthUser;
+        if (user.status === "بانتظار الاعتماد" || user.status === "pending") {
+          showToast("⚠️ حسابك وطلبك بانتظار موافقة الأدمن وتعيين الشركة والصلاحيات!", "info");
+          setIsLoading(false);
+          return;
+        }
+        if (user.status === "مرفوض") {
+          showToast("❌ عذراً، طلب التسجيل مرفوض من قبل الأدمن. يرجى التواصل مع الإدارة.", "error");
+          setIsLoading(false);
+          return;
+        }
         if (user.status && user.status !== "نشط") {
           showToast("⚠️ عذراً، هذا الحساب موقوف أو معطل حالياً من قبل الإدارة!", "error");
           setIsLoading(false);
           return;
         }
 
-        // Successfully logged in directly because they are linked!
+        // Successfully logged in directly because they are active & linked!
         setCurrentUser(user);
         localStorage.setItem("aw_current_user", JSON.stringify(user));
         showToast(`مرحباً بك مجدداً ${user.name} (تم الدخول عبر Google)`);
         await logSession(user, "تسجيل دخول بالنظام المالي (Google)");
         await loadEverything();
       } else {
-        // Not linked yet! Let's prompt them to complete the linking requirements.
+        // Not registered/linked yet!
         setGoogleUser({
           email: gUser.email,
           uid: gUser.uid,
           displayName: gUser.displayName || undefined,
         });
-        showToast("✓ تم التحقق من حساب Google بنجاح! يرجى إكمال الحقول التالية لربطه بمنشأتك.", "info");
+        showToast("✓ تم التحقق من حساب Google بنجاح! يرجى إكمال تسجيل بياناتك وطلب منشأتك.", "info");
       }
     } catch (err: any) {
       console.error(err);
@@ -979,6 +1126,177 @@ export default function App() {
     }
   };
 
+  const handleRegisterPendingUser = async (data: {
+    name: string;
+    email: string;
+    google_id?: string;
+    phone: string;
+    company_id?: string;
+    requested_company_name?: string;
+    requested_company_slug?: string;
+    requested_company_manager?: string;
+    requested_company_phone?: string;
+    requested_company_capital?: number;
+    requested_company_address?: string;
+    requested_company_record_no?: string;
+    requested_company_tax_no?: string;
+  }) => {
+    setIsLoading(true);
+    try {
+      const generatedCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const generatedPass = Math.floor(100000 + Math.random() * 900000).toString();
+      const newUserId = `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+      const newUserPayload: AuthUser = {
+        id: newUserId,
+        name: data.name,
+        code: generatedCode,
+        password: generatedPass,
+        email: data.email,
+        google_id: data.google_id || "",
+        phone: data.phone,
+        role: data.requested_company_name ? "admin" : "employee",
+        status: "بانتظار الاعتماد",
+        company_id: data.company_id || null,
+        requested_company_name: data.requested_company_name,
+        requested_company_slug: data.requested_company_slug,
+        requested_company_manager: data.requested_company_manager,
+        requested_company_phone: data.requested_company_phone,
+        requested_company_capital: data.requested_company_capital,
+        requested_company_address: data.requested_company_address,
+        requested_company_record_no: data.requested_company_record_no,
+        requested_company_tax_no: data.requested_company_tax_no,
+        perms: {
+          attendance: true,
+          dashboard: true,
+          installmentsView: true,
+          installmentsAdd: true,
+          installmentsEdit: false,
+          installmentsDelete: false,
+          quotes: true,
+          receipts: true,
+          payments: true,
+          expenses: true,
+          treasury: false,
+          financial_reports: true,
+          projects: true,
+          workers: true,
+          companies: false,
+          users: false,
+          sessions: false,
+          print: true,
+          dashTopCards: true,
+          dashCollection: true,
+          dashPulse: true,
+          dashLateClients: true,
+          dashLastReceipts: true,
+          dashUpcomingPaid: true,
+          region: "",
+          worker_id: null
+        },
+        company_perms: {},
+        created_at: new Date().toISOString()
+      };
+
+      const { error } = await sb.from("users").insert(newUserPayload);
+      if (error) {
+        throw error;
+      }
+
+      setUsers((prev) => [newUserPayload, ...prev]);
+      setGoogleUser(null);
+      showToast("✓ تم إرسال طلب تسجيل الحساب والشركة بنجاح للأدمن! سيتم تفعيل حسابك فور الموافقة.", "success");
+      return true;
+    } catch (err: any) {
+      console.error(err);
+      showToast("حدث خطأ أثناء تقديم طلب التسجيل: " + (err?.message || err), "error");
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleApprovePendingUser = async (
+    targetUserId: string,
+    chosenCompanyId: string,
+    chosenRole: "admin" | "supervisor" | "employee",
+    chosenPerms?: UserPerms
+  ) => {
+    setIsLoading(true);
+    try {
+      const targetUser = users.find(u => u.id === targetUserId);
+      if (!targetUser) {
+        showToast("المستخدم غير موجود!", "error");
+        return;
+      }
+
+      let finalCompId = chosenCompanyId;
+
+      // 1. If chosenCompanyId is "CREATE_NEW" and the user requested a new company:
+      if (chosenCompanyId === "CREATE_NEW" && targetUser.requested_company_name) {
+        const compSlug = targetUser.requested_company_slug || `comp-${Date.now()}`;
+        const newCompId = `company_${compSlug}`;
+        const companyPayload = {
+          id: newCompId,
+          slug: compSlug,
+          name: targetUser.requested_company_name,
+          manager: targetUser.requested_company_manager || targetUser.name,
+          phone: targetUser.requested_company_phone || targetUser.phone || "",
+          notes: `تم التأسيس والاعتماد من طلب التسجيل السحابي | رأس المال: ${targetUser.requested_company_capital || 0} ر.س`,
+          created_at: new Date().toISOString()
+        };
+
+        const { error: compErr } = await sb.from("companies").insert(companyPayload);
+        if (compErr) {
+          console.error("Comp creation error:", compErr);
+        }
+        setCompanies(prev => [companyPayload, ...prev]);
+        finalCompId = newCompId;
+      }
+
+      // 2. Default permissions if not passed
+      const permsToSet = chosenPerms || targetUser.perms;
+
+      // 3. Update user in DB
+      const updatedUserFields = {
+        status: "نشط",
+        company_id: finalCompId || null,
+        role: chosenRole,
+        perms: permsToSet
+      };
+
+      const { error: userErr } = await sb.from("users").update(updatedUserFields).eq("id", targetUserId);
+      if (userErr) {
+        throw userErr;
+      }
+
+      // Update local state
+      setUsers(prev => prev.map(u => u.id === targetUserId ? { ...u, ...updatedUserFields } : u));
+      showToast(`✓ تم قبول واعتماد الحساب ${targetUser.name} وتعيين الشركة والصلاحيات بنجاح!`, "success");
+    } catch (err: any) {
+      console.error(err);
+      showToast("فشل في اعتماد المستخدم: " + (err?.message || err), "error");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleRejectPendingUser = async (targetUserId: string) => {
+    setIsLoading(true);
+    try {
+      const { error } = await sb.from("users").update({ status: "مرفوض" }).eq("id", targetUserId);
+      if (error) throw error;
+
+      setUsers(prev => prev.map(u => u.id === targetUserId ? { ...u, status: "مرفوض" } : u));
+      showToast("تم رفض طلب التسجيل.", "info");
+    } catch (err: any) {
+      console.error(err);
+      showToast("فشل في تغيير حالة الطلب: " + (err?.message || err), "error");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleLogout = () => {
     const userToLog = currentUser;
     setCurrentUser(null);
@@ -1058,6 +1376,137 @@ export default function App() {
       }
       setCompanies(compList);
       setExtracts(ext.data || []);
+
+      // Auto-sync and update non-admin users in database to ensure proper names and strict company bindings
+      for (const uItem of uList) {
+        if (uItem.role !== "admin") {
+          let updateNeeded = false;
+          let newCompId = uItem.company_id;
+          let newName = uItem.name || "";
+
+          if (!newCompId || !compList.some((c) => c.id === newCompId)) {
+            newCompId = compList[0]?.id || "arab_world";
+            updateNeeded = true;
+          }
+
+          const matchedComp = compList.find((c) => c.id === newCompId);
+          if (!newName || newName === "موظف" || newName === "عامل" || newName === "مستخدم") {
+            newName = `موظف (${matchedComp?.name || "عرب وورلد"})`;
+            updateNeeded = true;
+          }
+
+          if (updateNeeded) {
+            uItem.company_id = newCompId;
+            uItem.name = newName;
+            try {
+              await sb.from("users").update({ company_id: newCompId, name: newName }).eq("id", uItem.id);
+            } catch (upErr) {
+              console.warn("Failed to sync user company in DB:", uItem.id, upErr);
+            }
+          }
+        }
+      }
+
+      // Seed default sample company employees if not present
+      const hasArabWorldEmp = uList.some((u) => u.company_id === "arab_world" && u.role !== "admin");
+      if (!hasArabWorldEmp && compList.some((c) => c.id === "arab_world")) {
+        const emp1: AuthUser = {
+          id: "emp_arab_world_1001",
+          name: "أحمد علي الفضلي - شركة عرب وورلد",
+          code: "1001",
+          password: "1001",
+          role: "employee",
+          company_id: "arab_world",
+          status: "نشط",
+          perms: {
+            attendance: true,
+            dashboard: true,
+            installmentsView: true,
+            installmentsAdd: true,
+            installmentsEdit: false,
+            installmentsDelete: false,
+            quotes: true,
+            receipts: true,
+            payments: true,
+            expenses: true,
+            treasury: false,
+            financial_reports: true,
+            projects: true,
+            workers: true,
+            companies: false,
+            users: false,
+            sessions: false,
+            print: true,
+            dashTopCards: true,
+            dashCollection: true,
+            dashPulse: true,
+            dashLateClients: true,
+            dashLastReceipts: true,
+            dashUpcomingPaid: true,
+            region: "",
+            worker_id: null
+          },
+          company_perms: {},
+          created_at: new Date().toISOString()
+        };
+        try {
+          await sb.from("users").upsert(emp1, { onConflict: "code" });
+          uList.push(emp1);
+        } catch (e) {
+          console.warn("Could not seed emp1:", e);
+        }
+      }
+
+      const hasDemoEmp = uList.some((u) => u.company_id === "demo_company" && u.role !== "admin");
+      if (!hasDemoEmp && compList.some((c) => c.id === "demo_company")) {
+        const emp2: AuthUser = {
+          id: "emp_demo_company_2001",
+          name: "سعد خالد المري - شركة التجربة المستقلة",
+          code: "2001",
+          password: "2001",
+          role: "employee",
+          company_id: "demo_company",
+          status: "نشط",
+          perms: {
+            attendance: true,
+            dashboard: true,
+            installmentsView: true,
+            installmentsAdd: true,
+            installmentsEdit: false,
+            installmentsDelete: false,
+            quotes: true,
+            receipts: true,
+            payments: true,
+            expenses: true,
+            treasury: false,
+            financial_reports: true,
+            projects: true,
+            workers: true,
+            companies: false,
+            users: false,
+            sessions: false,
+            print: true,
+            dashTopCards: true,
+            dashCollection: true,
+            dashPulse: true,
+            dashLateClients: true,
+            dashLastReceipts: true,
+            dashUpcomingPaid: true,
+            region: "",
+            worker_id: null
+          },
+          company_perms: {},
+          created_at: new Date().toISOString()
+        };
+        try {
+          await sb.from("users").upsert(emp2, { onConflict: "code" });
+          uList.push(emp2);
+        } catch (e) {
+          console.warn("Could not seed emp2:", e);
+        }
+      }
+
+      setUsers([...uList]);
 
       let attData: any[] = [];
       try {
@@ -1544,9 +1993,9 @@ export default function App() {
           setSelectedCompanyId("all");
         }
       } else {
-        const authComps = getAuthorizedCompanies();
-        if (!authComps.some((c) => c.id === selectedCompanyId)) {
-          setSelectedCompanyId(currentUser.company_id || "arab_world");
+        const userCompId = currentUser.company_id || "arab_world";
+        if (selectedCompanyId !== userCompId) {
+          setSelectedCompanyId(userCompId);
         }
         
         // Auto redirect active section if current section is unauthorized for non-admin
@@ -4075,6 +4524,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       <SaasLandingPortal
         companies={companies}
         onRegisterCompany={handleRegisterCompany}
+        onRegisterPendingUser={handleRegisterPendingUser}
         onNavigateToSlug={navigateToSlug}
         showToast={showToast}
         loginCode={loginCode}
@@ -4387,9 +4837,9 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
             {currentUser && getAuthorizedCompanies().length > 0 && (
               <div className="flex items-center gap-2 bg-slate-900/60 border border-amber-500/20 rounded-xl px-3 py-1.5 shadow-lg shadow-amber-500/5 hover:border-amber-500/40 transition-all font-sans">
                 <span className="text-[10px] text-amber-500 font-extrabold whitespace-nowrap">🏢 الشركة النشطة:</span>
-                {activeSlug && currentUser.role !== "admin" ? (
+                {currentUser.role !== "admin" ? (
                   <span className="text-xs font-black text-amber-300">
-                    {companies.find((c) => c.id === selectedCompanyId)?.name || "عرب وورلد"}
+                    {companies.find((c) => c.id === currentUser.company_id)?.name || "شركة عرب وورلد للمقاولات والعقود"}
                   </span>
                 ) : (
                   <select
@@ -4473,6 +4923,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
               sbStatus={sbStatus}
               companies={getAuthorizedCompanies()}
               selectedCompanyId={selectedCompanyId}
+              currentUser={currentUser}
             />
           )}
 
@@ -7395,6 +7846,41 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
           {/* Secure permissions and User configuration block */}
           {activeSection === "users" && (currentUser?.role === "admin" || can("users")) && (
             <div className="space-y-6">
+              {/* Pending Approvals Section */}
+              {users.filter((u) => u.status === "بانتظار الاعتماد" || u.status === "pending").length > 0 && (
+                <div className="bg-slate-900/80 backdrop-blur-xl border-2 border-amber-500/40 rounded-3xl p-6 shadow-2xl space-y-5 relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 rounded-full blur-2xl pointer-events-none"></div>
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-800 pb-4 gap-3">
+                    <div>
+                      <h3 className="text-base font-black text-white flex items-center gap-2">
+                        <span className="text-amber-400 text-lg">⏳</span>
+                        <span>طلبات التسجيل وتأسيس الشركات بانتظار موافقة الأدمن</span>
+                        <span className="bg-amber-500 text-slate-950 font-black text-[11px] px-2.5 py-0.5 rounded-full">
+                          {users.filter((u) => u.status === "بانتظار الاعتماد" || u.status === "pending").length} طلب
+                        </span>
+                      </h3>
+                      <p className="text-[11px] text-slate-400 font-bold mt-1">
+                        يمكنك قبول الطلبات وتحديد الشركة التابعة والصلاحيات المطلوبة للمستخدمين الجدد.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    {users
+                      .filter((u) => u.status === "بانتظار الاعتماد" || u.status === "pending")
+                      .map((pendingUser) => (
+                        <PendingUserApprovalCard
+                          key={pendingUser.id}
+                          pendingUser={pendingUser}
+                          companies={companies}
+                          onApprove={handleApprovePendingUser}
+                          onReject={handleRejectPendingUser}
+                        />
+                      ))}
+                  </div>
+                </div>
+              )}
+
               {/* Supabase Connection Setup Card */}
               <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl space-y-5">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-850 pb-4 gap-3">
