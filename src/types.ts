@@ -204,6 +204,9 @@ export interface AttendanceRecord {
   notes?: string;
   company_id?: string;
   created_at?: string;
+  device_info?: string;
+  device_type?: string;
+  ip_address?: string;
 }
 
 export interface Worker {
@@ -233,6 +236,9 @@ export interface DbSession {
   time: string;
   action: string;
   created_at?: string;
+  device_info?: string;
+  device_type?: string;
+  ip_address?: string;
 }
 
 export interface Company {

@@ -87,6 +87,20 @@ export function SaasLandingPortal({
   const [gReqCompPhone, setGReqCompPhone] = useState("");
   const [gReqCompCapital, setGReqCompCapital] = useState<number | "">("");
 
+  const [savedEmpCode, setSavedEmpCode] = useState<string>("");
+  const [savedEmpName, setSavedEmpName] = useState<string>("");
+
+  React.useEffect(() => {
+    try {
+      const c = localStorage.getItem("aw_saved_employee_code");
+      const n = localStorage.getItem("aw_saved_employee_name");
+      if (c) setSavedEmpCode(c);
+      if (n) setSavedEmpName(n);
+    } catch {
+      //
+    }
+  }, []);
+
   // Auto initialize Google display name if available
   React.useEffect(() => {
     if (googleUser?.displayName) {
@@ -552,6 +566,26 @@ export function SaasLandingPortal({
               </div>
 
               <form onSubmit={handleLogin} className="space-y-5">
+                {/* Saved Quick Employee Login Banner */}
+                {savedEmpCode && (
+                  <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-3 flex items-center justify-between gap-2 text-right animate-in fade-in duration-200">
+                    <div className="space-y-0.5">
+                      <span className="block text-[10px] font-bold text-amber-400">⚡ دخول مباشر مفوّض محفوظ</span>
+                      <span className="block text-xs font-black text-white">{savedEmpName || "موظف مسجل"} (كود: {savedEmpCode})</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLoginCode(savedEmpCode);
+                        showToast(`تم تعبئة كود الموظف (${savedEmpCode}) بنجاح! أدخل كلمة المرور للدخول.`, "info");
+                      }}
+                      className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-black rounded-xl transition-all cursor-pointer shrink-0 shadow-md"
+                    >
+                      استخدام الكود
+                    </button>
+                  </div>
+                )}
+
                 {/* 2. Employee Code */}
                 <div className="space-y-1.5">
                   <div className="flex justify-between items-center px-1">
@@ -569,6 +603,9 @@ export function SaasLandingPortal({
                       className="w-full h-full pl-4 pr-11 py-2.5 bg-slate-950/80 border border-slate-800 rounded-2xl text-xs font-bold text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 transition-all text-right"
                     />
                   </div>
+                  <p className="text-[9px] text-slate-400 font-medium px-1 pt-0.5 leading-relaxed">
+                    💡 <b className="text-amber-400">دخول مباشر للموظف:</b> عند التسجيل لأول مرة، أدخل كودك الوظيفي وكلمة المرور المرغوبة ليتم ربط حسابك اعتمادياً وتلقائياً.
+                  </p>
                 </div>
 
                 {/* 3. Password */}

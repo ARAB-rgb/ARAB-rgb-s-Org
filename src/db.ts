@@ -847,15 +847,26 @@ export function getContractTiming(x: Installment) {
   };
 }
 
-export async function logSession(user: User, action: string) {
+import { detectDevice, getClientIp } from "./utils/device";
+
+export async function logSession(user: User, action: string, customDeviceInfo?: string, customIp?: string, customDeviceType?: string) {
   if (!user) return;
-  await sb.from("sessions").insert({
-    name: user.name,
-    code: user.code,
-    role: user.role,
-    time: new Date().toLocaleString("ar-SA"),
-    action
-  });
+  try {
+    const dev = detectDevice();
+    const ip = customIp || await getClientIp();
+    await sb.from("sessions").insert({
+      name: user.name,
+      code: user.code,
+      role: user.role,
+      time: new Date().toLocaleString("ar-SA"),
+      action,
+      device_info: customDeviceInfo || dev.deviceString,
+      device_type: customDeviceType || dev.deviceType,
+      ip_address: ip
+    });
+  } catch (err) {
+    console.error("Failed to log session:", err);
+  }
 }
 
 export function awCleanWorkerNotes(notes: string): string {

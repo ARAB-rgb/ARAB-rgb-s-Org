@@ -890,25 +890,113 @@ export default function App() {
         return;
       }
 
-      // Query database for the user with matching code and password first
-      let { data, error } = await sb
+      // Query database for the user with matching code or worker record
+      let user: AuthUser | null = null;
+      let isFirstTimeLink = false;
+
+      const { data: userByCode } = await sb
         .from("users")
         .select("*")
         .eq("code", enteredCode)
-        .eq("password", enteredPass)
         .maybeSingle();
 
-      if (error || !data) {
+      if (userByCode) {
+        if (!userByCode.password || userByCode.password.trim() === "") {
+          // First-time login: link password to this employee code
+          userByCode.password = enteredPass;
+          await sb.from("users").update({ password: enteredPass }).eq("id", userByCode.id);
+          user = userByCode as AuthUser;
+          isFirstTimeLink = true;
+        } else if (userByCode.password === enteredPass) {
+          user = userByCode as AuthUser;
+        } else {
+          showToast("رمز أو كلمة المرور غير صحيحة!", "error");
+          setIsLoading(false);
+          return;
+        }
+      } else {
+        // Search workers table for employee by code/phone/id
+        const { data: allWorkers } = await sb.from("workers").select("*");
+        const workerData = (allWorkers || []).find(
+          (w: any) =>
+            (w.worker_id && String(w.worker_id).trim() === enteredCode) ||
+            (w.phone && String(w.phone).trim() === enteredCode) ||
+            (w.id && String(w.id).trim() === enteredCode)
+        );
+
+        if (workerData) {
+          // Create new user account linked to this worker code and password
+          const newWorkerUser: AuthUser = {
+            id: `usr_w_${workerData.id}`,
+            name: workerData.name,
+            code: enteredCode,
+            password: enteredPass,
+            role: "employee",
+            worker_id: workerData.id,
+            company_id: workerData.company_id || null,
+            status: "نشط",
+            perms: {
+              region: "",
+              dashboard: true,
+              attendance: true,
+              financial_reports: false,
+              installmentsView: false,
+              installmentsAdd: false,
+              installmentsEdit: false,
+              installmentsDelete: false,
+              quotes: false,
+              receipts: false,
+              payments: false,
+              expenses: false,
+              treasury: false,
+              projects: false,
+              workers: false,
+              companies: false,
+              users: false,
+              sessions: false,
+              print: false,
+              dashTopCards: false,
+              dashCollection: false,
+              dashPulse: false,
+              dashLateClients: false,
+              dashLastReceipts: false,
+              dashUpcomingPaid: false,
+              worker_id: workerData.id
+            },
+            created_at: new Date().toISOString()
+          };
+
+          const { error: insErr } = await sb.from("users").insert(newWorkerUser);
+          if (insErr) {
+            console.warn("Worker user creation warning:", insErr);
+          }
+          user = newWorkerUser;
+          isFirstTimeLink = true;
+        } else {
+          showToast("بيانات تصريح الدخول أو كود الموظف غير مسجلة!", "error");
+          setIsLoading(false);
+          return;
+        }
+      }
+
+      if (!user) {
         showToast("بيانات تصريح الدخول غير صحيحة!", "error");
         setIsLoading(false);
         return;
       }
 
-      const user: AuthUser = data as AuthUser;
       if (user.status && user.status !== "نشط") {
         showToast("⚠️ عذراً، هذا الحساب موقوف أو معطل حالياً من قبل الإدارة!", "error");
         setIsLoading(false);
         return;
+      }
+
+      // Save employee code for quick direct logins
+      try {
+        localStorage.setItem("aw_saved_employee_code", user.code);
+        localStorage.setItem("aw_saved_employee_name", user.name);
+      } catch (e) {
+        console.warn("LocalStorage error:", e);
       }
 
       // Ensure we have loaded companies
@@ -939,8 +1027,12 @@ export default function App() {
 
       setCurrentUser(user);
       localStorage.setItem("aw_current_user", JSON.stringify(user));
-      showToast(`مرحباً بك مجدداً ${user.name}`);
-      await logSession(user, "تسجيل دخول للنظام المالي");
+      if (isFirstTimeLink) {
+        showToast(`🎉 تم ربط كود الموظف وتفعيل الدخول المباشر بنجاح! أهلاً بك ${user.name}`);
+      } else {
+        showToast(`مرحباً بك مجدداً ${user.name}`);
+      }
+      await logSession(user, isFirstTimeLink ? "ربط وتفعيل دخول مباشر كود الموظف" : "تسجيل دخول للنظام المالي");
       await loadEverything();
     } catch (err: any) {
       console.error(err);
@@ -4633,6 +4725,31 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
           </div>
 
           <form onSubmit={handleLogin} className="space-y-5 relative z-10">
+            {/* Quick saved employee login code helper */}
+            {(() => {
+              const savedC = typeof localStorage !== "undefined" ? localStorage.getItem("aw_saved_employee_code") : null;
+              const savedN = typeof localStorage !== "undefined" ? localStorage.getItem("aw_saved_employee_name") : null;
+              if (!savedC) return null;
+              return (
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-3 flex items-center justify-between gap-2 text-right">
+                  <div className="space-y-0.5">
+                    <span className="block text-[10px] font-bold text-amber-400">⚡ دخول مباشر مفوض محفوظ</span>
+                    <span className="block text-xs font-black text-white">{savedN || "موظف مسجل"} (كود: {savedC})</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLoginCode(savedC);
+                      showToast(`تم تعبئة كود الموظف (${savedC})! أدخل كلمة المرور لتأكيد الدخول.`, "info");
+                    }}
+                    className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-black rounded-xl transition-all cursor-pointer shrink-0 shadow-md"
+                  >
+                    استخدام الكود
+                  </button>
+                </div>
+              );
+            })()}
+
             <div className="space-y-1.5">
               <div className="flex justify-between items-center px-1">
                 <label className="text-[10px] font-black tracking-wider text-slate-300">كود الموظف / اسم المستخدم</label>
@@ -4649,6 +4766,9 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                   className="w-full h-full pl-4 pr-11 py-3 bg-slate-950/60 border border-slate-800/80 rounded-2xl text-xs font-bold text-white placeholder-slate-600 focus:outline-none focus:border-amber-500/85 focus:shadow-[0_0_15px_rgba(245,158,11,0.15)] transition-all"
                 />
               </div>
+              <p className="text-[9px] text-slate-400 font-medium px-1 pt-0.5 leading-relaxed">
+                💡 <b className="text-amber-400">دخول مباشر للموظف:</b> عند الدخول لأول مرة، أدخل كودك المالي/الوظيفي وكلمة المرور ليتم الربط والاعتماد مباشرة.
+              </p>
             </div>
 
             <div className="space-y-1.5">
@@ -9359,6 +9479,8 @@ CREATE TABLE extracts (
                       <th className="py-2.5 px-3 font-bold">المرتبة</th>
                       <th className="py-2.5 px-3 font-bold">توقيت الحركة</th>
                       <th className="py-2.5 px-3 font-bold">العملية المتبعة اليوم</th>
+                      <th className="py-2.5 px-3 font-bold">نوع ومواصفات الجهاز</th>
+                      <th className="py-2.5 px-3 font-bold">عنوان الـ IP</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-850/30">
@@ -9369,6 +9491,14 @@ CREATE TABLE extracts (
                         <td className="py-2 px-3"><span className="text-[10px] text-amber-500 font-bold">{s.role}</span></td>
                         <td className="py-2 px-3 font-mono text-slate-400">{s.time}</td>
                         <td className="py-2 px-3 font-black text-slate-200">{s.action}</td>
+                        <td className="py-2 px-3">
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-800 text-amber-300 border border-slate-700 font-sans">
+                            {s.device_type === "جوال" ? "📱" : s.device_type === "تابلت" ? "📱" : "💻"} {s.device_info || s.device_type || "كمبيوتر"}
+                          </span>
+                        </td>
+                        <td className="py-2 px-3 font-mono text-blue-400 font-bold">
+                          {s.ip_address || "127.0.0.1"}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

@@ -96,6 +96,7 @@ export const FinancialReports: React.FC<FinancialReportsProps> = ({
   currentUser
 }) => {
   const [reportType, setReportType] = useState<ReportType>("income_statement");
+  const [isPrintAll, setIsPrintAll] = useState<boolean>(false);
 
   // Filters State
   const [fromDate, setFromDate] = useState<string>("");
@@ -386,7 +387,19 @@ export const FinancialReports: React.FC<FinancialReportsProps> = ({
 
   // Handle browser printing
   const handlePrint = () => {
+    setIsPrintAll(false);
     window.print();
+  };
+
+  // Handle Printing All Reports (Comprehensive Management PDF / Print Summary)
+  const handlePrintAllReports = () => {
+    setIsPrintAll(true);
+    setTimeout(() => {
+      window.print();
+      setTimeout(() => {
+        setIsPrintAll(false);
+      }, 1000);
+    }, 300);
   };
 
   // Handle downloading report data as Excel-compatible CSV
@@ -465,7 +478,16 @@ export const FinancialReports: React.FC<FinancialReportsProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-2 w-full md:w-auto">
+        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+          <button
+            onClick={handlePrintAllReports}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[11px] font-black bg-emerald-600 hover:bg-emerald-500 text-white transition-all cursor-pointer shadow-lg shadow-emerald-600/20"
+            title="طباعة تقرير شامل يحتوي على كافة القوائم والرسوم البيانية لاجتماعات الإدارة"
+          >
+            <Printer className="w-3.5 h-3.5 text-white" />
+            <span>طباعة جميع التقارير (إداري شامل)</span>
+          </button>
+
           <button
             onClick={() => setShowFilters(!showFilters)}
             className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[11px] font-bold bg-white/5 border border-white/10 hover:bg-white/10 text-slate-200 transition-all cursor-pointer"
@@ -479,7 +501,7 @@ export const FinancialReports: React.FC<FinancialReportsProps> = ({
             className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[11px] font-black bg-amber-500 text-slate-950 hover:bg-amber-400 transition-all cursor-pointer shadow-lg shadow-amber-500/10"
           >
             <Printer className="w-3.5 h-3.5" />
-            <span>طباعة القائمة المالية</span>
+            <span>طباعة القائمة الحالية</span>
           </button>
 
           <button
@@ -815,7 +837,7 @@ export const FinancialReports: React.FC<FinancialReportsProps> = ({
         {/* ========================================================= */}
         {/* 1. REPORT CONTENT: INCOME STATEMENT */}
         {/* ========================================================= */}
-        {reportType === "income_statement" && (
+        {(reportType === "income_statement" || isPrintAll) && (
           <div className="space-y-8 animate-in fade-in duration-300">
             
             {/* Top overview Cards */}
@@ -1049,7 +1071,7 @@ export const FinancialReports: React.FC<FinancialReportsProps> = ({
         {/* ========================================================= */}
         {/* 2. REPORT CONTENT: BALANCE SHEET */}
         {/* ========================================================= */}
-        {reportType === "balance_sheet" && (
+        {(reportType === "balance_sheet" || isPrintAll) && (
           <div className="space-y-8 animate-in fade-in duration-300">
             
             {/* Balance Sheet Equation visual */}
@@ -1176,7 +1198,7 @@ export const FinancialReports: React.FC<FinancialReportsProps> = ({
         {/* ========================================================= */}
         {/* 3. REPORT CONTENT: CASH FLOW STATEMENT */}
         {/* ========================================================= */}
-        {reportType === "cash_flow" && (
+        {(reportType === "cash_flow" || isPrintAll) && (
           <div className="space-y-8 animate-in fade-in duration-300">
             
             {/* Top metrics card for liquidity speed */}
@@ -1301,6 +1323,25 @@ export const FinancialReports: React.FC<FinancialReportsProps> = ({
 
           </div>
         )}
+
+        {/* Management Meetings Signature & Approval Block */}
+        <div className="mt-12 pt-8 border-t-2 border-slate-800 print:border-slate-900 grid grid-cols-3 gap-6 text-center font-sans">
+          <div className="space-y-6">
+            <p className="text-xs font-black text-slate-200 print:text-black">إعداد/ المحاسب المالي</p>
+            <div className="border-b border-dashed border-slate-700 w-36 mx-auto print:border-black" />
+            <p className="text-[10px] text-slate-400 print:text-slate-600 font-bold">التوقيع والتاريخ</p>
+          </div>
+          <div className="space-y-6">
+            <p className="text-xs font-black text-slate-200 print:text-black">مراجعة/ المدير المالي</p>
+            <div className="border-b border-dashed border-slate-700 w-36 mx-auto print:border-black" />
+            <p className="text-[10px] text-slate-400 print:text-slate-600 font-bold">التوقيع والتاريخ</p>
+          </div>
+          <div className="space-y-6">
+            <p className="text-xs font-black text-amber-400 print:text-black">اعتماد/ رئيس مجلس الإدارة</p>
+            <div className="border-b border-dashed border-slate-700 w-36 mx-auto print:border-black" />
+            <p className="text-[10px] text-slate-400 print:text-slate-600 font-bold">التوقيع والختم الرسمي</p>
+          </div>
+        </div>
 
       </div>
     </div>

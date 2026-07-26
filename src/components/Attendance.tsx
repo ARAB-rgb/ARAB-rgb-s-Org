@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { Worker, Project, AttendanceRecord, Company, User as AuthUser } from "../types";
 import { sb } from "../db";
+import { getFullDeviceInfo, detectDevice, getClientIp, ClientDeviceInfo } from "../utils/device";
 
 interface AttendanceProps {
   currentUser: AuthUser | null;
@@ -101,11 +102,18 @@ export const Attendance: React.FC<AttendanceProps> = ({
   const [filterProject, setFilterProject] = useState<string>("");
   const [filterDate, setFilterDate] = useState<string>("");
 
-  // Live Captured Geolocation Info
+  // Live Captured Geolocation & Device Info
   const [gpsLoading, setGpsLoading] = useState<boolean>(false);
   const [capturedLat, setCapturedLat] = useState<number | null>(null);
   const [capturedLng, setCapturedLng] = useState<number | null>(null);
   const [computedDistance, setComputedDistance] = useState<number | null>(null);
+  const [currentDevInfo, setCurrentDevInfo] = useState<ClientDeviceInfo | null>(null);
+
+  useEffect(() => {
+    getFullDeviceInfo().then((info) => {
+      setCurrentDevInfo(info);
+    });
+  }, []);
 
   // Manual Punch dialog / states for Admins
   const [showManualModal, setShowManualModal] = useState<boolean>(false);
@@ -432,6 +440,8 @@ export const Attendance: React.FC<AttendanceProps> = ({
       }
 
       const targetWorker = workers.find((w) => w.id === workerIdToUse);
+      const devInfo = currentDevInfo || await getFullDeviceInfo();
+
       const row: AttendanceRecord = {
         id: Math.random().toString(36).substring(7),
         worker_id: workerIdToUse,
@@ -445,7 +455,10 @@ export const Attendance: React.FC<AttendanceProps> = ({
         distance_in_meters: distance ?? undefined,
         status: distance !== null && distance > (proj?.allowed_radius || 25) ? "حاضر (تجاوز النطاق)" : "حاضر (GPS)",
         company_id: proj?.company_id || targetWorker?.company_id,
-        created_at: new Date().toISOString()
+        created_at: new Date().toISOString(),
+        device_info: devInfo.deviceString,
+        device_type: devInfo.deviceType,
+        ip_address: devInfo.ipAddress
       };
 
       const { error } = await sb.from("attendance").insert(row);
@@ -514,12 +527,16 @@ export const Attendance: React.FC<AttendanceProps> = ({
         }
       }
 
+      const devInfo = currentDevInfo || await getFullDeviceInfo();
       const updatedRow = {
         ...activeRecord,
         check_out_time: new Date().toLocaleTimeString("ar-EG", { hour12: false }),
         check_out_lat: coords?.lat ?? undefined,
         check_out_lng: coords?.lng ?? undefined,
-        status: activeRecord.status.includes("تجاوز") ? "حاضر (تجاوز النطاق)" : "حاضر تكميلي"
+        status: activeRecord.status.includes("تجاوز") ? "حاضر (تجاوز النطاق)" : "حاضر تكميلي",
+        device_info: activeRecord.device_info || devInfo.deviceString,
+        device_type: activeRecord.device_type || devInfo.deviceType,
+        ip_address: activeRecord.ip_address || devInfo.ipAddress
       };
 
       const { error } = await sb.from("attendance").update(updatedRow).eq("id", activeRecord.id);
@@ -569,7 +586,10 @@ export const Attendance: React.FC<AttendanceProps> = ({
         status: "إدخال يدوي (إداري)",
         notes: mNotes.trim(),
         company_id: proj?.company_id || targetWorker?.company_id,
-        created_at: new Date().toISOString()
+        created_at: new Date().toISOString(),
+        device_info: "إدخال يدوي (إداري)",
+        device_type: "كمبيوتر",
+        ip_address: "إداري"
       };
 
       const { error } = await sb.from("attendance").insert(row);
@@ -874,6 +894,18 @@ export const Attendance: React.FC<AttendanceProps> = ({
                     </div>
                   </div>
 
+                  {/* Device Specs & IP Readout */}
+                  <div className="bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/80 space-y-1.5 text-[10px]">
+                    <div className="flex justify-between items-center text-slate-300 font-bold">
+                      <span className="flex items-center gap-1">📱 مواصفات ونوع الجهاز:</span>
+                      <span className="text-amber-400 font-mono font-black">{currentDevInfo?.deviceString || "جاري التحديد..."}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-slate-300 font-bold">
+                      <span className="flex items-center gap-1">🌐 عنوان الـ IP الحالي:</span>
+                      <span className="text-blue-400 font-mono font-black">{currentDevInfo?.ipAddress || "جاري جلب الـ IP..."}</span>
+                    </div>
+                  </div>
+
                   {selectedProject?.latitude && selectedProject?.longitude ? (
                     <div className="text-[10px] border-t border-slate-900 pt-2 space-y-1">
                       <div className="flex justify-between text-slate-400 font-bold">
@@ -1015,6 +1047,7 @@ export const Attendance: React.FC<AttendanceProps> = ({
                       <th className="py-3 px-3">حضور</th>
                       <th className="py-3 px-3">انصراف</th>
                       <th className="py-3 px-3">مدة العمل</th>
+                      <th className="py-3 px-3">الجهاز المستعمل / الـ IP</th>
                       <th className="py-3 px-3">التواجد بالعمل</th>
                       <th className="py-3 px-3 text-center">الإجراء</th>
                     </tr>
@@ -1022,7 +1055,7 @@ export const Attendance: React.FC<AttendanceProps> = ({
                   <tbody>
                     {filteredLogs.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="py-8 text-center text-slate-500 font-bold">
+                        <td colSpan={9} className="py-8 text-center text-slate-500 font-bold">
                           لا توجد سجلات حضور مسجلة تطابق معايير البحث والفلترة المحددة.
                         </td>
                       </tr>
@@ -1055,6 +1088,18 @@ export const Attendance: React.FC<AttendanceProps> = ({
                             <td className="py-3.5 px-3 font-mono text-emerald-400 font-black">{log.check_in_time || "—"}</td>
                             <td className="py-3.5 px-3 font-mono text-amber-400 font-black">{log.check_out_time || "—"}</td>
                             <td className="py-3.5 px-3 font-sans font-black text-slate-100">{durationStr}</td>
+                            <td className="py-3.5 px-3">
+                              <div className="space-y-0.5">
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-800 text-amber-300 border border-slate-700 font-sans">
+                                  {log.device_type === "جوال" ? "📱" : log.device_type === "تابلت" ? "📱" : "💻"} {log.device_info || log.device_type || "كمبيوتر"}
+                                </span>
+                                {log.ip_address && (
+                                  <span className="block text-[9px] font-mono text-blue-400 font-bold">
+                                    🌐 {log.ip_address}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
                             <td className="py-3.5 px-3 font-mono">
                               <span className={`inline-flex items-center gap-1 font-black ${presencePct.includes("تجاوز") ? "text-rose-400" : "text-emerald-400"}`}>
                                 <span>{presencePct}</span>
