@@ -701,7 +701,7 @@ export default function App() {
   const [pNotes, setPNotes] = useState("");
   const [pLatitude, setPLatitude] = useState<number | "">("");
   const [pLongitude, setPLongitude] = useState<number | "">("");
-  const [pAllowedRadius, setPAllowedRadius] = useState<number | "">(200);
+  const [pAllowedRadius, setPAllowedRadius] = useState<number | "">(25);
 
   const [attendances, setAttendances] = useState<AttendanceRecord[]>([]);
 
@@ -3451,7 +3451,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       setProjectCompanyId("");
       setPLatitude("");
       setPLongitude("");
-      setPAllowedRadius(200);
+      setPAllowedRadius(25);
       await loadEverything();
       showToast("تم حفظ بطاقة المشروع بنجاح!");
     } catch {
@@ -6522,7 +6522,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                         <label className="block text-[10px] font-black text-slate-400">مسافة القبول القصوى (بالمتر)</label>
                         <input
                           type="number"
-                          placeholder="مثال: 200 متر"
+                          placeholder="مثال: 25 متر"
                           value={pAllowedRadius}
                           onChange={(e) => setPAllowedRadius(e.target.value ? Number(e.target.value) : "")}
                           className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 font-sans"
@@ -6536,7 +6536,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                 </div>
                 <div className="flex gap-2 justify-end">
                   {editProjectId && (
-                    <button type="button" onClick={() => { setEditProjectId(null); setPName(""); setPLocation(""); setPEngineer(""); setPBudget(""); setPProgress(0); setPNotes(""); setProjectCompanyId(""); setPLatitude(""); setPLongitude(""); setPAllowedRadius(200); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black cursor-pointer hover:bg-slate-700 text-white transition-colors">إلغاء</button>
+                    <button type="button" onClick={() => { setEditProjectId(null); setPName(""); setPLocation(""); setPEngineer(""); setPBudget(""); setPProgress(0); setPNotes(""); setProjectCompanyId(""); setPLatitude(""); setPLongitude(""); setPAllowedRadius(25); }} className="px-5 py-2.5 bg-slate-800 rounded-xl text-xs font-black cursor-pointer hover:bg-slate-700 text-white transition-colors">إلغاء</button>
                   )}
                   <button type="submit" className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-black transition-colors cursor-pointer">{editProjectId ? "حفظ التحديث" : "إنشاء بطاقة المشروع"}</button>
                 </div>
@@ -6653,7 +6653,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                                   setProjectCompanyId(p.company_id || "");
                                   setPLatitude(p.latitude !== undefined && p.latitude !== null ? p.latitude : "");
                                   setPLongitude(p.longitude !== undefined && p.longitude !== null ? p.longitude : "");
-                                  setPAllowedRadius(p.allowed_radius !== undefined && p.allowed_radius !== null ? p.allowed_radius : 200);
+                                  setPAllowedRadius(p.allowed_radius !== undefined && p.allowed_radius !== null ? p.allowed_radius : 25);
                                   document.getElementById("projects-tab-view")?.scrollIntoView({ behavior: "smooth" });
                                 }}
                                 className="p-1 text-blue-400 hover:text-white"

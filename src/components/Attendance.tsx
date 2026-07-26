@@ -407,7 +407,7 @@ export const Attendance: React.FC<AttendanceProps> = ({
         }
 
         distance = getDistanceInMeters(coords.lat, coords.lng, proj.latitude!, proj.longitude!);
-        const allowedRadius = proj.allowed_radius || 200;
+        const allowedRadius = proj.allowed_radius || 25;
 
         if (distance > allowedRadius && !bypassGpsRange) {
           showToast(
@@ -443,7 +443,7 @@ export const Attendance: React.FC<AttendanceProps> = ({
         check_in_lat: coords?.lat ?? undefined,
         check_in_lng: coords?.lng ?? undefined,
         distance_in_meters: distance ?? undefined,
-        status: distance !== null && distance > (proj?.allowed_radius || 200) ? "حاضر (تجاوز النطاق)" : "حاضر (GPS)",
+        status: distance !== null && distance > (proj?.allowed_radius || 25) ? "حاضر (تجاوز النطاق)" : "حاضر (GPS)",
         company_id: proj?.company_id || targetWorker?.company_id,
         created_at: new Date().toISOString()
       };
@@ -502,7 +502,7 @@ export const Attendance: React.FC<AttendanceProps> = ({
         }
 
         distance = getDistanceInMeters(coords.lat, coords.lng, proj.latitude!, proj.longitude!);
-        const allowedRadius = proj.allowed_radius || 200;
+        const allowedRadius = proj.allowed_radius || 25;
 
         if (distance > allowedRadius && !bypassGpsRange) {
           showToast(
@@ -884,14 +884,14 @@ export const Attendance: React.FC<AttendanceProps> = ({
                       </div>
                       <div className="flex justify-between text-slate-400 font-bold">
                         <span>المسافة الفعلية للجهاز:</span>
-                        <strong className={`font-mono font-black ${computedDistance !== null && computedDistance <= (selectedProject.allowed_radius || 200) ? "text-emerald-400" : "text-rose-400"}`}>
+                        <strong className={`font-mono font-black ${computedDistance !== null && computedDistance <= (selectedProject.allowed_radius || 25) ? "text-emerald-400" : "text-rose-400"}`}>
                           {computedDistance !== null ? `${computedDistance} متر` : "—"}
                         </strong>
                       </div>
                       <div className="flex justify-between text-slate-400 font-bold">
                         <span>النطاق الأقصى المسموح:</span>
                         <strong className="text-slate-200 font-mono">
-                          {selectedProject.allowed_radius || 200} م
+                          {selectedProject.allowed_radius || 25} م
                         </strong>
                       </div>
                     </div>
