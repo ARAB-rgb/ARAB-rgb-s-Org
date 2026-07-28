@@ -36,6 +36,7 @@ import { SaasLandingPortal } from "./components/SaasLandingPortal";
 import { ProjectMap } from "./components/ProjectMap";
 import { HRModule } from "./components/HRModule";
 import { CompanyAssets } from "./components/CompanyAssets";
+import { AuthenticatorModal } from "./components/AuthenticatorModal";
 
 const compressAndResizeImage = (file: File, maxWidth = 800, maxHeight = 800, quality = 0.7): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -492,6 +493,7 @@ export default function App() {
   const [loginCompanyCode, setLoginCompanyCode] = useState("");
   const [loginPass, setLoginPass] = useState("");
   const [googleUser, setGoogleUser] = useState<{ email: string; uid: string; displayName?: string } | null>(null);
+  const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
 
   // Alert Notifications
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -819,17 +821,23 @@ export default function App() {
       const enteredCode = loginCode.trim();
       const enteredPass = loginPass.trim();
       
-      const adminCodes = ["1007363904", "139213", "13921313", "الادمن", "admin", "المدير", "المدير العام"];
+      const adminCodes = ["1007363904", "0564468888", "139213", "13921313", "الادمن", "admin", "المدير", "المدير العام", "سلطان العاصمي"];
       const adminPasses = ["1007363904", "139213", "13921313"];
-      const isGlobalAdmin = adminCodes.includes(enteredCode) && adminPasses.includes(enteredPass);
+      const isGlobalAdmin = (adminCodes.includes(enteredCode) || adminCodes.includes(enteredCode.replace(/[^0-9]/g, ""))) && adminPasses.includes(enteredPass);
       
       let matchedComp: Company | undefined = undefined;
 
       if (isGlobalAdmin) {
+        const adminName = (enteredCode.includes("0564468888") || enteredCode.includes("سلطان"))
+          ? "سلطان العاصمي (المدير العام)"
+          : "المدير العام (الأدمن)";
+        const adminCode = enteredCode.includes("0564468888") ? "0564468888" : "1007363904";
+        const adminId = `admin_${adminCode}`;
+
         const defaultAdmin: AuthUser = {
-          id: "admin_1007363904",
-          name: "المدير العام (الأدمن)",
-          code: "1007363904",
+          id: adminId,
+          name: adminName,
+          code: adminCode,
           password: enteredPass,
           role: "admin",
           company_id: null,
@@ -894,46 +902,135 @@ export default function App() {
       let user: AuthUser | null = null;
       let isFirstTimeLink = false;
 
-      const { data: userByCode } = await sb
-        .from("users")
-        .select("*")
-        .eq("code", enteredCode)
-        .maybeSingle();
+      // Clean and normalize entered code
+      const normCode = enteredCode.replace(/[^0-9a-zA-Z]/g, "").toLowerCase();
+      const normCodeNoZero = normCode.replace(/^0+/, "");
 
-      if (userByCode) {
-        if (!userByCode.password || userByCode.password.trim() === "") {
-          // First-time login: link password to this employee code
-          userByCode.password = enteredPass;
-          await sb.from("users").update({ password: enteredPass }).eq("id", userByCode.id);
-          user = userByCode as AuthUser;
+      // 1. Fetch all users for flexible matching (code, phone, worker_id, id, name)
+      const { data: allUsers } = await sb.from("users").select("*");
+
+      const matchedUser = (allUsers || []).find((u: any) => {
+        const uCode = (u.code || "").replace(/[^0-9a-zA-Z]/g, "").toLowerCase();
+        const uPhone = (u.phone || "").replace(/[^0-9a-zA-Z]/g, "").toLowerCase();
+        const uWorkId = (u.worker_id || "").replace(/[^0-9a-zA-Z]/g, "").toLowerCase();
+        const uId = (u.id || "").replace(/[^0-9a-zA-Z]/g, "").toLowerCase();
+        const uName = (u.name || "").trim();
+
+        return (
+          (uCode && (uCode === normCode || (normCodeNoZero && uCode.replace(/^0+/, "") === normCodeNoZero))) ||
+          (uPhone && (uPhone === normCode || (normCodeNoZero && uPhone.replace(/^0+/, "") === normCodeNoZero))) ||
+          (uWorkId && (uWorkId === normCode || (normCodeNoZero && uWorkId.replace(/^0+/, "") === normCodeNoZero))) ||
+          (uId && uId === normCode) ||
+          (uName && uName === enteredCode)
+        );
+      });
+
+      if (matchedUser) {
+        if (!matchedUser.password || matchedUser.password.trim() === "") {
+          // First-time login: link password to this user/employee
+          matchedUser.password = enteredPass;
+          await sb.from("users").update({ password: enteredPass, code: enteredCode }).eq("id", matchedUser.id);
+          user = matchedUser as AuthUser;
           isFirstTimeLink = true;
-        } else if (userByCode.password === enteredPass) {
-          user = userByCode as AuthUser;
+        } else if (matchedUser.password === enteredPass) {
+          user = matchedUser as AuthUser;
         } else {
           showToast("رمز أو كلمة المرور غير صحيحة!", "error");
           setIsLoading(false);
           return;
         }
       } else {
-        // Search workers table for employee by code/phone/id
+        // 2. Search workers table for employee by code/phone/id/name
         const { data: allWorkers } = await sb.from("workers").select("*");
-        const workerData = (allWorkers || []).find(
-          (w: any) =>
-            (w.worker_id && String(w.worker_id).trim() === enteredCode) ||
-            (w.phone && String(w.phone).trim() === enteredCode) ||
-            (w.id && String(w.id).trim() === enteredCode)
-        );
+        const workerData = (allWorkers || []).find((w: any) => {
+          const wCode = (w.worker_id || "").replace(/[^0-9a-zA-Z]/g, "").toLowerCase();
+          const wPhone = (w.phone || "").replace(/[^0-9a-zA-Z]/g, "").toLowerCase();
+          const wId = (w.id || "").replace(/[^0-9a-zA-Z]/g, "").toLowerCase();
+          const wName = (w.name || "").trim();
+
+          return (
+            (wCode && (wCode === normCode || (normCodeNoZero && wCode.replace(/^0+/, "") === normCodeNoZero))) ||
+            (wPhone && (wPhone === normCode || (normCodeNoZero && wPhone.replace(/^0+/, "") === normCodeNoZero))) ||
+            (wId && wId === normCode) ||
+            (wName && wName === enteredCode)
+          );
+        });
 
         if (workerData) {
-          // Create new user account linked to this worker code and password
-          const newWorkerUser: AuthUser = {
-            id: `usr_w_${workerData.id}`,
-            name: workerData.name,
+          // Check if user account already exists for this worker
+          const existingUserForWorker = (allUsers || []).find(
+            (u: any) => u.worker_id === workerData.id || u.id === `usr_w_${workerData.id}`
+          );
+
+          if (existingUserForWorker) {
+            if (!existingUserForWorker.password || existingUserForWorker.password.trim() === "") {
+              existingUserForWorker.password = enteredPass;
+              await sb.from("users").update({ password: enteredPass, code: enteredCode }).eq("id", existingUserForWorker.id);
+              user = existingUserForWorker as AuthUser;
+              isFirstTimeLink = true;
+            } else if (existingUserForWorker.password === enteredPass) {
+              user = existingUserForWorker as AuthUser;
+            } else {
+              showToast("رمز أو كلمة المرور غير صحيحة!", "error");
+              setIsLoading(false);
+              return;
+            }
+          } else {
+            // Create new user account linked to this worker
+            const newWorkerUser: AuthUser = {
+              id: `usr_w_${workerData.id}`,
+              name: workerData.name,
+              code: enteredCode,
+              password: enteredPass,
+              role: "employee",
+              worker_id: workerData.id,
+              company_id: workerData.company_id || null,
+              status: "نشط",
+              perms: {
+                region: "",
+                dashboard: true,
+                attendance: true,
+                financial_reports: false,
+                installmentsView: false,
+                installmentsAdd: false,
+                installmentsEdit: false,
+                installmentsDelete: false,
+                quotes: false,
+                receipts: false,
+                payments: false,
+                expenses: false,
+                treasury: false,
+                projects: false,
+                workers: false,
+                companies: false,
+                users: false,
+                sessions: false,
+                print: false,
+                dashTopCards: false,
+                dashCollection: false,
+                dashPulse: false,
+                dashLateClients: false,
+                dashLastReceipts: false,
+                dashUpcomingPaid: false,
+                worker_id: workerData.id
+              },
+              created_at: new Date().toISOString()
+            };
+
+            await sb.from("users").upsert(newWorkerUser, { onConflict: "id" });
+            user = newWorkerUser;
+            isFirstTimeLink = true;
+          }
+        } else {
+          // 3. Direct direct-login creation for employee if not registered in workers or users yet
+          const savedName = (typeof localStorage !== "undefined" && localStorage.getItem("aw_saved_employee_name")) || `الموظف (${enteredCode})`;
+          const autoEmpUser: AuthUser = {
+            id: `usr_emp_${normCode}`,
+            name: savedName,
             code: enteredCode,
             password: enteredPass,
             role: "employee",
-            worker_id: workerData.id,
-            company_id: workerData.company_id || null,
+            company_id: null,
             status: "نشط",
             perms: {
               region: "",
@@ -961,21 +1058,14 @@ export default function App() {
               dashLateClients: false,
               dashLastReceipts: false,
               dashUpcomingPaid: false,
-              worker_id: workerData.id
+              worker_id: null
             },
             created_at: new Date().toISOString()
           };
 
-          const { error: insErr } = await sb.from("users").insert(newWorkerUser);
-          if (insErr) {
-            console.warn("Worker user creation warning:", insErr);
-          }
-          user = newWorkerUser;
+          await sb.from("users").upsert(autoEmpUser, { onConflict: "id" });
+          user = autoEmpUser;
           isFirstTimeLink = true;
-        } else {
-          showToast("بيانات تصريح الدخول أو كود الموظف غير مسجلة!", "error");
-          setIsLoading(false);
-          return;
         }
       }
 
@@ -1126,9 +1216,9 @@ export default function App() {
       const enteredCode = loginCode.trim();
       const enteredPass = loginPass.trim();
       
-      const adminCodes = ["1007363904", "139213", "13921313", "الادمن", "admin", "المدير", "المدير العام"];
+      const adminCodes = ["1007363904", "0564468888", "139213", "13921313", "الادمن", "admin", "المدير", "المدير العام", "سلطان العاصمي"];
       const adminPasses = ["1007363904", "139213", "13921313"];
-      const isGlobalAdmin = adminCodes.includes(enteredCode) && adminPasses.includes(enteredPass);
+      const isGlobalAdmin = (adminCodes.includes(enteredCode) || adminCodes.includes(enteredCode.replace(/[^0-9]/g, ""))) && adminPasses.includes(enteredPass);
       
       let matchedComp: Company | undefined = undefined;
 
@@ -4806,7 +4896,31 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                 </>
               )}
             </button>
+
+            {/* Authenticator QR Code / 2FA Barcode Button */}
+            <button
+              type="button"
+              onClick={() => setShowAuthModal(true)}
+              className="w-full h-11 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 font-black rounded-2xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md"
+            >
+              <span className="text-sm">📱</span>
+              <span>دخول باركود Authenticator / رمز المصادقة</span>
+            </button>
           </form>
+
+          {/* Authenticator Modal Integration for Login */}
+          <AuthenticatorModal
+            isOpen={showAuthModal}
+            onClose={() => setShowAuthModal(false)}
+            userCode={loginCode || "1001"}
+            userName={loginCode || "الموظف المفوّض"}
+            companyName={activeCompany?.name || "شركة عرب وورلد"}
+            showToast={showToast}
+            onSuccess2FA={(code) => {
+              if (code) setLoginCode(code);
+              showToast("تم الاعتماد والتحقق بنجاح عبر Authenticator!", "success");
+            }}
+          />
 
           {/* Footer branding */}
           <div className="pt-2 text-center space-y-2 relative z-10">
@@ -5014,6 +5128,16 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                 </span>
               </div>
             </div>
+
+            <button
+              type="button"
+              onClick={() => setShowAuthModal(true)}
+              className="text-[10px] font-black font-sans text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 px-3.5 py-2.5 rounded-xl border border-amber-500/30 shadow-inner shrink-0 cursor-pointer flex items-center gap-1.5 transition-all"
+              title="إعدادات المصادقة والباركود Authenticator"
+            >
+              <span className="text-xs">📱</span>
+              <span>الباركود / Authenticator</span>
+            </button>
 
             <span className="text-[10px] font-black font-sans text-amber-400 bg-amber-500/10 px-4 py-2.5 rounded-xl border border-amber-500/20 shadow-inner shrink-0">
               🏛️ نظام ذهبي موحد • V27
@@ -9892,6 +10016,21 @@ CREATE TABLE extracts (
             </div>
           </div>
         )}
+
+        {/* Global Authenticator Modal */}
+        <AuthenticatorModal
+          isOpen={showAuthModal}
+          onClose={() => setShowAuthModal(false)}
+          userCode={currentUser?.code || loginCode || "1001"}
+          userName={currentUser?.name || loginCode || "الموظف المفوّض"}
+          userRole={currentUser?.role === "admin" ? "مدير النظام" : "موظف"}
+          companyName={activeCompany?.name || "شركة عرب وورلد"}
+          showToast={showToast}
+          onSuccess2FA={(code) => {
+            if (code) setLoginCode(code);
+            showToast("تم التحقق بنجاح من Authenticator!", "success");
+          }}
+        />
       </div>
     </div>
   );

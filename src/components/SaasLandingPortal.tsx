@@ -3,6 +3,8 @@ import { Building, Sparkles, Shield, ArrowRight, Plus, CheckCircle, Smartphone, 
 import { motion, AnimatePresence } from "motion/react";
 import { Company } from "../types";
 
+import { AuthenticatorModal } from "./AuthenticatorModal";
+
 interface SaasLandingPortalProps {
   companies: Company[];
   onRegisterCompany: (companyData: {
@@ -89,6 +91,7 @@ export function SaasLandingPortal({
 
   const [savedEmpCode, setSavedEmpCode] = useState<string>("");
   const [savedEmpName, setSavedEmpName] = useState<string>("");
+  const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
 
   React.useEffect(() => {
     try {
@@ -684,10 +687,35 @@ export function SaasLandingPortal({
                     </button>
                   </>
                 )}
+
+                {/* Authenticator QR Code / 2FA Barcode Button */}
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowAuthModal(true)}
+                    className="w-full h-11 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 font-black rounded-2xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md"
+                  >
+                    <span className="text-sm">📱</span>
+                    <span>رمز المصادقة والباركود (Authenticator 2FA)</span>
+                  </button>
+                </div>
               </form>
             </>
           )}
         </motion.div>
+
+        {/* Authenticator Modal Integration */}
+        <AuthenticatorModal
+          isOpen={showAuthModal}
+          onClose={() => setShowAuthModal(false)}
+          userCode={loginCode || savedEmpCode || "1001"}
+          userName={savedEmpName || loginCode || "الموظف المفوّض"}
+          showToast={showToast}
+          onSuccess2FA={(code) => {
+            if (code) setLoginCode(code);
+            showToast("تم الاعتماد بنجاح عبر Authenticator!", "success");
+          }}
+        />
 
         {/* Elegant company creation action at bottom */}
         <div className="text-center pt-2 space-y-1">
