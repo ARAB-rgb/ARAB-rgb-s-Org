@@ -45,6 +45,7 @@ interface SaasLandingPortalProps {
   loginPass: string;
   setLoginPass: (v: string) => void;
   handleLogin: (e: React.FormEvent) => Promise<void>;
+  handleDirectLogin?: (inputCode?: string, enteredTotp?: string, companyOverrideId?: string | null) => Promise<void>;
   isLoading: boolean;
 
   handleGoogleSignIn?: () => Promise<void>;
@@ -66,6 +67,7 @@ export function SaasLandingPortal({
   loginPass,
   setLoginPass,
   handleLogin,
+  handleDirectLogin,
   isLoading,
   handleGoogleSignIn,
   googleUser,
@@ -711,9 +713,13 @@ export function SaasLandingPortal({
           userCode={loginCode || savedEmpCode || "1001"}
           userName={savedEmpName || loginCode || "الموظف المفوّض"}
           showToast={showToast}
-          onSuccess2FA={(code) => {
-            if (code) setLoginCode(code);
-            showToast("تم الاعتماد بنجاح عبر Authenticator!", "success");
+          onSuccess2FA={(userCode, totpCode) => {
+            if (userCode) setLoginCode(userCode);
+            if (handleDirectLogin) {
+              handleDirectLogin(userCode, totpCode, gSelectedCompId || null);
+            } else {
+              showToast("تم الاعتماد بنجاح عبر Authenticator!", "success");
+            }
           }}
         />
 
