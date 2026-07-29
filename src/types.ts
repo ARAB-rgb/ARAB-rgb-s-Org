@@ -99,6 +99,9 @@ export interface Installment {
   workplace?: string;
   guarantor?: string;
   status: "منتظم" | "متأخر" | "متعثر" | "مكتمل";
+  contract_direction?: "لنا" | "علينا" | "مصروفات عمالة" | string;
+  worker_id?: string;
+  project_id?: string;
   notes?: string;
   created_at?: string;
 }
@@ -151,6 +154,10 @@ export interface Payment {
   date: string;
   project: string;
   notes?: string;
+  installment_id?: string;
+  contract_no?: string;
+  remaining_before?: number;
+  remaining_after?: number;
   created_at?: string;
 }
 
@@ -245,7 +252,12 @@ export interface Company {
   id: string;
   slug?: string;
   name: string;
+  activity?: string;  // نشاط الشركة الرئيسي / التخصص
+  sub_title?: string; // العنوان الفرعي للشركة
   record_no?: string; // Commercial Registration / السجل التجاري
+  commercial_register?: string;
+  tax_no?: string;
+  capital?: number;
   manager?: string;   // مدير الشركة للتعميدات والتوقيع
   phone?: string;
   address?: string;

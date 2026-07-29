@@ -9,7 +9,7 @@ import {
   Home, ClipboardList, FileText, Landmark, TrendingUp, TrendingDown, Briefcase, Users,
   Settings, LogOut, Calendar, MapPin, User, Phone, Shield, Search, Plus,
   Edit2, Trash2, Download, AlertTriangle, Sparkles, Clock, RefreshCw, Key, Printer, Building, ChevronDown, ChevronUp,
-  PieChart, ShieldAlert, ShieldCheck, List, Map as MapIcon, Filter
+  PieChart, ShieldAlert, ShieldCheck, List, Map as MapIcon, Filter, Eye
 } from "lucide-react";
 
 import { User as AuthUser, UserPerms, Installment, Quote, Receipt, Payment, Expense, Project, Worker, DbSession, Company, Extract, AttendanceRecord } from "./types";
@@ -20,6 +20,7 @@ import {
   awExtractWorkerContract, awExtractWorkerLeaves, awBuildWorkerNotes, awCleanWorkerNotes,
   getSupabaseCredentials, saveSupabaseCredentials, checkSupabaseHealth, isSupabaseHealthy,
   awExtractExternalNo, awBuildNotesWithRegionAndTreasuryAndExternalNo, awExtractClassification, awExtractCycle, awExtractReceiptType,
+  awExtractContractDirection, awExtractWorkerId, awExtractProjectId,
   serializeQuoteNotes, deserializeQuoteNotes, auth, awExtractBeneficiaryType
 } from "./db";
 
@@ -219,6 +220,48 @@ const getStoredTreasuries = (companyId?: string | null, companiesList?: Company[
   return defaults;
 };
 
+const getCompanyActivity = (comp?: Company | null): string => {
+  if (!comp) return "منظومة إدارية وحسابية متكاملة";
+  if (comp.activity && comp.activity.trim()) return comp.activity.trim();
+  if (comp.sub_title && comp.sub_title.trim()) return comp.sub_title.trim();
+  if ((comp as any).company_activity && (comp as any).company_activity.trim()) return (comp as any).company_activity.trim();
+  if ((comp as any).company_subtitle && (comp as any).company_subtitle.trim()) return (comp as any).company_subtitle.trim();
+  if ((comp as any).activity_type && (comp as any).activity_type.trim()) return (comp as any).activity_type.trim();
+  
+  if (comp.notes) {
+    const match = comp.notes.match(/\[(?:نشاط_الشركة|النشاط|نشاط|Activity):?\s*([^\]]+)\]/i);
+    if (match && match[1]) return match[1].trim();
+  }
+  
+  if (comp.id === "arab_world") return "للمقاولات العامة والتقسيط والعقود";
+  return "للمقاولات العامة والتقسيط";
+};
+
+const getPaymentRemaining = (p: Payment, workersList: Worker[] = [], installmentsList: Installment[] = []): number | null => {
+  if (p.remaining_after !== undefined && p.remaining_after !== null) {
+    return Number(p.remaining_after);
+  }
+  if (p.notes) {
+    const match = p.notes.match(/\[(?:المتبقي|متبقي|remaining):?\s*([\d\.\-]+)\]/i);
+    if (match && match[1] && !isNaN(Number(match[1]))) {
+      return Number(match[1]);
+    }
+  }
+  if (p.worker_id) {
+    const w = workersList.find(x => x.id === p.worker_id);
+    if (w) {
+      return Math.max(0, Number(w.balance || 0));
+    }
+  }
+  if (p.installment_id || p.contract_no) {
+    const inst = installmentsList.find(i => (p.installment_id && i.id === p.installment_id) || (p.contract_no && i.no === p.contract_no));
+    if (inst) {
+      return Number(inst.remaining || 0);
+    }
+  }
+  return null;
+};
+
 function PendingUserApprovalCard({
   pendingUser,
   companies,
@@ -361,17 +404,25 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
 
   // SaaS Multi-tenant Path Routing State
-  const [activeSlug, setActiveSlug] = useState<string | null>(() => {
+  const RESERVED_SLUGS = new Set([
+    "assets", "api", "static", "favicon.ico", "manifest.json", "sw.js", "robots.txt", "index.html"
+  ]);
+
+  const getSlugFromPath = (): string | null => {
     const path = window.location.pathname;
     const segments = path.split("/").filter(Boolean);
-    return segments[0] || null;
-  });
+    const first = segments[0] || null;
+    if (first && RESERVED_SLUGS.has(first.toLowerCase())) {
+      return null;
+    }
+    return first;
+  };
+
+  const [activeSlug, setActiveSlug] = useState<string | null>(() => getSlugFromPath());
 
   useEffect(() => {
     const handlePopState = () => {
-      const path = window.location.pathname;
-      const segments = path.split("/").filter(Boolean);
-      setActiveSlug(segments[0] || null);
+      setActiveSlug(getSlugFromPath());
     };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
@@ -607,6 +658,7 @@ export default function App() {
   const [expandedReceipts, setExpandedReceipts] = useState<Record<string, boolean>>({});
   const [expandedPayments, setExpandedPayments] = useState<Record<string, boolean>>({});
   const [expandedExpenses, setExpandedExpenses] = useState<Record<string, boolean>>({});
+  const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
   const [selectedExpenseCategoryFilter, setSelectedExpenseCategoryFilter] = useState<string>("all");
 
   // Backup & Restore states
@@ -722,6 +774,7 @@ export default function App() {
 
   // 7. Companies Forms
   const [cName, setCName] = useState("");
+  const [cActivity, setCActivity] = useState("");
   const [cRegister, setCRegister] = useState("");
   const [cTaxNo, setCTaxNo] = useState("");
   const [cCapital, setCCapital] = useState<number | "">("");
@@ -2223,45 +2276,73 @@ export default function App() {
     }
   }, [activeSlug, companies]);
 
-  const getTargetCompanyId = (formCompanyVal?: string) => {
-    if (currentUser?.role !== "admin") {
-      if (formCompanyVal && isCompanyAuthorized(formCompanyVal)) {
-        return formCompanyVal;
-      }
-      if (selectedCompanyId !== "all" && isCompanyAuthorized(selectedCompanyId)) {
-        return selectedCompanyId;
-      }
-      return currentUser?.company_id || null;
+  const isSuperAdminUser = (u?: AuthUser | null): boolean => {
+    if (!u) return false;
+    if (u.role !== "admin") return false;
+    // If the admin user is explicitly tied to a specific company, they are a Tenant Admin (restricted to that company)
+    if (u.company_id && u.company_id !== "all" && u.company_id !== "global" && u.company_id.trim() !== "") {
+      return false;
     }
-    return formCompanyVal || (selectedCompanyId !== "all" ? selectedCompanyId : null) || null;
+    return true;
   };
 
-  // Auth User allowed scope helpers
   const getAuthorizedCompanies = () => {
     if (!currentUser) return [];
-    if (currentUser.role === "admin") return companies;
-    const userCompany = currentUser.company_id || "arab_world";
-    return companies.filter((c) => c.id === userCompany);
+    if (isSuperAdminUser(currentUser)) return companies;
+
+    const allowedSet = new Set<string>();
+
+    if (currentUser.company_id && currentUser.company_id !== "all" && currentUser.company_id !== "global") {
+      allowedSet.add(currentUser.company_id);
+    }
+
+    if (currentUser.company_perms && typeof currentUser.company_perms === "object") {
+      Object.keys(currentUser.company_perms).forEach((cId) => {
+        if (cId && cId !== "global") {
+          allowedSet.add(cId);
+        }
+      });
+    }
+
+    if (allowedSet.size === 0) {
+      allowedSet.add("arab_world");
+    }
+
+    return companies.filter((c) => allowedSet.has(c.id));
+  };
+
+  const isCompanyAuthorized = (compId: string | undefined | null) => {
+    if (!currentUser) return false;
+    if (isSuperAdminUser(currentUser)) return true;
+    const targetId = compId || "arab_world";
+    const authComps = getAuthorizedCompanies();
+    return authComps.some((c) => c.id === targetId);
   };
 
   const getAuthorizedUsers = () => {
     if (!currentUser) return [];
-    if (currentUser.role === "admin") return users;
+    if (isSuperAdminUser(currentUser)) return users;
     const authComps = getAuthorizedCompanies();
     const authCompIds = authComps.map((c) => c.id);
     return users.filter((u) => {
-      if (u.role === "admin") return false;
+      if (isSuperAdminUser(u)) return false;
       const uComp = u.company_id || "arab_world";
       return authCompIds.includes(uComp);
     });
   };
 
-  const isCompanyAuthorized = (compId: string | undefined | null) => {
-    if (!currentUser) return false;
-    if (currentUser.role === "admin") return true;
-    const userCompany = currentUser.company_id || "arab_world";
-    const itemCompany = compId || "arab_world";
-    return itemCompany === userCompany;
+  const getTargetCompanyId = (formCompanyVal?: string) => {
+    if (formCompanyVal && isCompanyAuthorized(formCompanyVal)) {
+      return formCompanyVal;
+    }
+    if (selectedCompanyId !== "all" && isCompanyAuthorized(selectedCompanyId)) {
+      return selectedCompanyId;
+    }
+    const authComps = getAuthorizedCompanies();
+    if (authComps.length > 0) {
+      return authComps[0].id;
+    }
+    return currentUser?.company_id || "arab_world";
   };
 
   const getActivePerms = () => {
@@ -2373,17 +2454,21 @@ export default function App() {
 
   useEffect(() => {
     if (currentUser) {
-      if (currentUser.role === "admin") {
-        if (selectedCompanyId !== "all" && !companies.some((c) => c.id === selectedCompanyId)) {
+      const authComps = getAuthorizedCompanies();
+      const authCompIds = authComps.map((c) => c.id);
+
+      if (selectedCompanyId !== "all" && !authCompIds.includes(selectedCompanyId)) {
+        if (authComps.length === 1) {
+          setSelectedCompanyId(authComps[0].id);
+        } else if (authComps.length > 1) {
           setSelectedCompanyId("all");
+        } else {
+          setSelectedCompanyId("arab_world");
         }
-      } else {
-        const userCompId = currentUser.company_id || "arab_world";
-        if (selectedCompanyId !== userCompId) {
-          setSelectedCompanyId(userCompId);
-        }
-        
-        // Auto redirect active section if current section is unauthorized for non-admin
+      }
+
+      // Auto redirect active section if current section is unauthorized for non-admin
+      if (!isSuperAdminUser(currentUser)) {
         const hasAccess = (perm: string) => {
           const activePerms = getActivePerms();
           if (activePerms) {
@@ -2730,9 +2815,23 @@ export default function App() {
       finalNotes = `[التصنيف: ${activeClassification}] ` + finalNotes;
     }
 
+    const activeDirection = row.contract_direction_input || "لنا";
+    if (activeDirection) {
+      finalNotes = `[اتجاه العقد: ${activeDirection}] ` + finalNotes;
+    }
+    if (row.worker_id_input) {
+      finalNotes = `[رمز العامل: ${row.worker_id_input}] ` + finalNotes;
+    }
+    if (row.project_id_input) {
+      finalNotes = `[رمز المشروع: ${row.project_id_input}] ` + finalNotes;
+    }
+
     const payload = {
       ...row,
       notes: finalNotes,
+      contract_direction: activeDirection,
+      worker_id: row.worker_id_input || null,
+      project_id: row.project_id_input || null,
       company_id: getTargetCompanyId(row.company_id),
     };
     delete payload.region_input;
@@ -2744,6 +2843,9 @@ export default function App() {
     delete payload.capital_splits_input;
     delete payload.cycle_input;
     delete payload.classification_input;
+    delete payload.contract_direction_input;
+    delete payload.worker_id_input;
+    delete payload.project_id_input;
 
     setIsLoading(true);
     try {
@@ -3541,7 +3643,33 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       notesAppended = `${notesAppended} | ⚠️ قيد تعديل رقابي: [السبب: ${auditReasonPassed}] [مرجع: ${auditRefNoPassed}]`;
     }
 
-    const row = {
+    let payRemBefore: number | undefined = undefined;
+    let payRemAfter: number | undefined = undefined;
+
+    if (paySelectedInstallment) {
+      payRemBefore = Number(paySelectedInstallment.remaining || 0);
+      payRemAfter = Math.max(0, payRemBefore - Number(payAmount));
+    } else if (payWorkerId) {
+      const w = workers.find(x => x.id === payWorkerId);
+      if (w) {
+        const tot = Number(w.daily || 0) * Number(w.days || 0);
+        const currentAdvance = Number(w.advance || 0);
+        payRemBefore = Math.max(0, tot - currentAdvance);
+        payRemAfter = Math.max(0, payRemBefore - Number(payAmount));
+      }
+    } else if (payContractQuery) {
+      const foundInst = getInstallmentsForReceipt().find(x => payContractQuery.includes(x.no) || x.no === payContractQuery.trim());
+      if (foundInst) {
+        payRemBefore = Number(foundInst.remaining || 0);
+        payRemAfter = Math.max(0, payRemBefore - Number(payAmount));
+      }
+    }
+
+    if (payRemAfter !== undefined) {
+      notesAppended = `[المتبقي: ${payRemAfter}] ` + notesAppended;
+    }
+
+    const row: any = {
       no: targetNo,
       to_name: payTo.trim(),
       amount: Number(payAmount),
@@ -3551,6 +3679,10 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       notes: payAttachment ? `${notesAppended} [مرفق: ${payAttachment}]` : notesAppended,
       company_id: getTargetCompanyId(paymentCompanyId),
       worker_id: payWorkerId || null,
+      installment_id: paySelectedInstallment ? paySelectedInstallment.id : undefined,
+      contract_no: paySelectedInstallment ? paySelectedInstallment.no : undefined,
+      remaining_before: payRemBefore,
+      remaining_after: payRemAfter,
     };
 
     setIsLoading(true);
@@ -3957,6 +4089,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
 
     const row: any = {
       name: cName.trim(),
+      activity: cActivity.trim(),
       commercial_register: cRegister.trim(),
       tax_no: cTaxNo.trim(),
       capital: Number(cCapital || 0),
@@ -3985,6 +4118,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       await logSession(currentUser!, editCompanyId ? `تعديل ملف الشركة: ${cName}` : `إنشاء شركة فرعية جديدة: ${cName}`);
       setEditCompanyId(null);
       setCName("");
+      setCActivity("");
       setCRegister("");
       setCTaxNo("");
       setCCapital("");
@@ -5160,6 +5294,68 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
     }
   });
 
+  // 4. If logged-in user tries to open a company URL slug they are not authorized for (403 Forbidden):
+  if (currentUser && !isCompanyAuthorized(activeCompany.id)) {
+    const userAuthComps = getAuthorizedCompanies();
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4 text-right select-none overflow-hidden relative" dir="rtl">
+        <Toast toasts={toasts} removeToast={removeToast} />
+        
+        {/* Ambient Glow */}
+        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-rose-500/10 rounded-full blur-[120px] pointer-events-none"></div>
+
+        <div className="w-full max-w-md bg-[#0e172c]/95 backdrop-blur-2xl border border-rose-500/30 p-8 rounded-[32px] text-center space-y-6 shadow-2xl relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-16 h-16 border-t-2 border-r-2 border-rose-500/30 rounded-tr-[32px] pointer-events-none"></div>
+          <div className="absolute bottom-0 left-0 w-16 h-16 border-b-2 border-l-2 border-rose-500/30 rounded-bl-[32px] pointer-events-none"></div>
+
+          <div className="w-16 h-16 bg-rose-500/10 border border-rose-500/30 text-rose-500 rounded-2xl mx-auto flex items-center justify-center text-3xl font-bold shadow-lg">
+            🔒
+          </div>
+
+          <div className="space-y-2">
+            <div className="inline-block px-3 py-1 bg-rose-500/10 border border-rose-500/30 text-rose-400 rounded-full text-[10px] font-black tracking-wider uppercase">
+              403 Forbidden - غير مصرح بالوصول
+            </div>
+            <h1 className="text-lg font-black text-white">غير مصرح لك بالوصول لشركة {activeCompany.name}</h1>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              عذراً، حسابك الحالي (<strong className="text-amber-400">{currentUser.name}</strong>) لا يمتلك صلاحية الوصول لمساحة العمل الخاصة بـ <strong className="text-white font-bold">"{activeCompany.name}"</strong> (/{activeSlug}).
+            </p>
+          </div>
+
+          <div className="pt-2 space-y-3">
+            {userAuthComps.length > 0 && (
+              <button
+                onClick={() => {
+                  const firstComp = userAuthComps[0];
+                  navigateToSlug(firstComp.slug || firstComp.id);
+                }}
+                className="w-full py-3 bg-gradient-to-l from-amber-500 to-amber-600 text-slate-950 font-black rounded-xl text-xs hover:from-amber-400 hover:to-amber-500 transition-all cursor-pointer shadow-lg flex items-center justify-center gap-2"
+              >
+                <span>🏢</span>
+                <span>الانتقال لشركتك المصرح بها ({userAuthComps[0].name})</span>
+              </button>
+            )}
+
+            <button
+              onClick={handleLogout}
+              className="w-full py-2.5 bg-slate-900 hover:bg-slate-850 text-slate-300 hover:text-white border border-slate-800 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center justify-center gap-2"
+            >
+              <span>🚪</span>
+              <span>تسجيل الخروج والتبديل لحساب آخر</span>
+            </button>
+
+            <button
+              onClick={() => navigateToSlug(null)}
+              className="w-full py-2 text-[11px] text-slate-400 hover:text-amber-400 font-bold transition-colors cursor-pointer"
+            >
+              ← البوابة المركزية
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen mesh-gradient text-slate-100 flex flex-col md:flex-row text-right font-sans relative" dir="rtl">
       
@@ -5257,15 +5453,27 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                 <Sparkles className="w-5 h-5 text-slate-950 animate-pulse" />
               </div>
               <div>
-                <h1 className="text-base md:text-lg font-black tracking-tight text-white flex items-center gap-2 font-sans">
-                  <span>شركة</span>
+                <h1 className="text-base md:text-lg font-black tracking-tight text-white flex items-center gap-2 font-sans flex-wrap">
                   <span className="text-transparent bg-clip-text bg-gradient-to-l from-amber-400 via-yellow-200 to-amber-500 drop-shadow-[0_2px_10px_rgba(245,158,11,0.15)]">
-                    {selectedCompanyId === "all" || companies.length === 0
-                      ? "عرب وورلد"
-                      : companies.find((c) => c.id === selectedCompanyId)?.name || "عرب وورلد"
-                    }
+                    {(() => {
+                      const matched = selectedCompanyId === "all" || companies.length === 0
+                        ? null
+                        : companies.find((c) => c.id === selectedCompanyId);
+                      if (matched) return matched.name;
+                      return selectedCompanyId === "all" ? "منظومة كافة الشركات المصرحة" : "شركة عرب وورلد للمقاولات والعقود";
+                    })()}
                   </span>
-                  <span className="text-xs font-bold text-slate-300">للمقاولات العامة والتقسيط</span>
+                  {(() => {
+                    const matched = selectedCompanyId === "all" || companies.length === 0
+                      ? null
+                      : companies.find((c) => c.id === selectedCompanyId);
+                    const subText = getCompanyActivity(matched);
+                    return subText ? (
+                      <span className="text-xs font-bold text-slate-300">
+                        {subText}
+                      </span>
+                    ) : null;
+                  })()}
                 </h1>
                 <p className="text-[9px] text-slate-400 font-medium tracking-wide mt-0.5">البوابة الإدارية والمنظومة الحسابية المتكاملة الموثقة</p>
               </div>
@@ -5274,17 +5482,17 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
             {currentUser && getAuthorizedCompanies().length > 0 && (
               <div className="flex items-center gap-2 bg-slate-900/60 border border-amber-500/20 rounded-xl px-3 py-1.5 shadow-lg shadow-amber-500/5 hover:border-amber-500/40 transition-all font-sans">
                 <span className="text-[10px] text-amber-500 font-extrabold whitespace-nowrap">🏢 الشركة النشطة:</span>
-                {currentUser.role !== "admin" ? (
+                {getAuthorizedCompanies().length <= 1 ? (
                   <span className="text-xs font-black text-amber-300">
-                    {companies.find((c) => c.id === currentUser.company_id)?.name || "شركة عرب وورلد للمقاولات والعقود"}
+                    🏢 {getAuthorizedCompanies()[0]?.name || "شركة عرب وورلد للمقاولات والعقود"}
                   </span>
                 ) : (
                   <select
                     value={selectedCompanyId}
                     onChange={(e) => {
                       const val = e.target.value;
-                      setSelectedCompanyId(val);
-                      if (currentUser?.role === "admin") {
+                      if (val === "all" || isCompanyAuthorized(val)) {
+                        setSelectedCompanyId(val);
                         if (val === "all") {
                           navigateToSlug(null);
                         } else {
@@ -5293,13 +5501,13 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                             navigateToSlug(matched.slug || matched.id);
                           }
                         }
+                      } else {
+                        showToast("⚠️ غير مصرح لك بالتنقل لهذه الشركة!", "error");
                       }
                     }}
                     className="bg-transparent text-white font-extrabold text-xs focus:outline-none cursor-pointer text-slate-950 bg-white"
                   >
-                    {getAuthorizedCompanies().length > 1 && (
-                      <option value="all" className="text-slate-950 font-bold">✨ كل الشركات المصرحة</option>
-                    )}
+                    <option value="all" className="text-slate-950 font-bold">✨ كل الشركات المصرحة ({getAuthorizedCompanies().length})</option>
                     {getAuthorizedCompanies().map((c) => (
                       <option key={c.id} value={c.id} className="text-slate-950 font-bold">🏢 {c.name}</option>
                     ))}
@@ -5380,6 +5588,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
               activePerms={getActivePerms()}
               installments={getVisibleInstallments()}
               projects={getVisibleProjects()}
+              workers={getVisibleWorkers()}
               onSaveInstallment={onSaveInstallment}
               onDeleteInstallment={onDeleteInstallment}
               onPrintContract={onPrintContract}
@@ -5691,6 +5900,62 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                       ))}
                     </datalist>
                   </div>
+
+                  {/* Financial Summary Header Card for Linked Contract */}
+                  {rSelectedInstallment && (
+                    <div className="sm:col-span-4 bg-slate-950/80 border border-emerald-500/30 rounded-2xl p-4 grid grid-cols-1 sm:grid-cols-3 gap-3 text-center">
+                      <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800">
+                        <span className="text-[10px] font-black text-slate-400 block">إجمالي قيمة العقد/المشروع</span>
+                        <span className="text-sm font-black text-white font-mono">{Number(rSelectedInstallment.amount || 0).toLocaleString()} ريال</span>
+                      </div>
+                      <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800">
+                        <span className="text-[10px] font-black text-slate-400 block">إجمالي المحصل سابقاً</span>
+                        <span className="text-sm font-black text-emerald-400 font-mono">{Number(rSelectedInstallment.paid || 0).toLocaleString()} ريال</span>
+                      </div>
+                      <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800">
+                        <span className="text-[10px] font-black text-slate-400 block">المبلغ المتبقي للتحصيل</span>
+                        <span className="text-sm font-black text-amber-400 font-mono">{Number(rSelectedInstallment.remaining || 0).toLocaleString()} ريال</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Direction Alert Banner if contract is payment/labor expenses */}
+                  {rSelectedInstallment && (awExtractContractDirection(rSelectedInstallment.notes || "") === "علينا" || awExtractContractDirection(rSelectedInstallment.notes || "") === "مصروفات عمالة" || rSelectedInstallment.contract_direction === "علينا" || rSelectedInstallment.contract_direction === "مصروفات عمالة") && (
+                    <div className="sm:col-span-4 bg-rose-950/40 border border-rose-500/40 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-right">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0" />
+                        <div>
+                          <div className="text-xs font-black text-rose-300">
+                            ⚠️ تنبيه اتجاه العقد: هذا العقد مصنف كـ ({(awExtractContractDirection(rSelectedInstallment.notes || "") || rSelectedInstallment.contract_direction) === "مصروفات عمالة" ? "مصروفات وتكلفة عمالة" : "عقد علينا / مستحق لمقاول"})
+                          </div>
+                          <div className="text-[10px] text-slate-300 font-bold">
+                            سندات القبض مخصصة للإيرادات والتحصيل (لنا). يوصى بقيد الدفعة كـ (سند صرف) لإدراجها ضمن مصروفات العقد/المشروع الصحيحة.
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const linkedNo = rSelectedInstallment.no;
+                          const linkedClient = rSelectedInstallment.client;
+                          const linkedId = rSelectedInstallment.identity;
+                          const linkedAmt = rSelectedInstallment.installment || rSelectedInstallment.remaining || "";
+                          const linkedProj = rSelectedInstallment.project || "عام";
+                          setActiveSection("payments");
+                          setTimeout(() => {
+                            handleAutoFillPayment(`${linkedNo} | ${linkedClient} | ${linkedId}`);
+                            setPayTo(linkedClient);
+                            setPayAmount(linkedAmt);
+                            setPayProject(linkedProj);
+                          }, 50);
+                          showToast("تم التحويل تلقائياً إلى تبويب سند الصرف بنجاح!", "info");
+                        }}
+                        className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black shrink-0 transition-colors cursor-pointer"
+                      >
+                        ↪️ التحويل الآن إلى سند صرف
+                      </button>
+                    </div>
+                  )}
 
                   <div className="space-y-1">
                     <label className="text-[10px] font-black text-slate-400">استلمنا من / الجهة</label>
@@ -6087,6 +6352,57 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                       ))}
                     </datalist>
                   </div>
+
+                  {/* Financial Summary Header Card for Linked Contract in Payments */}
+                  {paySelectedInstallment && (
+                    <div className="sm:col-span-4 bg-slate-950/80 border border-blue-500/30 rounded-2xl p-4 grid grid-cols-1 sm:grid-cols-3 gap-3 text-center">
+                      <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800">
+                        <span className="text-[10px] font-black text-slate-400 block">إجمالي قيمة العقد/المشروع</span>
+                        <span className="text-sm font-black text-white font-mono">{Number(paySelectedInstallment.amount || 0).toLocaleString()} ريال</span>
+                      </div>
+                      <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800">
+                        <span className="text-[10px] font-black text-slate-400 block">إجمالي المدفوع سابقاً</span>
+                        <span className="text-sm font-black text-rose-400 font-mono">{Number(paySelectedInstallment.paid || 0).toLocaleString()} ريال</span>
+                      </div>
+                      <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800">
+                        <span className="text-[10px] font-black text-slate-400 block">المبلغ المتبقي للدفوعات</span>
+                        <span className="text-sm font-black text-cyan-400 font-mono">{Number(paySelectedInstallment.remaining || 0).toLocaleString()} ريال</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Direction Alert Banner if contract is revenue ( لنا ) */}
+                  {paySelectedInstallment && (awExtractContractDirection(paySelectedInstallment.notes || "") === "لنا" || paySelectedInstallment.contract_direction === "لنا") && (
+                    <div className="sm:col-span-4 bg-amber-950/40 border border-amber-500/40 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-right">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+                        <div>
+                          <div className="text-xs font-black text-amber-300">
+                            ⚠️ تنبيه اتجاه العقد: هذا العقد مصنف كـ (لنا - إيراد تحصيل من عميل)
+                          </div>
+                          <div className="text-[10px] text-slate-300 font-bold">
+                            سندات الصرف مخصصة للمصروفات والمستحقات. إذا كنت تستلم دفعة تحصيل، يفضل التحويل إلى (سند قبض).
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const linkedNo = paySelectedInstallment.no;
+                          const linkedClient = paySelectedInstallment.client;
+                          const linkedId = paySelectedInstallment.identity;
+                          setActiveSection("receipts");
+                          setTimeout(() => {
+                            handleAutoFillReceipt(`${linkedNo} | ${linkedClient} | ${linkedId}`);
+                          }, 50);
+                          showToast("تم التحويل تلقائياً إلى تبويب سند القبض بنجاح!", "info");
+                        }}
+                        className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-black shrink-0 transition-colors cursor-pointer"
+                      >
+                        ↪️ التحويل الآن إلى سند قبض
+                      </button>
+                    </div>
+                  )}
                   <div className="space-y-1 sm:col-span-2 md:col-span-2">
                     <label className="text-[10px] font-black text-amber-500">👤👥 تصنيف المستفيد (مجموعة أو شخص)</label>
                     <select
@@ -6364,6 +6680,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                             <th className="py-2.5 px-3 font-bold">التاريخ</th>
                             <th className="py-2.5 px-3 font-bold">صرف إلى</th>
                             <th className="py-2.5 px-3 font-bold">مبلغ الصرف الصادر</th>
+                            <th className="py-2.5 px-3 font-bold text-amber-400">المتبقي الكلي</th>
                             <th className="py-2.5 px-3 font-bold">طريقة الصرف</th>
                             <th className="py-2.5 px-3 font-bold">المشروع والبيان</th>
                             <th className="py-2.5 px-3 font-bold text-center">إجراء</th>
@@ -6372,6 +6689,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                         <tbody>
                           {filteredPayments.map((p, idx) => {
                             const bType = awExtractBeneficiaryType(p.notes || "", p.worker_id, p.to_name);
+                            const remVal = getPaymentRemaining(p, workers, installments);
                             return (
                               <React.Fragment key={p.id || idx}>
                                 <tr className={`border-b border-slate-850 hover:bg-slate-800/10 transition-colors ${expandedPayments[p.id] ? "bg-slate-900/20" : ""}`}>
@@ -6404,6 +6722,9 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                                     </div>
                                   </td>
                                   <td className="py-3 px-3 font-black text-rose-400 font-mono">-{Number(p.amount || 0).toLocaleString()} ريال</td>
+                                  <td className="py-3 px-3 font-mono font-bold text-amber-400">
+                                    {remVal !== null ? `${remVal.toLocaleString()} ريال` : "—"}
+                                  </td>
                                   <td className="py-3 px-3 font-bold text-slate-200">{p.method}</td>
                                   <td className="py-3 px-3">
                                     <span className="block font-bold text-slate-200">{p.project}</span>
@@ -6445,7 +6766,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                                 </tr>
                                 {expandedPayments[p.id] && (
                                   <tr className="bg-slate-950/40 border-b border-slate-800/80">
-                                    <td colSpan={8} className="p-4">
+                                    <td colSpan={9} className="p-4">
                                       <div className="bg-slate-900/40 rounded-2xl p-4 border border-slate-800/60 shadow-xl grid grid-cols-1 md:grid-cols-3 gap-4 text-right">
                                         <div className="space-y-1 bg-slate-950/45 p-3.5 rounded-xl border border-slate-800/80">
                                           <h4 className="text-[11px] font-black text-amber-500 mb-2.5 flex items-center gap-1.5 border-b border-slate-800/60 pb-1.5">
@@ -6467,9 +6788,11 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                                             <span>💸</span> القيمة والجهة الممولة
                                           </h4>
                                           <div className="grid grid-cols-2 gap-y-2 gap-x-1 text-[11px] font-bold text-slate-400">
-                                            <div>المبلغ:</div>
+                                            <div>مبلغ الصرف:</div>
                                             <div className="text-rose-400 text-left font-black font-mono">-{Number(p.amount || 0).toLocaleString()} ريال</div>
-                                            <div>الخزنة:</div>
+                                            <div>المتبقي الكلي:</div>
+                                            <div className="text-amber-400 text-left font-black font-mono">{remVal !== null ? `${remVal.toLocaleString()} ريال` : "—"}</div>
+                                            <div>الخزنة الممولة:</div>
                                             <div className="text-cyan-400 text-left font-black">🏦 {awExtractTreasury(p.notes || "") || "خزنة الشركة"}</div>
                                           </div>
                                         </div>
@@ -7048,6 +7371,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                           <th className="py-2.5 px-3 font-bold">اسم المشروع والموقع</th>
                           <th className="py-2.5 px-3 font-bold">المهندس المشرف</th>
                           <th className="py-2.5 px-3 font-bold">الميزانية</th>
+                          <th className="py-2.5 px-3 font-bold">تكلفة العمالة المباشرة</th>
                           <th className="py-2.5 px-3 font-bold">Progress</th>
                           <th className="py-2.5 px-3 font-bold">الحالة</th>
                           <th className="py-2.5 px-3 font-bold text-center">إجراء</th>
@@ -7063,51 +7387,90 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                             (p.engineer && p.engineer.toLowerCase().includes(q)) ||
                             (p.notes && p.notes.toLowerCase().includes(q))
                           );
-                        }).map((p, idx) => (
-                          <tr key={idx} className="border-b border-slate-850 hover:bg-slate-800/10 transition-colors">
-                            <td className="py-3 px-3">
-                              <span className="block font-black text-white">{p.name}</span>
-                              <span className="block text-[10px] text-slate-400 mt-0.5 flex items-center gap-1"><MapPin className="w-3 h-3 text-amber-500" /> {p.location || "غير محدد"}</span>
-                            </td>
-                            <td className="py-3 px-3 font-bold text-slate-200">{p.engineer || "بإشراف فرقا المقاول"}</td>
-                            <td className="py-3 px-3 font-mono text-white font-extrabold">{Number(p.budget || 0).toLocaleString()} ريال</td>
-                            <td className="py-3 px-3">
-                              <div className="flex items-center gap-2">
-                                <span className="font-mono text-[11px] font-bold text-amber-400">{p.progress}%</span>
-                                <div className="w-20 h-1.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
-                                  <div className="bg-amber-500 h-full" style={{ width: `${p.progress}%` }} />
-                                </div>
-                              </div>
-                            </td>
-                            <td className="py-3 px-3">
-                              <span className={`inline-block px-2.5 py-0.5 rounded text-[10px] font-black ${p.status === "نشط" ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"}`}>{p.status}</span>
-                            </td>
-                            <td className="py-3 px-3 text-center space-x-1">
-                              <button
-                                onClick={() => {
-                                  if (currentUser?.role !== "admin" && currentUser?.role !== "supervisor" && !can("projects")) {
-                                    showToast("عذراً، لا تمتلك صلاحية تعديل المشاريع!", "error");
-                                    return;
-                                  }
-                                  setEditProjectId(p.id);
-                                  setPName(p.name || "");
-                                  setPLocation(p.location || "");
-                                  setPEngineer(p.engineer || "");
-                                  setPBudget(p.budget || "");
-                                  setPProgress(p.progress !== undefined && p.progress !== null ? p.progress : 0);
-                                  setPStatus(p.status || "نشط");
-                                  setPNotes(p.notes || "");
-                                  setProjectCompanyId(p.company_id || "");
-                                  setPLatitude(p.latitude !== undefined && p.latitude !== null ? p.latitude : "");
-                                  setPLongitude(p.longitude !== undefined && p.longitude !== null ? p.longitude : "");
-                                  setPAllowedRadius(p.allowed_radius !== undefined && p.allowed_radius !== null ? p.allowed_radius : 25);
-                                  document.getElementById("projects-tab-view")?.scrollIntoView({ behavior: "smooth" });
-                                }}
-                                className="p-1 text-blue-400 hover:text-white"
-                                title="تعديل المشروع"
-                              >
-                                <Edit2 className="w-3.5 h-3.5" />
-                              </button>
+                        }).map((p, idx) => {
+                          const pName = p.name ? p.name.trim() : "";
+                          const pCompanyId = p.company_id;
+                          const pWorkers = workers.filter(w => (w.project && w.project.trim() === pName) || (pCompanyId && w.company_id === pCompanyId));
+                          const pWorkerIds = new Set(pWorkers.map(w => w.id));
+
+                          const pLaborPayments = payments.filter(pay => 
+                            (pay.project && pay.project.trim() === pName) ||
+                            (pay.worker_id && pWorkerIds.has(pay.worker_id))
+                          ).reduce((sum, pay) => sum + Number(pay.amount || 0), 0);
+
+                          const pLaborExpenses = expenses.filter(exp => 
+                            (exp.project && exp.project.trim() === pName) && 
+                            (exp.category === "عمالة" || (exp.notes && exp.notes.includes("عمالة")))
+                          ).reduce((sum, exp) => sum + Number(exp.amount || 0), 0);
+
+                          const pLaborContracts = installments.filter(inst =>
+                            (inst.project && inst.project.trim() === pName) &&
+                            (inst.contract_direction === "مصروفات عمالة" || awExtractContractDirection(inst.notes || "") === "مصروفات عمالة")
+                          ).reduce((sum, inst) => sum + Number(inst.amount || 0), 0);
+
+                          const totalLaborCost = pLaborPayments + pLaborExpenses + pLaborContracts;
+                          const isExpanded = !!expandedProjects[p.id];
+
+                          return (
+                            <React.Fragment key={p.id || idx}>
+                              <tr className={`border-b border-slate-850 hover:bg-slate-800/10 transition-colors ${isExpanded ? "bg-slate-900/30" : ""}`}>
+                                <td className="py-3 px-3">
+                                  <span className="block font-black text-white">{p.name}</span>
+                                  <span className="block text-[10px] text-slate-400 mt-0.5 flex items-center gap-1"><MapPin className="w-3 h-3 text-amber-500" /> {p.location || "غير محدد"}</span>
+                                </td>
+                                <td className="py-3 px-3 font-bold text-slate-200">{p.engineer || "بإشراف فرقا المقاول"}</td>
+                                <td className="py-3 px-3 font-mono text-white font-extrabold">{Number(p.budget || 0).toLocaleString()} ريال</td>
+                                <td className="py-3 px-3">
+                                  <div className="flex flex-col">
+                                    <span className="font-mono text-cyan-400 font-extrabold text-xs">{totalLaborCost.toLocaleString()} ريال</span>
+                                    <span className="text-[10px] text-slate-400 font-bold">👥 {pWorkers.length} عامل مسجل</span>
+                                  </div>
+                                </td>
+                                <td className="py-3 px-3">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono text-[11px] font-bold text-amber-400">{p.progress}%</span>
+                                    <div className="w-20 h-1.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+                                      <div className="bg-amber-500 h-full" style={{ width: `${p.progress}%` }} />
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="py-3 px-3">
+                                  <span className={`inline-block px-2.5 py-0.5 rounded text-[10px] font-black ${p.status === "نشط" ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"}`}>{p.status}</span>
+                                </td>
+                                <td className="py-3 px-3 text-center space-x-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => setExpandedProjects(prev => ({ ...prev, [p.id]: !prev[p.id] }))}
+                                    className="p-1 text-cyan-400 hover:text-cyan-300"
+                                    title={isExpanded ? "طي تفاصيل العمالة" : "توسيع تفاصيل تكلفة العمالة والمشاريع"}
+                                  >
+                                    <Eye className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      if (currentUser?.role !== "admin" && currentUser?.role !== "supervisor" && !can("projects")) {
+                                        showToast("عذراً، لا تمتلك صلاحية تعديل المشاريع!", "error");
+                                        return;
+                                      }
+                                      setEditProjectId(p.id);
+                                      setPName(p.name || "");
+                                      setPLocation(p.location || "");
+                                      setPEngineer(p.engineer || "");
+                                      setPBudget(p.budget || "");
+                                      setPProgress(p.progress !== undefined && p.progress !== null ? p.progress : 0);
+                                      setPStatus(p.status || "نشط");
+                                      setPNotes(p.notes || "");
+                                      setProjectCompanyId(p.company_id || "");
+                                      setPLatitude(p.latitude !== undefined && p.latitude !== null ? p.latitude : "");
+                                      setPLongitude(p.longitude !== undefined && p.longitude !== null ? p.longitude : "");
+                                      setPAllowedRadius(p.allowed_radius !== undefined && p.allowed_radius !== null ? p.allowed_radius : 25);
+                                      document.getElementById("projects-tab-view")?.scrollIntoView({ behavior: "smooth" });
+                                    }}
+                                    className="p-1 text-blue-400 hover:text-white"
+                                    title="تعديل المشروع"
+                                  >
+                                    <Edit2 className="w-3.5 h-3.5" />
+                                  </button>
                               <button
                                 onClick={() => {
                                   if (currentUser?.role !== "admin" && currentUser?.role !== "supervisor" && !can("projects")) {
@@ -7129,7 +7492,50 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                               </button>
                             </td>
                           </tr>
-                        ))}
+                          {isExpanded && (
+                            <tr className="bg-slate-950/60 border-b border-slate-800">
+                              <td colSpan={7} className="p-4">
+                                <div className="bg-slate-900/80 rounded-2xl p-4 border border-cyan-500/30 space-y-3 text-right">
+                                  <h5 className="text-xs font-black text-cyan-400 flex items-center gap-2">
+                                    <span>🏗️</span> كارت تحليل تكلفة العمالة المباشرة للمشروع — {p.name}
+                                  </h5>
+                                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-center">
+                                    <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+                                      <span className="text-[10px] text-slate-400 block font-bold">عدد العمال المعينين</span>
+                                      <span className="text-sm font-black text-white font-mono">{pWorkers.length} عامل</span>
+                                    </div>
+                                    <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+                                      <span className="text-[10px] text-slate-400 block font-bold">مدفوعات العمالة (سندات صرف)</span>
+                                      <span className="text-sm font-black text-rose-400 font-mono">{pLaborPayments.toLocaleString()} ريال</span>
+                                    </div>
+                                    <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+                                      <span className="text-[10px] text-slate-400 block font-bold">مصروفات مباشرة (بند عمالة)</span>
+                                      <span className="text-sm font-black text-amber-400 font-mono">{pLaborExpenses.toLocaleString()} ريال</span>
+                                    </div>
+                                    <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+                                      <span className="text-[10px] text-slate-400 block font-bold">إجمالي تكلفة العمالة المباشرة</span>
+                                      <span className="text-sm font-black text-cyan-400 font-mono">{totalLaborCost.toLocaleString()} ريال</span>
+                                    </div>
+                                  </div>
+                                  {pWorkers.length > 0 && (
+                                    <div className="bg-slate-950/40 p-3 rounded-xl border border-slate-850">
+                                      <span className="text-[10px] font-black text-slate-400 block mb-1.5">العمال والموظفون المرتبطون بالمشروع:</span>
+                                      <div className="flex flex-wrap gap-2">
+                                        {pWorkers.map((w, wIdx) => (
+                                          <span key={wIdx} className="px-2.5 py-1 bg-slate-900 border border-slate-750 rounded-lg text-[11px] font-bold text-slate-200">
+                                            👷‍♂️ {w.name} ({w.job}) — {w.salary ? `${w.salary} ريال` : "بدون راتب محدد"}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
                       </tbody>
                     </table>
                   </div>
@@ -7838,6 +8244,17 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                     </div>
 
                     <div className="space-y-1">
+                      <label className="text-[10px] text-slate-400 font-bold">نشاط الشركة / الوصف الفرعي (يظهر بالهيدر)</label>
+                      <input
+                        type="text"
+                        placeholder="مثال: للمقاولات العامة والتقسيط والعقود"
+                        value={cActivity}
+                        onChange={(e) => setCActivity(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500 font-sans"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
                       <label className="text-[10px] text-slate-400 font-bold">رقم السجل التجاري</label>
                       <input
                         type="text"
@@ -8003,6 +8420,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                                       onClick={() => {
                                         setEditCompanyId(comp.id);
                                         setCName(comp.name || "");
+                                        setCActivity(comp.activity || (comp as any).sub_title || (comp as any).company_activity || "");
                                         setCRegister(comp.commercial_register || "");
                                         setCTaxNo(comp.tax_no || "");
                                         setCCapital(comp.capital || "");
@@ -8899,22 +9317,23 @@ CREATE TABLE extracts (
                         </select>
                       </div>
 
-                      {uRole !== "admin" && (
-                        <div className="space-y-1">
-                          <label className="text-[10px] text-slate-400 font-black block">🏢 الشركة التابع لها الموظف *</label>
-                          <select
-                            required
-                            value={uCompanyId}
-                            onChange={(e) => setUCompanyId(e.target.value)}
-                            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none text-slate-950 bg-white font-sans"
-                          >
-                            <option value="" className="text-slate-950">اختر الشركة...</option>
-                            {getAuthorizedCompanies().map((c) => (
-                              <option key={c.id} value={c.id} className="text-slate-950 font-bold">🏢 {c.name}</option>
-                            ))}
-                          </select>
-                        </div>
-                      )}
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-slate-400 font-black block">🏢 الشركة التابع لها الحساب *</label>
+                        <select
+                          required
+                          value={uCompanyId}
+                          onChange={(e) => setUCompanyId(e.target.value)}
+                          className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none text-slate-950 bg-white font-sans"
+                        >
+                          <option value="" className="text-slate-950">اختر الشركة التابع لها الحساب...</option>
+                          {isSuperAdminUser(currentUser) && (
+                            <option value="all" className="text-amber-600 font-black">🌐 أدمن عام لكل الشركات (Super Admin)</option>
+                          )}
+                          {getAuthorizedCompanies().map((c) => (
+                            <option key={c.id} value={c.id} className="text-slate-950 font-bold">🏢 {c.name}</option>
+                          ))}
+                        </select>
+                      </div>
 
                       <div className="space-y-1">
                         <label className="text-[10px] text-slate-400 font-black block">النطاق الإداري / المنطقة</label>

@@ -552,6 +552,30 @@ export function awExtractClassification(notes: string): "مدين" | "دائن" 
   return "مدين";
 }
 
+export function awExtractContractDirection(notes: string): "لنا" | "علينا" | "مصروفات عمالة" {
+  const text = String(notes || "");
+  const m1 = text.match(/\[اتجاه العقد:\s*([^\]]+)\]/);
+  if (m1) {
+    const val = m1[1].trim();
+    if (val === "علينا" || val === "مصروفات عمالة" || val === "لنا") return val;
+  }
+  return "لنا";
+}
+
+export function awExtractWorkerId(notes: string): string {
+  const text = String(notes || "");
+  const m1 = text.match(/\[رمز العامل:\s*([^\]]+)\]/);
+  if (m1) return m1[1].trim();
+  return "";
+}
+
+export function awExtractProjectId(notes: string): string {
+  const text = String(notes || "");
+  const m1 = text.match(/\[رمز المشروع:\s*([^\]]+)\]/);
+  if (m1) return m1[1].trim();
+  return "";
+}
+
 export function awExtractTreasury(notes: string): string {
   const text = String(notes || "");
   const m1 = text.match(/\[الخزنة:\s*([^\]]+)\]/);

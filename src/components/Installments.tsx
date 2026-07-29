@@ -8,8 +8,13 @@ import {
   Plus, Search, User, Phone, MapPin, ClipboardList, Shield,
   Printer, Trash2, Edit2, FileText, CheckCircle, AlertTriangle, Eye, X, Globe
 } from "lucide-react";
-import { Installment, Project, User as AuthUser, Company } from "../types";
-import { getContractTiming, awExtractRegion, awCleanNotes, generateNextNo, awExtractTreasury, awExtractCapital, awExtractCapitalSource, awExtractCapitalCompany, awExtractCapitalCollection, awExtractCapitalSplit, awExtractCycle, awExtractClassification } from "../db";
+import { Installment, Project, User as AuthUser, Company, Worker } from "../types";
+import {
+  getContractTiming, awExtractRegion, awCleanNotes, generateNextNo, awExtractTreasury,
+  awExtractCapital, awExtractCapitalSource, awExtractCapitalCompany, awExtractCapitalCollection,
+  awExtractCapitalSplit, awExtractCycle, awExtractClassification, awExtractContractDirection,
+  awExtractWorkerId, awExtractProjectId
+} from "../db";
 import { safeStorage } from "../safeStorage";
 
 const localStorage = safeStorage;
@@ -19,6 +24,7 @@ interface InstallmentsProps {
   activePerms?: any;
   installments: Installment[];
   projects: Project[];
+  workers?: Worker[];
   onSaveInstallment: (row: any, editId: string | null) => Promise<boolean>;
   onDeleteInstallment: (id: string) => void;
   onPrintContract: (id: string) => void;
@@ -68,6 +74,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
   activePerms,
   installments,
   projects,
+  workers,
   onSaveInstallment,
   onDeleteInstallment,
   onPrintContract,
@@ -82,6 +89,9 @@ export const Installments: React.FC<InstallmentsProps> = ({
   // Form Fields
   const [client, setClient] = useState("");
   const [contractType, setContractType] = useState<string>("تقسيط");
+  const [contractDirection, setContractDirection] = useState<"لنا" | "علينا" | "مصروفات عمالة">("لنا");
+  const [linkedWorkerId, setLinkedWorkerId] = useState<string>("");
+  const [linkedProjectId, setLinkedProjectId] = useState<string>("");
   const [installmentCycle, setInstallmentCycle] = useState<string>("يومي");
   const [classification, setClassification] = useState<string>("مدين");
   const [identity, setIdentity] = useState("");
@@ -275,6 +285,9 @@ export const Installments: React.FC<InstallmentsProps> = ({
     setEditId(null);
     setClient("");
     setContractType("تقسيط");
+    setContractDirection("لنا");
+    setLinkedWorkerId("");
+    setLinkedProjectId("");
     setInstallmentCycle("يومي");
     setClassification("مدين");
     setIdentity("");
@@ -313,6 +326,9 @@ export const Installments: React.FC<InstallmentsProps> = ({
     setEditId(x.id);
     setClient(x.client || "");
     setContractType(x.type === "daily" || !x.type ? "تقسيط" : x.type);
+    setContractDirection((x.contract_direction as any) || awExtractContractDirection(x.notes || "") || "لنا");
+    setLinkedWorkerId(x.worker_id || awExtractWorkerId(x.notes || "") || "");
+    setLinkedProjectId(x.project_id || awExtractProjectId(x.notes || "") || "");
     setInstallmentCycle(awExtractCycle(x.notes || "") || "يومي");
     setClassification(awExtractClassification(x.notes || "") || "مدين");
     setIdentity(x.identity || "");
@@ -379,6 +395,9 @@ export const Installments: React.FC<InstallmentsProps> = ({
       treasury_input: treasury, // to be passed down
       cycle_input: installmentCycle, // pass down cycle to onSaveInstallment
       classification_input: classification, // pass down classification (دائن/مدين)
+      contract_direction_input: contractDirection,
+      worker_id_input: linkedWorkerId,
+      project_id_input: linkedProjectId,
       capital_input: capitalSource === "كلاهما" ? Object.values(capitalSplits).reduce<number>((sum, val) => sum + Number(val || 0), 0) : Number(capital || 0),
       capital_source_input: capitalSource,
       capital_company_input: capitalSource === "كلاهما" ? Number(capitalSplits["خزنة الشركة"] || 0) : (capitalSource === "خزنة الشركة" ? Number(capital || 0) : 0),
@@ -466,6 +485,95 @@ export const Installments: React.FC<InstallmentsProps> = ({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
 
+            {/* Contract Direction Selector Panel */}
+            <div className="sm:col-span-2 md:col-span-4 bg-slate-950/60 p-4 rounded-2xl border border-slate-800 space-y-2.5">
+              <label className="text-xs font-black text-amber-400 flex items-center gap-1.5">
+                <span>🧭</span> اتجاه العقد وطبيعة المعاملة المالية (Contract Direction & Flow)
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setContractDirection("لنا")}
+                  className={`p-3 rounded-xl border text-right transition-all flex items-center justify-between cursor-pointer ${
+                    contractDirection === "لنا"
+                      ? "bg-emerald-500/15 border-emerald-500 text-emerald-300 font-extrabold shadow-lg"
+                      : "bg-slate-900/40 border-slate-800 text-slate-400 hover:text-white"
+                  }`}
+                >
+                  <div>
+                    <div className="text-xs font-black">🟢 لنا (إيراد / تحصيل من عميل)</div>
+                    <div className="text-[10px] text-slate-400 font-normal">عقد مشروع/تقسيط للشركة وتوليد مقبوضات</div>
+                  </div>
+                  {contractDirection === "لنا" && <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setContractDirection("علينا")}
+                  className={`p-3 rounded-xl border text-right transition-all flex items-center justify-between cursor-pointer ${
+                    contractDirection === "علينا"
+                      ? "bg-rose-500/15 border-rose-500 text-rose-300 font-extrabold shadow-lg"
+                      : "bg-slate-900/40 border-slate-800 text-slate-400 hover:text-white"
+                  }`}
+                >
+                  <div>
+                    <div className="text-xs font-black">🔴 علينا (مصروف / استحقاق لمقاول)</div>
+                    <div className="text-[10px] text-slate-400 font-normal">عقد مقاولة باطن أو توريد وتوليد مدفوعات</div>
+                  </div>
+                  {contractDirection === "علينا" && <CheckCircle className="w-4 h-4 text-rose-400 shrink-0" />}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setContractDirection("مصروفات عمالة")}
+                  className={`p-3 rounded-xl border text-right transition-all flex items-center justify-between cursor-pointer ${
+                    contractDirection === "مصروفات عمالة"
+                      ? "bg-cyan-500/15 border-cyan-500 text-cyan-300 font-extrabold shadow-lg"
+                      : "bg-slate-900/40 border-slate-800 text-slate-400 hover:text-white"
+                  }`}
+                >
+                  <div>
+                    <div className="text-xs font-black">💼 مصروفات عمالة (عقد تشغيل/رواتب)</div>
+                    <div className="text-[10px] text-slate-400 font-normal">ربط مباشر بتكاليف عمالة مشروع محدد</div>
+                  </div>
+                  {contractDirection === "مصروفات عمالة" && <CheckCircle className="w-4 h-4 text-cyan-400 shrink-0" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Optional Worker / Employee Linking */}
+            {workers && workers.length > 0 && (
+              <div className="sm:col-span-2 space-y-1">
+                <label className="text-[10px] font-black text-cyan-400 flex items-center gap-1">
+                  <span>👷‍♂️</span> ربط بالعامل أو الموظف (عقود تشغيل وتكلفة مباشرة)
+                </label>
+                <select
+                  value={linkedWorkerId}
+                  onChange={(e) => {
+                    const wId = e.target.value;
+                    setLinkedWorkerId(wId);
+                    const matched = workers.find(w => w.id === wId);
+                    if (matched) {
+                      if (!client || client === "عام") setClient(matched.name);
+                      if (!phone) setPhone(matched.phone || "");
+                      if (matched.project && !projectSug) {
+                        setProjectSug(matched.project);
+                        const matchedP = projects.find(p => p.name === matched.project);
+                        if (matchedP) setLinkedProjectId(matchedP.id);
+                      }
+                    }
+                  }}
+                  className="w-full px-3.5 py-2.5 bg-slate-950/40 border border-slate-850 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-cyan-500 transition-colors"
+                >
+                  <option value="">-- اختياري: حدد العامل/الموظف المرتبط بهذا العقد --</option>
+                  {workers.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name} — {w.job} {w.project ? `(مشروع: ${w.project})` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <div className="space-y-1">
               <label className="text-[10px] font-black text-slate-400">اسم العميل</label>
