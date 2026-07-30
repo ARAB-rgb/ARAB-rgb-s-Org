@@ -2276,19 +2276,9 @@ export default function App() {
     }
   }, [activeSlug, companies]);
 
-  const isSuperAdminUser = (u?: AuthUser | null): boolean => {
-    if (!u) return false;
-    if (u.role !== "admin") return false;
-    // If the admin user is explicitly tied to a specific company, they are a Tenant Admin (restricted to that company)
-    if (u.company_id && u.company_id !== "all" && u.company_id !== "global" && u.company_id.trim() !== "") {
-      return false;
-    }
-    return true;
-  };
-
   const getAuthorizedCompanies = () => {
     if (!currentUser) return [];
-    if (isSuperAdminUser(currentUser)) return companies;
+    if (currentUser.role === "admin") return companies;
 
     const allowedSet = new Set<string>();
 
@@ -2313,7 +2303,7 @@ export default function App() {
 
   const isCompanyAuthorized = (compId: string | undefined | null) => {
     if (!currentUser) return false;
-    if (isSuperAdminUser(currentUser)) return true;
+    if (currentUser.role === "admin") return true;
     const targetId = compId || "arab_world";
     const authComps = getAuthorizedCompanies();
     return authComps.some((c) => c.id === targetId);
@@ -2321,28 +2311,27 @@ export default function App() {
 
   const getAuthorizedUsers = () => {
     if (!currentUser) return [];
-    if (isSuperAdminUser(currentUser)) return users;
+    if (currentUser.role === "admin") return users;
     const authComps = getAuthorizedCompanies();
     const authCompIds = authComps.map((c) => c.id);
     return users.filter((u) => {
-      if (isSuperAdminUser(u)) return false;
+      if (u.role === "admin") return false;
       const uComp = u.company_id || "arab_world";
       return authCompIds.includes(uComp);
     });
   };
 
   const getTargetCompanyId = (formCompanyVal?: string) => {
-    if (formCompanyVal && isCompanyAuthorized(formCompanyVal)) {
-      return formCompanyVal;
+    if (currentUser?.role !== "admin") {
+      if (formCompanyVal && isCompanyAuthorized(formCompanyVal)) {
+        return formCompanyVal;
+      }
+      if (selectedCompanyId !== "all" && isCompanyAuthorized(selectedCompanyId)) {
+        return selectedCompanyId;
+      }
+      return currentUser?.company_id || "arab_world";
     }
-    if (selectedCompanyId !== "all" && isCompanyAuthorized(selectedCompanyId)) {
-      return selectedCompanyId;
-    }
-    const authComps = getAuthorizedCompanies();
-    if (authComps.length > 0) {
-      return authComps[0].id;
-    }
-    return currentUser?.company_id || "arab_world";
+    return formCompanyVal || (selectedCompanyId !== "all" ? selectedCompanyId : null) || null;
   };
 
   const getActivePerms = () => {
@@ -2454,21 +2443,17 @@ export default function App() {
 
   useEffect(() => {
     if (currentUser) {
-      const authComps = getAuthorizedCompanies();
-      const authCompIds = authComps.map((c) => c.id);
-
-      if (selectedCompanyId !== "all" && !authCompIds.includes(selectedCompanyId)) {
-        if (authComps.length === 1) {
-          setSelectedCompanyId(authComps[0].id);
-        } else if (authComps.length > 1) {
+      if (currentUser.role === "admin") {
+        if (selectedCompanyId !== "all" && !companies.some((c) => c.id === selectedCompanyId)) {
           setSelectedCompanyId("all");
-        } else {
-          setSelectedCompanyId("arab_world");
         }
-      }
+      } else {
+        const userCompId = currentUser.company_id || "arab_world";
+        if (selectedCompanyId !== userCompId) {
+          setSelectedCompanyId(userCompId);
+        }
 
-      // Auto redirect active section if current section is unauthorized for non-admin
-      if (!isSuperAdminUser(currentUser)) {
+        // Auto redirect active section if current section is unauthorized for non-admin
         const hasAccess = (perm: string) => {
           const activePerms = getActivePerms();
           if (activePerms) {
@@ -5294,68 +5279,6 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
     }
   });
 
-  // 4. If logged-in user tries to open a company URL slug they are not authorized for (403 Forbidden):
-  if (currentUser && !isCompanyAuthorized(activeCompany.id)) {
-    const userAuthComps = getAuthorizedCompanies();
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4 text-right select-none overflow-hidden relative" dir="rtl">
-        <Toast toasts={toasts} removeToast={removeToast} />
-        
-        {/* Ambient Glow */}
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-rose-500/10 rounded-full blur-[120px] pointer-events-none"></div>
-
-        <div className="w-full max-w-md bg-[#0e172c]/95 backdrop-blur-2xl border border-rose-500/30 p-8 rounded-[32px] text-center space-y-6 shadow-2xl relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-16 h-16 border-t-2 border-r-2 border-rose-500/30 rounded-tr-[32px] pointer-events-none"></div>
-          <div className="absolute bottom-0 left-0 w-16 h-16 border-b-2 border-l-2 border-rose-500/30 rounded-bl-[32px] pointer-events-none"></div>
-
-          <div className="w-16 h-16 bg-rose-500/10 border border-rose-500/30 text-rose-500 rounded-2xl mx-auto flex items-center justify-center text-3xl font-bold shadow-lg">
-            🔒
-          </div>
-
-          <div className="space-y-2">
-            <div className="inline-block px-3 py-1 bg-rose-500/10 border border-rose-500/30 text-rose-400 rounded-full text-[10px] font-black tracking-wider uppercase">
-              403 Forbidden - غير مصرح بالوصول
-            </div>
-            <h1 className="text-lg font-black text-white">غير مصرح لك بالوصول لشركة {activeCompany.name}</h1>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              عذراً، حسابك الحالي (<strong className="text-amber-400">{currentUser.name}</strong>) لا يمتلك صلاحية الوصول لمساحة العمل الخاصة بـ <strong className="text-white font-bold">"{activeCompany.name}"</strong> (/{activeSlug}).
-            </p>
-          </div>
-
-          <div className="pt-2 space-y-3">
-            {userAuthComps.length > 0 && (
-              <button
-                onClick={() => {
-                  const firstComp = userAuthComps[0];
-                  navigateToSlug(firstComp.slug || firstComp.id);
-                }}
-                className="w-full py-3 bg-gradient-to-l from-amber-500 to-amber-600 text-slate-950 font-black rounded-xl text-xs hover:from-amber-400 hover:to-amber-500 transition-all cursor-pointer shadow-lg flex items-center justify-center gap-2"
-              >
-                <span>🏢</span>
-                <span>الانتقال لشركتك المصرح بها ({userAuthComps[0].name})</span>
-              </button>
-            )}
-
-            <button
-              onClick={handleLogout}
-              className="w-full py-2.5 bg-slate-900 hover:bg-slate-850 text-slate-300 hover:text-white border border-slate-800 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center justify-center gap-2"
-            >
-              <span>🚪</span>
-              <span>تسجيل الخروج والتبديل لحساب آخر</span>
-            </button>
-
-            <button
-              onClick={() => navigateToSlug(null)}
-              className="w-full py-2 text-[11px] text-slate-400 hover:text-amber-400 font-bold transition-colors cursor-pointer"
-            >
-              ← البوابة المركزية
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen mesh-gradient text-slate-100 flex flex-col md:flex-row text-right font-sans relative" dir="rtl">
       
@@ -5482,7 +5405,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
             {currentUser && getAuthorizedCompanies().length > 0 && (
               <div className="flex items-center gap-2 bg-slate-900/60 border border-amber-500/20 rounded-xl px-3 py-1.5 shadow-lg shadow-amber-500/5 hover:border-amber-500/40 transition-all font-sans">
                 <span className="text-[10px] text-amber-500 font-extrabold whitespace-nowrap">🏢 الشركة النشطة:</span>
-                {getAuthorizedCompanies().length <= 1 ? (
+                {currentUser.role !== "admin" && getAuthorizedCompanies().length <= 1 ? (
                   <span className="text-xs font-black text-amber-300">
                     🏢 {getAuthorizedCompanies()[0]?.name || "شركة عرب وورلد للمقاولات والعقود"}
                   </span>
@@ -5491,18 +5414,14 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                     value={selectedCompanyId}
                     onChange={(e) => {
                       const val = e.target.value;
-                      if (val === "all" || isCompanyAuthorized(val)) {
-                        setSelectedCompanyId(val);
-                        if (val === "all") {
-                          navigateToSlug(null);
-                        } else {
-                          const matched = companies.find((c) => c.id === val);
-                          if (matched) {
-                            navigateToSlug(matched.slug || matched.id);
-                          }
-                        }
+                      setSelectedCompanyId(val);
+                      if (val === "all") {
+                        navigateToSlug(null);
                       } else {
-                        showToast("⚠️ غير مصرح لك بالتنقل لهذه الشركة!", "error");
+                        const matched = companies.find((c) => c.id === val);
+                        if (matched) {
+                          navigateToSlug(matched.slug || matched.id);
+                        }
                       }
                     }}
                     className="bg-transparent text-white font-extrabold text-xs focus:outline-none cursor-pointer text-slate-950 bg-white"
@@ -9326,7 +9245,7 @@ CREATE TABLE extracts (
                           className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none text-slate-950 bg-white font-sans"
                         >
                           <option value="" className="text-slate-950">اختر الشركة التابع لها الحساب...</option>
-                          {isSuperAdminUser(currentUser) && (
+                          {currentUser?.role === "admin" && (
                             <option value="all" className="text-amber-600 font-black">🌐 أدمن عام لكل الشركات (Super Admin)</option>
                           )}
                           {getAuthorizedCompanies().map((c) => (
