@@ -38,6 +38,7 @@ import { ProjectMap } from "./components/ProjectMap";
 import { HRModule } from "./components/HRModule";
 import { CompanyAssets } from "./components/CompanyAssets";
 import { AuthenticatorModal } from "./components/AuthenticatorModal";
+import { NotFound404 } from "./components/NotFound404";
 
 const compressAndResizeImage = (file: File, maxWidth = 800, maxHeight = 800, quality = 0.7): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -5020,31 +5021,9 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
     );
   }
 
-  // 2. If there is a slug but no matching company in DB:
+  // 2. Fallback Route: If there is a slug or unknown URL path but no matching company in DB:
   if (!activeCompany) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4 text-right" dir="rtl">
-        <Toast toasts={toasts} removeToast={removeToast} />
-        <div className="w-full max-w-md bg-slate-900 border border-slate-800 p-8 rounded-3xl text-center space-y-6 shadow-2xl relative overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-to-tr from-amber-500/5 to-transparent pointer-events-none"></div>
-          <div className="w-16 h-16 bg-rose-500/10 border border-rose-500/30 text-rose-500 rounded-2xl mx-auto flex items-center justify-center text-2xl font-bold">
-            ⚠️
-          </div>
-          <div className="space-y-2">
-            <h1 className="text-xl font-black text-white">مساحة العمل غير موجودة!</h1>
-            <p className="text-xs text-slate-400">عذراً، الرابط المخصص <span className="text-amber-400 font-mono font-bold">/{activeSlug}</span> غير مسجل في نظامنا السحابي حالياً.</p>
-          </div>
-          <div className="pt-2 flex flex-col gap-3">
-            <button
-              onClick={() => navigateToSlug(null)}
-              className="w-full py-2.5 bg-gradient-to-l from-amber-500 to-amber-600 text-slate-950 font-black rounded-xl text-xs hover:from-amber-400 hover:to-amber-500 transition-all cursor-pointer shadow-lg"
-            >
-              العودة للبوابة المركزية وتأسيس مساحة عمل
-            </button>
-          </div>
-        </div>
-      </div>
-    );
+    return <NotFound404 onGoHome={() => navigateToSlug(null)} />;
   }
 
   // 3. If there is an active company but no logged-in session:
