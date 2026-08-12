@@ -201,7 +201,9 @@ class SupabaseEmulationChain {
   }
 
   select(fields: string = "*") {
-    this.action = 'select';
+    if (!this.action) {
+      this.action = 'select';
+    }
     return this;
   }
 

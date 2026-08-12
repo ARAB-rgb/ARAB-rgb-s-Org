@@ -1656,6 +1656,10 @@ export default function App() {
     chosenRole: "admin" | "supervisor" | "employee",
     chosenPerms?: UserPerms
   ) => {
+    if (currentUser?.role !== "admin" && !can("users")) {
+      showToast("⚠️ عذراً، لا تملك صلاحية اعتماد الموظفين والمستخدمين!", "error");
+      return;
+    }
     setIsLoading(true);
     try {
       const targetUser = users.find(u => u.id === targetUserId);
@@ -1696,7 +1700,8 @@ export default function App() {
         status: "نشط",
         company_id: finalCompId || null,
         role: chosenRole,
-        perms: permsToSet
+        perms: permsToSet,
+        updated_at: new Date().toISOString(),
       };
 
       const { error: userErr } = await sb.from("users").update(updatedUserFields).eq("id", targetUserId);
@@ -1716,6 +1721,10 @@ export default function App() {
   };
 
   const handleRejectPendingUser = async (targetUserId: string) => {
+    if (currentUser?.role !== "admin" && !can("users")) {
+      showToast("⚠️ عذراً، لا تملك صلاحية رفض أو إدارة طلبات الموظفين!", "error");
+      return;
+    }
     setIsLoading(true);
     try {
       const { error } = await sb.from("users").update({ status: "مرفوض" }).eq("id", targetUserId);
@@ -1974,13 +1983,31 @@ export default function App() {
             showToast("⚠️ تم إيقاف أو تعطيل هذا الحساب من قبل الإدارة. تم تسجيل الخروج تلقائياً.", "error");
             return;
           }
+
+          // Check if employee credentials, role, company, permissions, or updated_at changed
+          const permsChanged = JSON.stringify(freshUser.perms || {}) !== JSON.stringify(currentUser.perms || {}) ||
+            JSON.stringify(freshUser.company_perms || {}) !== JSON.stringify(currentUser.company_perms || {});
+          const infoChanged = freshUser.password !== currentUser.password ||
+            freshUser.code !== currentUser.code ||
+            freshUser.role !== currentUser.role ||
+            freshUser.company_id !== currentUser.company_id ||
+            freshUser.status !== currentUser.status ||
+            (freshUser.updated_at && currentUser.updated_at && freshUser.updated_at !== currentUser.updated_at);
+
+          if (permsChanged || infoChanged) {
+            setCurrentUser(null);
+            localStorage.removeItem("aw_current_user");
+            showToast("🔒 تم تعديل صلاحيات أو بيانات حسابك فوراً من قبل الإدارة. يرجى إعادة تسجيل الدخول لمتابعة العمل.", "info");
+            return;
+          }
+
           setCurrentUser(freshUser);
           localStorage.setItem("aw_current_user", JSON.stringify(freshUser));
         } else {
           // The user was completely deleted from the database
           setCurrentUser(null);
           localStorage.removeItem("aw_current_user");
-          showToast("⚠️ عذراً، تم حذف حسابك أو إلغاء صلاحية دخولك بالكامل من النظام المالي.", "error");
+          showToast("⚠️ تم حذف حسابك من قبل الإدارة. تم تسجيل الخروج فوراً.", "error");
           return;
         }
       }
@@ -2167,7 +2194,7 @@ export default function App() {
       loadEverything();
       const interval = setInterval(() => {
         loadEverything();
-      }, 7000);
+      }, 3000);
       return () => clearInterval(interval);
     }
   }, [currentUser]);
@@ -2409,6 +2436,10 @@ export default function App() {
   };
 
   const addNewTreasury = async (name: string, compId?: string) => {
+    if (currentUser?.role !== "admin" && !can("treasury")) {
+      showToast("⚠️ عذراً، لا تملك صلاحية إضافة أو إدارة الخزائن المالية!", "error");
+      return;
+    }
     const cleanName = name.trim();
     if (!cleanName) return;
     const targetCompId = compId || (currentUser?.role !== "admin" ? currentUser?.company_id : selectedCompanyId);
@@ -2660,30 +2691,67 @@ export default function App() {
   const recalcLinkedContractFromReceipts = async (installmentId: string) => {
     if (!installmentId) return;
 
-    const { data: rows, error } = await sb
-      .from("receipts")
-      .select("*")
-      .eq("installment_id", installmentId);
-
-    if (error) {
-      showToast("تعذر إعادة حساب العقد في الملقم", "error");
-      return;
-    }
-
     const linked = installments.find((x) => x.id === installmentId);
     if (!linked) return;
 
-    const paidFromReceipts = (rows || []).reduce((sum, x) => {
+    const [recByInst, recByNo, payByInst, payByNo] = await Promise.all([
+      sb.from("receipts").select("*").eq("installment_id", installmentId),
+      linked.no ? sb.from("receipts").select("*").eq("contract_no", linked.no) : Promise.resolve({ data: [], error: null }),
+      sb.from("payments").select("*").eq("installment_id", installmentId),
+      linked.no ? sb.from("payments").select("*").eq("contract_no", linked.no) : Promise.resolve({ data: [], error: null }),
+    ]);
+
+    // Merge receipts uniquely
+    const recMap = new Map<string, any>();
+    (recByInst.data || []).forEach((r: any) => { if (r?.id) recMap.set(r.id, r); });
+    (recByNo.data || []).forEach((r: any) => { if (r?.id) recMap.set(r.id, r); });
+    const allReceipts = Array.from(recMap.values());
+
+    // Merge payments uniquely
+    const payMap = new Map<string, any>();
+    (payByInst.data || []).forEach((p: any) => { if (p?.id) payMap.set(p.id, p); });
+    (payByNo.data || []).forEach((p: any) => { if (p?.id) payMap.set(p.id, p); });
+    const allPayments = Array.from(payMap.values());
+
+    const contractDir = linked.contract_direction || awExtractContractDirection(linked.notes || "") || "لنا";
+    const isExpenseDir = contractDir === "علينا" || contractDir === "مصروفات عمالة";
+
+    const paidFromReceipts = allReceipts.reduce((sum, x) => {
       const isOutgoing = awExtractReceiptType(x.notes || "") === "صادر";
       const amt = Number(x.amount || 0);
       return sum + (isOutgoing ? -amt : amt);
     }, 0);
-    const newRemaining = Math.max(0, Number(linked.amount || 0) - paidFromReceipts);
+
+    const paidOutFromPayments = allPayments.reduce((sum, x) => {
+      const amt = Number(x.amount || 0);
+      return sum + amt;
+    }, 0);
+
+    const initialDownPayment = (linked.notes || "").match(/\[دفعة_مقدمة:\s*([\d\.]+)\]/) 
+      ? Number((linked.notes || "").match(/\[دفعة_مقدمة:\s*([\d\.]+)\]/)?.[1] || 0)
+      : 0;
+
+    let netPaid = 0;
+    if (allReceipts.length === 0 && allPayments.length === 0) {
+      // No linked vouchers created yet; preserve the contract's initial paid amount
+      netPaid = Number(linked.paid || 0);
+    } else {
+      if (isExpenseDir) {
+        // For "علينا" / "مصروفات عمالة": Payments (+) add to paid, Receipts (-) deduct from paid
+        netPaid = initialDownPayment + (paidOutFromPayments - paidFromReceipts);
+      } else {
+        // For "لنا": Receipts (+) add to paid, Payments (-) deduct from paid
+        netPaid = initialDownPayment + (paidFromReceipts - paidOutFromPayments);
+      }
+    }
+
+    const contractTotal = Number(linked.amount || 0);
+    const newRemaining = Math.max(0, contractTotal - netPaid);
     const newStatus = newRemaining <= 0 ? "مكتمل" : "منتظم";
 
     await sb
       .from("installments")
-      .update({ paid: paidFromReceipts, remaining: newRemaining, status: newStatus })
+      .update({ paid: netPaid, remaining: newRemaining, status: newStatus })
       .eq("id", installmentId);
   };
 
@@ -2771,6 +2839,11 @@ export default function App() {
   // Interactive CRUD operations
   // Save Installments
   const onSaveInstallment = async (row: any, editId: string | null): Promise<boolean> => {
+    if (editId ? !can("installmentsEdit") : !can("installmentsAdd")) {
+      showToast("⚠️ عذراً، لا تملك الصلاحية المطلوبة لحفظ أو تعديل العقود!", "error");
+      return false;
+    }
+
     const userRegion = userRegionFilter;
     const activeRegion = currentUser && currentUser.role !== "admin" && userRegion ? userRegion : row.region_input;
     const activeTreasury = row.treasury_input || "خزنة التحصيل";
@@ -2810,6 +2883,9 @@ export default function App() {
     if (row.project_id_input) {
       finalNotes = `[رمز المشروع: ${row.project_id_input}] ` + finalNotes;
     }
+    if (Number(row.paid) > 0) {
+      finalNotes = `[دفعة_مقدمة: ${Number(row.paid)}] ` + finalNotes;
+    }
 
     const payload = {
       ...row,
@@ -2835,14 +2911,20 @@ export default function App() {
     setIsLoading(true);
     try {
       const q = editId
-        ? sb.from("installments").update(payload).eq("id", editId)
-        : sb.from("installments").insert(payload);
+        ? sb.from("installments").update(payload).eq("id", editId).select()
+        : sb.from("installments").insert(payload).select();
 
-      const { error } = await q;
+      const { data: savedRows, error } = await q;
       if (error) {
         showToast(error.message, "error");
         setIsLoading(false);
         return false;
+      }
+
+      const targetInstId = editId || (savedRows ? (Array.isArray(savedRows) ? savedRows[0]?.id : savedRows.id) : null);
+
+      if (targetInstId) {
+        await recalcLinkedContractFromReceipts(targetInstId);
       }
 
       await logSession(currentUser!, editId ? `تعديل ملف العقد رقم: ${row.no}` : `تسجيل عقد تقسيط جديد رقم: ${row.no}`);
@@ -2858,6 +2940,10 @@ export default function App() {
   };
 
   const onDeleteInstallment = (id: string) => {
+    if (!can("installmentsDelete")) {
+      showToast("⚠️ عذراً، لا تملك صلاحية حذف العقود الماليّة!", "error");
+      return;
+    }
     const inst = installments.find(i => i.id === id);
     const instName = inst ? `${inst.no} - ${inst.client || ""}` : id;
     triggerConfirm(
@@ -3384,6 +3470,10 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
   // Quotes CRUD
   const saveQuoteLogic = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!can("quotes")) {
+      showToast("⚠️ عذراً، لا تملك صلاحية إنشاء وتعديل عروض الأسعار!", "error");
+      return;
+    }
     if (!qClient) return;
 
     const serializedNotes = serializeQuoteNotes(qItems, qNotes);
@@ -3433,6 +3523,10 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
   };
 
   const deleteQuoteLogic = async (id: string, reason?: string) => {
+    if (!can("quotes")) {
+      showToast("⚠️ عذراً، لا تملك صلاحية حذف عروض الأسعار!", "error");
+      return;
+    }
     setIsLoading(true);
     try {
       const q = quotes.find((item) => item.id === id);
@@ -3458,6 +3552,10 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
   // Receipts CRUD with auto updating Linked Installments
   const saveReceiptLogic = async (e?: React.FormEvent, auditReasonPassed?: string, auditRefNoPassed?: string) => {
     if (e) e.preventDefault();
+    if (!can("receipts")) {
+      showToast("⚠️ عذراً، لا تملك صلاحية تحرير أو تعديل سندات القبض!", "error");
+      return;
+    }
     if (!rFrom) return;
 
     if (editReceiptId && (currentUser?.role === "admin" || currentUser?.role === "supervisor") && !auditReasonPassed) {
@@ -3478,6 +3576,9 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
         return;
       }
     }
+
+    const oldReceiptForInst = editReceiptId ? receipts.find(r => r.id === editReceiptId) : null;
+    const oldInstIdForRec = oldReceiptForInst?.installment_id;
 
     let linked = rSelectedInstallment;
     if (!linked && rContractQuery) {
@@ -3536,6 +3637,9 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       if (linked) {
         await recalcLinkedContractFromReceipts(linked.id);
       }
+      if (oldInstIdForRec && oldInstIdForRec !== linked?.id) {
+        await recalcLinkedContractFromReceipts(oldInstIdForRec);
+      }
 
       await logSession(
         currentUser!,
@@ -3569,6 +3673,10 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
   };
 
   const deleteReceiptLogicExecute = async (id: string, instId?: string, reason?: string) => {
+    if (!can("receipts")) {
+      showToast("⚠️ عذراً، لا تملك صلاحية حذف سندات القبض!", "error");
+      return;
+    }
     setIsLoading(true);
     try {
       const r = receipts.find((x) => x.id === id);
@@ -3608,6 +3716,10 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
   // Payments CRUD
   const savePaymentLogic = async (e?: React.FormEvent, auditReasonPassed?: string, auditRefNoPassed?: string) => {
     if (e) e.preventDefault();
+    if (!can("payments")) {
+      showToast("⚠️ عذراً، لا تملك صلاحية تحرير أو تعديل سندات الصرف!", "error");
+      return;
+    }
     if (!payTo || !payAmount) return;
 
     if (editPaymentId && (currentUser?.role === "admin" || currentUser?.role === "supervisor") && !auditReasonPassed) {
@@ -3628,12 +3740,15 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       notesAppended = `${notesAppended} | ⚠️ قيد تعديل رقابي: [السبب: ${auditReasonPassed}] [مرجع: ${auditRefNoPassed}]`;
     }
 
+    const oldPaymentForInst = editPaymentId ? payments.find(p => p.id === editPaymentId) : null;
+    const oldInstIdForPay = oldPaymentForInst?.installment_id;
+
     let payRemBefore: number | undefined = undefined;
     let payRemAfter: number | undefined = undefined;
 
     if (paySelectedInstallment) {
       payRemBefore = Number(paySelectedInstallment.remaining || 0);
-      payRemAfter = Math.max(0, payRemBefore - Number(payAmount));
+      payRemAfter = payRemBefore + Number(payAmount);
     } else if (payWorkerId) {
       const w = workers.find(x => x.id === payWorkerId);
       if (w) {
@@ -3646,7 +3761,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       const foundInst = getInstallmentsForReceipt().find(x => payContractQuery.includes(x.no) || x.no === payContractQuery.trim());
       if (foundInst) {
         payRemBefore = Number(foundInst.remaining || 0);
-        payRemAfter = Math.max(0, payRemBefore - Number(payAmount));
+        payRemAfter = payRemBefore + Number(payAmount);
       }
     }
 
@@ -3734,6 +3849,13 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
         return;
       }
 
+      if (paySelectedInstallment) {
+        await recalcLinkedContractFromReceipts(paySelectedInstallment.id);
+      }
+      if (oldInstIdForPay && oldInstIdForPay !== paySelectedInstallment?.id) {
+        await recalcLinkedContractFromReceipts(oldInstIdForPay);
+      }
+
       await logSession(
         currentUser!,
         editPaymentId
@@ -3764,8 +3886,13 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
   };
 
   const deletePaymentLogic = async (paymentId: string, reason?: string) => {
+    if (!can("payments")) {
+      showToast("⚠️ عذراً، لا تملك صلاحية حذف سندات الصرف!", "error");
+      return;
+    }
     const p = payments.find((x) => x.id === paymentId);
     if (!p) return;
+    const instId = p.installment_id;
 
     setIsLoading(true);
     try {
@@ -3786,6 +3913,10 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
         return;
       }
 
+      if (instId) {
+        await recalcLinkedContractFromReceipts(instId);
+      }
+
       const logMsg = `حذف سند الصرف رقم: ${p.no}${p.amount ? ` بمبلغ ${p.amount} ريال` : ""}${p.to_name ? ` إلى ${p.to_name}` : ""} | مذكرة تسوية (سبب الحذف): ${reason || "لم يذكر"}`;
       await logSession(currentUser!, logMsg);
       await loadEverything();
@@ -3800,6 +3931,10 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
   // Expenses CRUD
   const saveExpenseLogic = async (e?: React.FormEvent, auditReasonPassed?: string, auditRefNoPassed?: string) => {
     if (e) e.preventDefault();
+    if (!can("expenses")) {
+      showToast("⚠️ عذراً، لا تملك صلاحية إدخال أو تعديل المصروفات!", "error");
+      return;
+    }
     if (!eName || !eAmount) return;
 
     if (editExpenseId && (currentUser?.role === "admin" || currentUser?.role === "supervisor") && !auditReasonPassed) {
@@ -3868,6 +4003,10 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
   };
 
   const deleteExpenseLogic = async (id: string, reason?: string) => {
+    if (!can("expenses")) {
+      showToast("⚠️ عذراً، لا تملك صلاحية حذف المصروفات!", "error");
+      return;
+    }
     setIsLoading(true);
     try {
       const e = expenses.find((item) => item.id === id);
@@ -3912,6 +4051,10 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
 
   const saveProjectLogic = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!can("projects")) {
+      showToast("⚠️ عذراً، لا تملك صلاحية إضافة أو تعديل بطاقات المشاريع!", "error");
+      return;
+    }
     if (!pName) return;
 
     const row = {
@@ -3964,6 +4107,10 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
   };
 
   const deleteProjectLogic = async (projectId: string, reason?: string) => {
+    if (!can("projects")) {
+      showToast("⚠️ عذراً، لا تملك صلاحية حذف المشاريع!", "error");
+      return;
+    }
     setIsLoading(true);
     try {
       const p = projects.find((item) => item.id === projectId);
@@ -3989,6 +4136,10 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
   // Workers CRUD
   const saveWorkerLogic = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!can("workers")) {
+      showToast("⚠️ عذراً، لا تملك صلاحية إضافة أو تعديل ملفات العمال!", "error");
+      return;
+    }
     if (!wName) return;
 
     const tot = Number(wDaily || 0) * Number(wDays || 0);
@@ -4043,6 +4194,10 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
   };
 
   const deleteWorkerLogic = async (id: string, reason?: string) => {
+    if (!can("workers")) {
+      showToast("⚠️ عذراً، لا تملك صلاحية حذف ملفات العمال!", "error");
+      return;
+    }
     setIsLoading(true);
     try {
       const w = workers.find((item) => item.id === id);
@@ -4068,6 +4223,10 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
   // Companies & Extracts CRUD Logic
   const saveCompanyLogic = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (currentUser?.role !== "admin" && !can("companies")) {
+      showToast("⚠️ عذراً، لا تملك صلاحية إضافة أو تعديل الشركات!", "error");
+      return;
+    }
     if (!cName) return;
 
     const targetCompanyId = editCompanyId || "comp_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7);
@@ -4120,6 +4279,10 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
   };
 
   const onDeleteCompany = (id: string, name: string) => {
+    if (currentUser?.role !== "admin" && !can("companies")) {
+      showToast("⚠️ عذراً، لا تملك صلاحية حذف بطاقات الشركات!", "error");
+      return;
+    }
     triggerConfirm(
       "حذف الشركة",
       `هل أنت متأكد من حذف الشركة "${name}" بالكامل؟ سيتم فك ارتباط أي مستندات تابعة.`,
@@ -4146,6 +4309,10 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
 
   const saveExtractLogic = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (currentUser?.role !== "admin" && !can("financial_reports") && !can("projects")) {
+      showToast("⚠️ عذراً، لا تملك صلاحية إدخال أو تعديل المستخلصات المالية!", "error");
+      return;
+    }
     if (!exCompanyId || !exTitle) {
       showToast("يرجى اختيار الشركة وكتابة اسم/رقم المستخلص مسبقًا", "error");
       return;
@@ -4191,6 +4358,10 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
   };
 
   const onDeleteExtract = (id: string, title: string) => {
+    if (currentUser?.role !== "admin" && !can("financial_reports") && !can("projects")) {
+      showToast("⚠️ عذراً، لا تملك صلاحية حذف المستخلصات المالية!", "error");
+      return;
+    }
     triggerConfirm(
       "حذف المستخلص",
       `هل أنت متأكد من حذف المستخلص "${title}"؟`,
@@ -4764,6 +4935,10 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
   // Users & Perms CRUD
   const saveUserLogic = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (currentUser?.role !== "admin" && !can("users")) {
+      showToast("⚠️ عذراً، لا تملك صلاحية إضافة أو تعديل الموظفين والصلاحيات!", "error");
+      return;
+    }
     if (!uName || !uCode || !uPass) return;
 
     let finalRole = uRole;
@@ -4797,6 +4972,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       role: finalRole,
       company_id: finalRole === "admin" ? null : finalCompanyId,
       status: uStatus,
+      updated_at: new Date().toISOString(),
       perms: {
         ...uPerms,
         region: uRegion,
@@ -4866,6 +5042,10 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
   };
 
   const deleteUserLogicExecute = async (id: string, name: string) => {
+    if (currentUser?.role !== "admin" && !can("users")) {
+      showToast("⚠️ عذراً، لا تملك صلاحية حذف حسابات الموظفين!", "error");
+      return;
+    }
     setIsLoading(true);
     try {
       const { error } = await sb.from("users").delete().eq("id", id);
