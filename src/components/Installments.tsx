@@ -7,7 +7,9 @@ import React, { useState, useEffect } from "react";
 import {
   Plus, Search, User, Phone, MapPin, ClipboardList, Shield,
   Printer, Trash2, Edit2, FileText, CheckCircle, AlertTriangle, Eye, X, Globe,
-  RotateCw, RefreshCw, CalendarCheck, Activity, CheckCircle2, Filter, RotateCcw
+  RotateCw, RefreshCw, CalendarCheck, Activity, CheckCircle2, Filter, RotateCcw,
+  ChevronDown, ChevronUp, LayoutGrid, Table as TableIcon, Calendar, Clock, DollarSign,
+  Maximize2, Minimize2, Info
 } from "lucide-react";
 import { Installment, Project, User as AuthUser, Company, Worker } from "../types";
 import {
@@ -222,6 +224,24 @@ export const Installments: React.FC<InstallmentsProps> = ({
   const [fProject, setFProject] = useState("");
   const [fRegion, setFRegion] = useState("");
   const [fSort, setFSort] = useState("date_desc");
+  const [viewLayout, setViewLayout] = useState<"smart_table" | "cards">("smart_table");
+  const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
+
+  const toggleRowExpanded = (id: string) => {
+    setExpandedRows(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const toggleAllExpanded = (expand: boolean) => {
+    if (!expand) {
+      setExpandedRows({});
+    } else {
+      const all: Record<string, boolean> = {};
+      installments.forEach(item => {
+        all[item.id] = true;
+      });
+      setExpandedRows(all);
+    }
+  };
 
   // Contract Renewal State
   const [renewTarget, setRenewTarget] = useState<Installment | null>(null);
@@ -712,7 +732,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
     <div className="space-y-6" dir="rtl">
       {/* Contract Addition Form Panel */}
       {((!editId && finalPerms?.installmentsAdd) || (editId && finalPerms?.installmentsEdit) || currentUser?.role === "admin") && (
-        <form onSubmit={handleSubmit} className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl space-y-6">
+        <form onSubmit={handleSubmit} className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-xl space-y-5 sm:space-y-6">
           <div className="border-b border-slate-850 pb-4">
             <h3 className="text-base font-black text-white flex items-center gap-2">
               <span className="p-1.5 rounded-lg bg-blue-600/20 border border-blue-500/30 text-blue-400">📝</span>
@@ -1325,9 +1345,9 @@ export const Installments: React.FC<InstallmentsProps> = ({
       )}
 
       {/* Filter and Tables Section */}
-      <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
+      <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-xl space-y-4">
         {/* Contract Status Quick Filter Tabs Header */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-black text-slate-400 flex items-center gap-1.5 ml-1">
               <Filter className="w-3.5 h-3.5 text-amber-400" />
@@ -1392,7 +1412,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
           </div>
 
           {/* Result counter and Reset Filters */}
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 w-full md:w-auto justify-between md:justify-end">
             {(qSearch || fStatus || fType || fClassification || fNationality || fProject || fRegion || fContractLifecycle !== "all") && (
               <button
                 type="button"
@@ -1420,14 +1440,14 @@ export const Installments: React.FC<InstallmentsProps> = ({
           </div>
         </div>
 
-        {/* Quick Filter Controls Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-9 gap-2.5 p-4 bg-slate-950/30 rounded-2xl border border-slate-850/80">
+        {/* Quick Filter Controls Grid (Balanced responsive columns) */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5 p-3.5 sm:p-4 bg-slate-950/40 rounded-2xl border border-slate-850/80">
           <input
             type="text"
             placeholder="البحث باسم العميل أو العقد..."
             value={qSearch}
             onChange={(e) => setQSearch(e.target.value)}
-            className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-blue-500"
+            className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-blue-500 sm:col-span-2 md:col-span-1"
           />
           <select
             value={fContractLifecycle}
@@ -1523,102 +1543,478 @@ export const Installments: React.FC<InstallmentsProps> = ({
           </select>
         </div>
 
-        {/* Contract log list table */}
-        <div className="overflow-x-auto rounded-2xl border border-slate-800/80 shadow-2xl bg-slate-950/70">
-          <table className="min-w-[1250px] w-full text-right text-xs md:text-sm border-collapse">
-            <thead>
-              <tr className="bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 border-b border-slate-800 text-slate-300">
-                <th className="py-3.5 px-4 font-black min-w-[240px] text-amber-400">
-                  <div className="flex items-center gap-2">
-                    <User className="w-4 h-4 text-amber-400 shrink-0" />
-                    <span>العميل والتصنيف</span>
-                  </div>
-                </th>
-                <th className="py-3.5 px-4 font-black min-w-[170px] text-slate-300">
-                  <div className="flex items-center gap-2">
-                    <FileText className="w-4 h-4 text-blue-400 shrink-0" />
-                    <span>رقم العقد والفرع</span>
-                  </div>
-                </th>
-                <th className="py-3.5 px-4 font-black min-w-[120px] text-slate-300">
-                  <div className="flex items-center gap-1.5">
-                    <span>📅</span>
-                    <span>تاريخ العقد</span>
-                  </div>
-                </th>
-                <th className="py-3.5 px-4 font-black min-w-[120px] text-slate-300">
-                  <div className="flex items-center gap-1.5">
-                    <span>⏱️</span>
-                    <span>آخر سداد</span>
-                  </div>
-                </th>
-                <th className="py-3.5 px-4 font-black text-center min-w-[90px] text-slate-300">التأخر</th>
-                <th className="py-3.5 px-4 font-black min-w-[120px] text-slate-200">
-                  <div className="flex items-center gap-1.5">
-                    <span>💵</span>
-                    <span>إجمالي العقد</span>
-                  </div>
-                </th>
-                <th className="py-3.5 px-4 font-black min-w-[110px] text-emerald-400">
-                  <div className="flex items-center gap-1.5">
-                    <span>🟢</span>
-                    <span>المستلم</span>
-                  </div>
-                </th>
-                <th className="py-3.5 px-4 font-black min-w-[110px] text-amber-400">
-                  <div className="flex items-center gap-1.5">
-                    <span>🔴</span>
-                    <span>المتبقي</span>
-                  </div>
-                </th>
-                <th className="py-3.5 px-4 font-black text-center min-w-[130px] text-slate-300">حالة السداد</th>
-                <th className="py-3.5 px-4 font-black text-center min-w-[240px] text-slate-300">الإجراءات</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-850/60">
-              {listToRender.length > 0 ? (
-                listToRender.map((item, idx) => {
-                  const t = getContractTiming(item);
-                  const isFullyPaid = Number(item.remaining || 0) <= 0 || item.status === "مكتمل";
-                  const computedStatus = isFullyPaid ? "مكتمل" : (t.overdueDays > 0 ? "متأخر" : item.status);
-                  const itemRegion = awExtractRegion(item.notes || "");
-                  const itemTreasury = awExtractTreasury(item.notes || "");
-                  const itemClassification = awExtractClassification(item.notes || "");
-                  const renewedFrom = awExtractRenewedFrom(item.notes || "");
+        {/* View Switcher and Expand All Controls Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-1 pb-1">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-slate-400">طريقة العرض:</span>
+            <div className="inline-flex p-1 bg-slate-950/80 rounded-xl border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setViewLayout("smart_table")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer ${
+                  viewLayout === "smart_table"
+                    ? "bg-amber-500 text-slate-950 shadow-sm"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <TableIcon className="w-3.5 h-3.5" />
+                <span>جدول مدمج متناسق</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewLayout("cards")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer ${
+                  viewLayout === "cards"
+                    ? "bg-amber-500 text-slate-950 shadow-sm"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+                <span>بطاقات تفصيلية</span>
+              </button>
+            </div>
+          </div>
 
-                  return (
-                    <tr
-                      key={idx}
-                      className={`transition-all duration-150 group ${
-                        isFullyPaid
-                          ? "bg-emerald-950/15 hover:bg-emerald-950/30 border-r-4 border-r-emerald-500"
-                          : computedStatus === "متأخر"
-                          ? "bg-rose-950/15 hover:bg-rose-950/30 border-r-4 border-r-rose-500"
-                          : idx % 2 === 0
-                          ? "bg-slate-900/30 hover:bg-slate-800/40"
-                          : "bg-slate-950/40 hover:bg-slate-800/40"
-                      }`}
-                    >
-                      {/* Client Name & Category Badges */}
-                      <td className="py-3.5 px-4 align-middle">
-                        <div className="flex items-center gap-2">
-                          <span className="font-black text-white text-sm tracking-wide leading-tight group-hover:text-amber-300 transition-colors">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => toggleAllExpanded(true)}
+              className="px-2.5 py-1.5 bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-amber-300 border border-slate-800 rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+              title="إظهار كافة الخانات والتفاصيل المنسدلة تحت كل عقد"
+            >
+              <Maximize2 className="w-3.5 h-3.5 text-amber-400" />
+              <span>إظهار تفاصيل الكل</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => toggleAllExpanded(false)}
+              className="px-2.5 py-1.5 bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-amber-300 border border-slate-800 rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+              title="طي كافة الخانات الإضافية"
+            >
+              <Minimize2 className="w-3.5 h-3.5 text-slate-400" />
+              <span>طي التفاصيل</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Content View: Smart Table OR Cards */}
+        {viewLayout === "smart_table" ? (
+          /* Smart Table that fits 100% on screen without horizontal cutting */
+          <div className="rounded-2xl border border-slate-800/80 shadow-2xl bg-slate-950/70 overflow-hidden w-full">
+            <table className="w-full text-right text-xs md:text-sm border-collapse table-auto">
+              <thead>
+                <tr className="bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 border-b border-slate-800 text-slate-300">
+                  <th className="py-3 px-3.5 font-black text-amber-400 w-[30%]">
+                    <div className="flex items-center gap-1.5">
+                      <User className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span>العميل والعقد</span>
+                    </div>
+                  </th>
+                  <th className="py-3 px-3 font-black text-slate-200 w-[28%] text-center">
+                    <div className="flex items-center justify-center gap-1.5">
+                      <DollarSign className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>المبالغ المالية (إجمالي / مستلم / متبقي)</span>
+                    </div>
+                  </th>
+                  <th className="py-3 px-3 font-black text-center text-slate-300 w-[17%]">
+                    <div className="flex items-center justify-center gap-1.5">
+                      <Activity className="w-4 h-4 text-blue-400 shrink-0" />
+                      <span>حالة السداد والتأخر</span>
+                    </div>
+                  </th>
+                  <th className="py-3 px-3.5 font-black text-center text-slate-300 w-[25%]">
+                    <span>الإجراءات والتفاصيل</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-850/60">
+                {listToRender.length > 0 ? (
+                  listToRender.map((item, idx) => {
+                    const t = getContractTiming(item);
+                    const isFullyPaid = Number(item.remaining || 0) <= 0 || item.status === "مكتمل";
+                    const computedStatus = isFullyPaid ? "مكتمل" : (t.overdueDays > 0 ? "متأخر" : item.status);
+                    const itemRegion = awExtractRegion(item.notes || "");
+                    const itemTreasury = awExtractTreasury(item.notes || "");
+                    const itemClassification = awExtractClassification(item.notes || "");
+                    const renewedFrom = awExtractRenewedFrom(item.notes || "");
+                    const isExpanded = !!expandedRows[item.id];
+                    const matchedProject = projects.find(p => p.id === item.project_id);
+                    const matchedWorker = workers?.find(w => w.id === item.worker_id);
+
+                    return (
+                      <React.Fragment key={item.id || idx}>
+                        <tr
+                          className={`transition-all duration-150 group ${
+                            isFullyPaid
+                              ? "bg-emerald-950/15 hover:bg-emerald-950/30 border-r-4 border-r-emerald-500"
+                              : computedStatus === "متأخر"
+                              ? "bg-rose-950/15 hover:bg-rose-950/30 border-r-4 border-r-rose-500"
+                              : idx % 2 === 0
+                              ? "bg-slate-900/30 hover:bg-slate-800/40"
+                              : "bg-slate-950/40 hover:bg-slate-800/40"
+                          }`}
+                        >
+                          {/* Client Name & Contract Badges */}
+                          <td className="py-3.5 px-3.5 align-middle">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-black text-white text-sm tracking-wide leading-tight group-hover:text-amber-300 transition-colors">
+                                {item.client}
+                              </span>
+                              <span className="font-mono text-xs font-black text-amber-400 bg-slate-950 px-2 py-0.5 rounded-md border border-slate-800 shadow-inner">
+                                {item.no}
+                              </span>
+                              {isFullyPaid && (
+                                <span className="inline-flex items-center gap-1 text-[9px] font-black text-emerald-300 bg-emerald-900/60 border border-emerald-600/50 px-1.5 py-0.5 rounded-md shadow-sm">
+                                  <span>✅</span> منتهي
+                                </span>
+                              )}
+                            </div>
+                            
+                            <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                              <span className="text-[10px] text-slate-300 bg-slate-900/80 px-2 py-0.5 rounded-md border border-slate-800 font-bold">
+                                {item.nationality || "غير محدد"}
+                              </span>
+                              <span className="text-[9px] px-2 py-0.5 rounded-md bg-blue-500/15 border border-blue-500/30 text-blue-300 font-black">
+                                {item.type === "daily" || !item.type ? "تقسيط" : item.type}
+                              </span>
+                              <span className="text-[9px] px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-300 font-black">
+                                {(() => {
+                                  const c = awExtractCycle(item.notes || "") || "يومي";
+                                  return c === "يومي" ? "يومي" :
+                                         c === "اسبوعي" ? "أسبوعي" :
+                                         c === "نصف شهر" ? "نصف شهري" : "شهري";
+                                })()}
+                              </span>
+                              <span className={`text-[9px] px-2 py-0.5 rounded-md font-black ${
+                                itemClassification === "دائن"
+                                  ? "bg-rose-500/15 border border-rose-500/30 text-rose-300"
+                                  : "bg-emerald-500/15 border border-emerald-500/30 text-emerald-300"
+                              }`}>
+                                {itemClassification}
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* Consolidated Financial Summary Cell */}
+                          <td className="py-3 px-3 align-middle">
+                            <div className="grid grid-cols-3 gap-1.5 bg-slate-950/70 p-2 rounded-xl border border-slate-850 shadow-inner text-center">
+                              <div>
+                                <span className="block text-[9px] font-bold text-slate-400">الإجمالي</span>
+                                <span className={`block font-mono font-black text-xs md:text-sm mt-0.5 ${
+                                  itemClassification === "دائن" ? "text-rose-400" : "text-slate-100"
+                                }`}>
+                                  {Number(item.amount || 0).toLocaleString()}
+                                </span>
+                              </div>
+                              <div className="border-r border-slate-800">
+                                <span className="block text-[9px] font-bold text-emerald-400">المستلم</span>
+                                <span className="block font-mono font-black text-xs md:text-sm text-emerald-400 mt-0.5">
+                                  {Number(item.paid || 0).toLocaleString()}
+                                </span>
+                              </div>
+                              <div className="border-r border-slate-800">
+                                <span className="block text-[9px] font-bold text-amber-400">المتبقي</span>
+                                <span className={`block font-mono font-black text-xs md:text-sm mt-0.5 ${
+                                  Number(item.remaining || 0) <= 0
+                                    ? "text-emerald-400"
+                                    : itemClassification === "دائن"
+                                    ? "text-rose-400"
+                                    : "text-amber-300"
+                                }`}>
+                                  {Number(item.remaining || 0).toLocaleString()}
+                                </span>
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Status and Delay */}
+                          <td className="py-3 px-3 align-middle text-center">
+                            <div className="flex flex-col items-center justify-center gap-1.5">
+                              {isFullyPaid ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/50">
+                                  <CheckCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                  <span>منتهي ومسدد</span>
+                                </span>
+                              ) : computedStatus === "منتظم" ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                                  <span>منتظم</span>
+                                </span>
+                              ) : computedStatus === "متأخر" ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black bg-rose-600 text-white shadow-md shadow-rose-950/50 animate-pulse">
+                                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                                  <span>متأخر</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                                  <span>{computedStatus}</span>
+                                </span>
+                              )}
+
+                              {t.overdueDays > 0 && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-black text-rose-400 bg-rose-950/60 px-2 py-0.5 rounded border border-rose-800/60">
+                                  <span>تأخر:</span>
+                                  <span className="font-mono">{t.overdueDays}</span>
+                                  <span>يوم</span>
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Action Buttons + Dropdown Expander */}
+                          <td className="py-3 px-3.5 align-middle text-center">
+                            <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                              {/* Open File */}
+                              <button
+                                type="button"
+                                onClick={() => setSelectedFileContract(item)}
+                                className="px-2.5 py-1.5 bg-slate-900 hover:bg-blue-600 text-slate-300 hover:text-white border border-slate-700/80 rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer shadow-sm"
+                                title="فتح ملف العقد وتفاصيل الأقساط"
+                              >
+                                <FileText className="w-3.5 h-3.5 text-blue-400 group-hover:text-white" />
+                                <span>الملف</span>
+                              </button>
+
+                              {/* Quick Receipt */}
+                              {onCreateReceiptForContract && !isFullyPaid && (
+                                <button
+                                  type="button"
+                                  onClick={() => onCreateReceiptForContract(item)}
+                                  className="px-2.5 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl text-xs font-black transition-all flex items-center gap-1 cursor-pointer shadow-md shadow-emerald-500/20 hover:scale-105"
+                                  title="تحرير سند قبض لهذا العقد فوراً"
+                                >
+                                  <span>💰</span>
+                                  <span>سند قبض</span>
+                                </button>
+                              )}
+
+                              {/* Renewal Button */}
+                              {((finalPerms?.installmentsAdd) || currentUser?.role === "admin") && (
+                                <button
+                                  type="button"
+                                  onClick={() => openRenewModal(item)}
+                                  className={`px-2.5 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1 cursor-pointer ${
+                                    isFullyPaid
+                                      ? "bg-cyan-500 hover:bg-cyan-400 text-slate-950 shadow-md ring-1 ring-cyan-300"
+                                      : "bg-cyan-500/15 hover:bg-cyan-500 text-cyan-300 hover:text-slate-950 border border-cyan-500/30"
+                                  }`}
+                                  title={isFullyPaid ? "تجديد العقد المنتهي لعميلك" : "تجديد العقد أو تمديد فترته"}
+                                >
+                                  <RotateCw className="w-3.5 h-3.5" />
+                                  <span>تجديد</span>
+                                </button>
+                              )}
+
+                              {/* Delete Button */}
+                              {(currentUser?.role === "admin" || finalPerms?.installmentsDelete) && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (confirm(`هل أنت متأكد من حذف العقد الخاص بـ (${item.client}) ورقم العقد (${item.no}) بشكل نهائي؟ لا يمكن التراجع عن هذا الإجراء!`)) {
+                                      onDeleteInstallment(item.id);
+                                    }
+                                  }}
+                                  className="p-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/20 rounded-xl transition-all cursor-pointer"
+                                  title="حذف العقد"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+
+                              {/* Dropdown Toggle for Remaining Hidden Fields */}
+                              <button
+                                type="button"
+                                onClick={() => toggleRowExpanded(item.id)}
+                                className={`px-2 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1 cursor-pointer ${
+                                  isExpanded
+                                    ? "bg-amber-500 text-slate-950 shadow-sm"
+                                    : "bg-slate-900/90 hover:bg-slate-800 text-amber-400 border border-amber-500/30"
+                                }`}
+                                title="إظهار باقي الخانات والتواريخ والمعلومات التفصيلية تحت السطر"
+                              >
+                                {isExpanded ? (
+                                  <>
+                                    <ChevronUp className="w-3.5 h-3.5" />
+                                    <span className="text-[11px]">إخفاء</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <ChevronDown className="w-3.5 h-3.5" />
+                                    <span className="text-[11px]">باقي الخانات</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+
+                        {/* Dropdown Sub-Row containing all remaining fields */}
+                        {isExpanded && (
+                          <tr className="bg-slate-900/80 border-b border-amber-500/20">
+                            <td colSpan={4} className="p-4">
+                              <div className="bg-slate-950/90 border border-amber-500/25 rounded-2xl p-4 shadow-xl space-y-3 text-right">
+                                <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-amber-400 font-black text-xs flex items-center gap-1.5">
+                                      <Info className="w-4 h-4" />
+                                      <span>كافة الخانات والتفاصيل الإضافية للعقد:</span>
+                                    </span>
+                                    <span className="text-xs font-mono font-bold text-slate-300">({item.no} - {item.client})</span>
+                                  </div>
+                                  <span className="text-[11px] text-slate-400 font-bold">
+                                    معرف العقد: <span className="font-mono text-slate-300">{item.id}</span>
+                                  </span>
+                                </div>
+
+                                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 pt-1">
+                                  {/* Contract Start Date */}
+                                  <div className="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
+                                    <span className="block text-[10px] font-bold text-slate-400 mb-1 flex items-center gap-1">
+                                      <Calendar className="w-3 h-3 text-blue-400" />
+                                      <span>تاريخ بداية العقد:</span>
+                                    </span>
+                                    <span className="block font-mono text-xs font-black text-white">
+                                      {item.start_date || "غير محدد"}
+                                    </span>
+                                  </div>
+
+                                  {/* Last Paid Date */}
+                                  <div className="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
+                                    <span className="block text-[10px] font-bold text-slate-400 mb-1 flex items-center gap-1">
+                                      <Clock className="w-3 h-3 text-amber-400" />
+                                      <span>تاريخ آخر سداد:</span>
+                                    </span>
+                                    <span className="block font-mono text-xs font-black text-amber-300">
+                                      {t.lastPaid || "غير مسدد"}
+                                    </span>
+                                  </div>
+
+                                  {/* Branch */}
+                                  <div className="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
+                                    <span className="block text-[10px] font-bold text-slate-400 mb-1 flex items-center gap-1">
+                                      <MapPin className="w-3 h-3 text-amber-400" />
+                                      <span>إدارة الفرع:</span>
+                                    </span>
+                                    <span className="block text-xs font-black text-amber-200">
+                                      {itemRegion || "القرية الرئيسية"}
+                                    </span>
+                                  </div>
+
+                                  {/* Treasury */}
+                                  <div className="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
+                                    <span className="block text-[10px] font-bold text-slate-400 mb-1 flex items-center gap-1">
+                                      <span>🏢</span>
+                                      <span>الخزنة التابعة:</span>
+                                    </span>
+                                    <span className="block text-xs font-black text-blue-300">
+                                      {itemTreasury || "خزنة التحصيل"}
+                                    </span>
+                                  </div>
+
+                                  {/* Project */}
+                                  <div className="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
+                                    <span className="block text-[10px] font-bold text-slate-400 mb-1 flex items-center gap-1">
+                                      <ClipboardList className="w-3 h-3 text-emerald-400" />
+                                      <span>المشروع المرتبط:</span>
+                                    </span>
+                                    <span className="block text-xs font-bold text-slate-200 truncate">
+                                      {matchedProject?.name || "عام / غير مرتبط"}
+                                    </span>
+                                  </div>
+
+                                  {/* Worker */}
+                                  <div className="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
+                                    <span className="block text-[10px] font-bold text-slate-400 mb-1 flex items-center gap-1">
+                                      <User className="w-3 h-3 text-purple-400" />
+                                      <span>مسؤول العقد:</span>
+                                    </span>
+                                    <span className="block text-xs font-bold text-slate-200 truncate">
+                                      {matchedWorker?.name || "الإدارة العامة"}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* Additional Notes & Renewal Metadata */}
+                                {(renewedFrom || item.notes) && (
+                                  <div className="pt-2 border-t border-slate-850 flex flex-wrap items-center justify-between gap-2 text-xs">
+                                    {renewedFrom && (
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-black text-cyan-300 bg-cyan-950/80 border border-cyan-700/60 px-2.5 py-1 rounded-lg">
+                                        🔄 تم تجديد هذا العقد من العقد السابق: <span className="font-mono">{renewedFrom}</span>
+                                      </span>
+                                    )}
+                                    {item.notes && (
+                                      <span className="text-slate-300 text-xs">
+                                        <strong className="text-slate-400">ملاحظات:</strong> {awCleanNotes(item.notes)}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan={4} className="py-12 text-center text-slate-500 font-bold text-sm">
+                      <div className="flex flex-col items-center justify-center gap-2">
+                        <span className="text-3xl">📭</span>
+                        <span>لا توجد أي عقود مسجلة ومطابقة لشروط البحث والفلترة.</span>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          /* Responsive Cards View (جميع الخانات والإجراءات واضحة داخل كل كرت) */
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 w-full">
+            {listToRender.length > 0 ? (
+              listToRender.map((item, idx) => {
+                const t = getContractTiming(item);
+                const isFullyPaid = Number(item.remaining || 0) <= 0 || item.status === "مكتمل";
+                const computedStatus = isFullyPaid ? "مكتمل" : (t.overdueDays > 0 ? "متأخر" : item.status);
+                const itemRegion = awExtractRegion(item.notes || "");
+                const itemTreasury = awExtractTreasury(item.notes || "");
+                const itemClassification = awExtractClassification(item.notes || "");
+                const renewedFrom = awExtractRenewedFrom(item.notes || "");
+                const matchedProject = projects.find(p => p.id === item.project_id);
+                const matchedWorker = workers?.find(w => w.id === item.worker_id);
+
+                return (
+                  <div
+                    key={item.id || idx}
+                    className={`rounded-2xl border p-4 shadow-xl transition-all space-y-3.5 relative text-right ${
+                      isFullyPaid
+                        ? "bg-gradient-to-b from-slate-900/90 to-emerald-950/20 border-emerald-500/40"
+                        : computedStatus === "متأخر"
+                        ? "bg-gradient-to-b from-slate-900/90 to-rose-950/25 border-rose-500/40"
+                        : "bg-slate-900/80 border-slate-800 hover:border-slate-700"
+                    }`}
+                  >
+                    {/* Header: Client name & Contract No & Status */}
+                    <div className="flex items-start justify-between gap-3 border-b border-slate-800/80 pb-3">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="text-base font-black text-white leading-tight">
                             {item.client}
+                          </h4>
+                          <span className="font-mono text-xs font-black text-amber-400 bg-slate-950 px-2 py-0.5 rounded-lg border border-slate-800">
+                            {item.no}
                           </span>
-                          {isFullyPaid && (
-                            <span className="inline-flex items-center gap-1 text-[9px] font-black text-emerald-300 bg-emerald-900/60 border border-emerald-600/50 px-2 py-0.5 rounded-md shadow-sm whitespace-nowrap">
-                              <span>✅</span> منتهي
-                            </span>
-                          )}
                         </div>
-                        <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                          <span className="text-[10px] text-slate-300 bg-slate-900/80 px-2 py-0.5 rounded-md border border-slate-800 font-bold whitespace-nowrap">
+                        <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                          <span className="text-[10px] text-slate-300 bg-slate-950 px-2 py-0.5 rounded-md border border-slate-800 font-bold">
                             {item.nationality || "غير محدد"}
                           </span>
-                          <span className="text-[9px] px-2 py-0.5 rounded-md bg-blue-500/15 border border-blue-500/30 text-blue-300 font-black font-sans whitespace-nowrap">
+                          <span className="text-[9px] px-2 py-0.5 rounded-md bg-blue-500/15 border border-blue-500/30 text-blue-300 font-black">
                             {item.type === "daily" || !item.type ? "تقسيط" : item.type}
                           </span>
-                          <span className="text-[9px] px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-300 font-black font-sans whitespace-nowrap">
+                          <span className="text-[9px] px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-300 font-black">
                             {(() => {
                               const c = awExtractCycle(item.notes || "") || "يومي";
                               return c === "يومي" ? "يومي" :
@@ -1626,7 +2022,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
                                      c === "نصف شهر" ? "نصف شهري" : "شهري";
                             })()}
                           </span>
-                          <span className={`text-[9px] px-2 py-0.5 rounded-md font-black font-sans whitespace-nowrap ${
+                          <span className={`text-[9px] px-2 py-0.5 rounded-md font-black ${
                             itemClassification === "دائن"
                               ? "bg-rose-500/15 border border-rose-500/30 text-rose-300"
                               : "bg-emerald-500/15 border border-emerald-500/30 text-emerald-300"
@@ -1634,213 +2030,152 @@ export const Installments: React.FC<InstallmentsProps> = ({
                             {itemClassification}
                           </span>
                         </div>
-                      </td>
+                      </div>
 
-                      {/* Contract Number, Branch & Treasury */}
-                      <td className="py-3.5 px-4 align-middle">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="font-mono text-xs font-black text-amber-400 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800 shadow-inner whitespace-nowrap">
-                            {item.no}
-                          </span>
-                          {renewedFrom && (
-                            <span className="inline-flex items-center gap-1 text-[9px] font-black text-cyan-300 bg-cyan-950/80 border border-cyan-700/60 px-1.5 py-0.5 rounded-md whitespace-nowrap" title={`مجدد من العقد: ${renewedFrom}`}>
-                              🔄 مجدد من: {renewedFrom}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 mt-1.5">
-                          <span className="text-[10px] text-amber-400/90 font-bold bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 whitespace-nowrap">
-                            📍 {itemRegion || "القرية الرئيسية"}
-                          </span>
-                          <span className="text-[10px] text-blue-300 font-bold bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/20 whitespace-nowrap">
-                            🏢 {itemTreasury || "خزنة التحصيل"}
-                          </span>
-                        </div>
-                      </td>
-
-                      {/* Start Date */}
-                      <td className="py-3.5 px-4 align-middle font-mono whitespace-nowrap">
-                        <span className="px-2.5 py-1 rounded-lg bg-slate-950/60 border border-slate-800/80 text-slate-300 text-xs font-bold inline-block shadow-inner">
-                          {item.start_date || "—"}
-                        </span>
-                      </td>
-
-                      {/* Last Paid Date */}
-                      <td className="py-3.5 px-4 align-middle font-mono whitespace-nowrap">
-                        <span className={`px-2.5 py-1 rounded-lg border text-xs font-bold inline-block shadow-inner ${
-                          t.lastPaid && t.lastPaid !== "غير مسدد"
-                            ? "bg-slate-950/60 border-slate-800 text-slate-300"
-                            : "bg-amber-950/20 border-amber-500/30 text-amber-400/90 font-sans"
-                        }`}>
-                          {t.lastPaid || "غير مسدد"}
-                        </span>
-                      </td>
-
-                      {/* Overdue Days */}
-                      <td className="py-3.5 px-4 align-middle text-center whitespace-nowrap">
-                        {t.overdueDays > 0 ? (
-                          <span className="inline-flex items-center justify-center gap-1 px-2.5 py-1 rounded-lg bg-rose-500/20 border border-rose-500/40 text-rose-300 font-black font-mono text-xs shadow-sm">
-                            <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                            <span>{t.overdueDays}</span>
-                            <span className="text-[10px] font-sans">
-                              {(() => {
-                                const c = awExtractCycle(item.notes || "") || "يومي";
-                                return c === "يومي" ? "يوم" :
-                                       c === "اسبوعي" ? "أسبوع" :
-                                       c === "نصف شهر" ? "نصف شهر" : "شهر";
-                              })()}
-                            </span>
-                          </span>
-                        ) : (
-                          <span className="inline-block px-2 py-0.5 rounded-md bg-slate-900/50 border border-slate-800 text-slate-500 font-mono font-bold text-xs">
-                            0
-                          </span>
-                        )}
-                      </td>
-
-                      {/* Total Amount */}
-                      <td className="py-3.5 px-4 align-middle whitespace-nowrap">
-                        <div className="flex items-baseline gap-1">
-                          <span className={`font-mono font-black text-sm ${
-                            itemClassification === "دائن" ? "text-rose-400" : "text-slate-100"
-                          }`}>
-                            {Number(item.amount || 0).toLocaleString()}
-                          </span>
-                          <span className="text-[10px] text-slate-400 font-bold">ريال</span>
-                        </div>
-                      </td>
-
-                      {/* Paid Amount */}
-                      <td className="py-3.5 px-4 align-middle whitespace-nowrap">
-                        <div className="flex items-baseline gap-1">
-                          <span className="font-mono font-black text-sm text-emerald-400">
-                            {Number(item.paid || 0).toLocaleString()}
-                          </span>
-                          <span className="text-[10px] text-emerald-500/80 font-bold">ريال</span>
-                        </div>
-                      </td>
-
-                      {/* Remaining Amount */}
-                      <td className="py-3.5 px-4 align-middle whitespace-nowrap">
-                        <div className="flex items-baseline gap-1">
-                          <span className={`font-mono font-black text-sm ${
-                            Number(item.remaining || 0) <= 0
-                              ? "text-emerald-400"
-                              : itemClassification === "دائن"
-                              ? "text-rose-400"
-                              : "text-amber-400"
-                          }`}>
-                            {Number(item.remaining || 0).toLocaleString()}
-                          </span>
-                          <span className="text-[10px] text-slate-400 font-bold">ريال</span>
-                        </div>
-                      </td>
-
-                      {/* Status */}
-                      <td className="py-3.5 px-4 align-middle text-center whitespace-nowrap">
+                      {/* Status badge */}
+                      <div className="flex flex-col items-end gap-1 shrink-0">
                         {isFullyPaid ? (
-                          <span
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 shadow-md shadow-emerald-950/40"
-                            title="تم سداد هذا العقد بالكامل وهو الآن عقد منتهي ومكتمل"
-                          >
-                            <CheckCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/50">
+                            <CheckCircle className="w-3.5 h-3.5" />
                             <span>منتهي ومسدد</span>
                           </span>
-                        ) : computedStatus === "منتظم" ? (
-                          <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                        ) : computedStatus === "متأخر" ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black bg-rose-600 text-white shadow-md animate-pulse">
+                            <AlertTriangle className="w-3.5 h-3.5" />
+                            <span>متأخر ({t.overdueDays} يوم)</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
                             <span>منتظم</span>
                           </span>
-                        ) : computedStatus === "متأخر" ? (
-                          <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-black bg-rose-600 text-white shadow-md shadow-rose-950/50 animate-pulse">
-                            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                            <span>متأخر</span>
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
-                            <span>{computedStatus}</span>
-                          </span>
                         )}
-                      </td>
+                      </div>
+                    </div>
 
-                      {/* Actions */}
-                      <td className="py-3.5 px-4 align-middle text-center whitespace-nowrap">
-                        <div className="flex items-center justify-center gap-1.5">
-                          {/* File Details Button */}
+                    {/* Financial Blocks */}
+                    <div className="grid grid-cols-3 gap-2 bg-slate-950/80 p-3 rounded-xl border border-slate-850 text-center">
+                      <div>
+                        <span className="block text-[10px] font-bold text-slate-400">إجمالي العقد</span>
+                        <span className={`block font-mono font-black text-sm mt-0.5 ${
+                          itemClassification === "دائن" ? "text-rose-400" : "text-slate-100"
+                        }`}>
+                          {Number(item.amount || 0).toLocaleString()} <span className="text-[9px]">ريال</span>
+                        </span>
+                      </div>
+                      <div className="border-r border-slate-800">
+                        <span className="block text-[10px] font-bold text-emerald-400">المستلم</span>
+                        <span className="block font-mono font-black text-sm text-emerald-400 mt-0.5">
+                          {Number(item.paid || 0).toLocaleString()} <span className="text-[9px]">ريال</span>
+                        </span>
+                      </div>
+                      <div className="border-r border-slate-800">
+                        <span className="block text-[10px] font-bold text-amber-400">المتبقي</span>
+                        <span className={`block font-mono font-black text-sm mt-0.5 ${
+                          Number(item.remaining || 0) <= 0
+                            ? "text-emerald-400"
+                            : itemClassification === "دائن"
+                            ? "text-rose-400"
+                            : "text-amber-300"
+                        }`}>
+                          {Number(item.remaining || 0).toLocaleString()} <span className="text-[9px]">ريال</span>
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Details Grid (All remaining fields visible) */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+                      <div className="bg-slate-950/50 p-2 rounded-lg border border-slate-850">
+                        <span className="block text-[10px] text-slate-400">📅 تاريخ البداية:</span>
+                        <span className="font-mono font-bold text-white mt-0.5 block">{item.start_date || "—"}</span>
+                      </div>
+                      <div className="bg-slate-950/50 p-2 rounded-lg border border-slate-850">
+                        <span className="block text-[10px] text-slate-400">⏱️ آخر سداد:</span>
+                        <span className="font-mono font-bold text-amber-300 mt-0.5 block">{t.lastPaid || "غير مسدد"}</span>
+                      </div>
+                      <div className="bg-slate-950/50 p-2 rounded-lg border border-slate-850">
+                        <span className="block text-[10px] text-slate-400">📍 الفرع:</span>
+                        <span className="font-bold text-slate-200 mt-0.5 block truncate">{itemRegion || "القرية الرئيسية"}</span>
+                      </div>
+                      <div className="bg-slate-950/50 p-2 rounded-lg border border-slate-850">
+                        <span className="block text-[10px] text-slate-400">🏢 الخزنة:</span>
+                        <span className="font-bold text-blue-300 mt-0.5 block truncate">{itemTreasury || "خزنة التحصيل"}</span>
+                      </div>
+                      <div className="bg-slate-950/50 p-2 rounded-lg border border-slate-850">
+                        <span className="block text-[10px] text-slate-400">💼 المشروع:</span>
+                        <span className="font-bold text-slate-300 mt-0.5 block truncate">{matchedProject?.name || "عام"}</span>
+                      </div>
+                      <div className="bg-slate-950/50 p-2 rounded-lg border border-slate-850">
+                        <span className="block text-[10px] text-slate-400">👤 المسؤول:</span>
+                        <span className="font-bold text-slate-300 mt-0.5 block truncate">{matchedWorker?.name || "الإدارة"}</span>
+                      </div>
+                    </div>
+
+                    {/* Actions Bar */}
+                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-850">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {/* File Details */}
+                        <button
+                          type="button"
+                          onClick={() => setSelectedFileContract(item)}
+                          className="px-3 py-1.5 bg-slate-950 hover:bg-blue-600 text-slate-200 hover:text-white border border-slate-750 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                        >
+                          <FileText className="w-3.5 h-3.5 text-blue-400" />
+                          <span>فتح الملف</span>
+                        </button>
+
+                        {/* Quick Receipt */}
+                        {onCreateReceiptForContract && !isFullyPaid && (
                           <button
                             type="button"
-                            onClick={() => setSelectedFileContract(item)}
-                            className="px-3 py-1.5 bg-slate-900 hover:bg-blue-600 text-slate-300 hover:text-white border border-slate-700/80 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
-                            title="فتح ملف العقد وتفاصيل الأقساط"
+                            onClick={() => onCreateReceiptForContract(item)}
+                            className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-md shadow-emerald-500/20"
                           >
-                            <FileText className="w-3.5 h-3.5 text-blue-400 group-hover:text-white" />
-                            <span>فتح الملف</span>
+                            <span>💰</span>
+                            <span>سند قبض</span>
                           </button>
+                        )}
 
-                          {/* Quick Receipt Button (if not fully paid) */}
-                          {onCreateReceiptForContract && !isFullyPaid && (
-                            <button
-                              type="button"
-                              onClick={() => onCreateReceiptForContract(item)}
-                              className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-md shadow-emerald-500/20 hover:scale-105 active:scale-95"
-                              title="تحرير سند قبض لهذا العقد فوراً"
-                            >
-                              <span>💰</span>
-                              <span>سند قبض</span>
-                            </button>
-                          )}
+                        {/* Renewal */}
+                        {((finalPerms?.installmentsAdd) || currentUser?.role === "admin") && (
+                          <button
+                            type="button"
+                            onClick={() => openRenewModal(item)}
+                            className="px-3 py-1.5 bg-cyan-500/15 hover:bg-cyan-500 text-cyan-300 hover:text-slate-950 border border-cyan-500/30 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <RotateCw className="w-3.5 h-3.5" />
+                            <span>تجديد</span>
+                          </button>
+                        )}
+                      </div>
 
-                          {/* Renewal Button */}
-                          {((finalPerms?.installmentsAdd) || currentUser?.role === "admin") && (
-                            <button
-                              type="button"
-                              onClick={() => openRenewModal(item)}
-                              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
-                                isFullyPaid
-                                  ? "bg-cyan-500 hover:bg-cyan-400 text-slate-950 shadow-md shadow-cyan-500/25 ring-1 ring-cyan-300 hover:scale-105"
-                                  : "bg-cyan-500/15 hover:bg-cyan-500 text-cyan-300 hover:text-slate-950 border border-cyan-500/30"
-                              }`}
-                              title={isFullyPaid ? "تجديد العقد المنتهي لعميلك" : "تجديد العقد أو تمديد فترته"}
-                            >
-                              <RotateCw className="w-3.5 h-3.5" />
-                              <span>تجديد</span>
-                            </button>
-                          )}
-
-                          {/* Delete Button */}
-                          {(currentUser?.role === "admin" || finalPerms?.installmentsDelete) && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (confirm(`هل أنت متأكد من حذف العقد الخاص بـ (${item.client}) ورقم العقد (${item.no}) بشكل نهائي؟ لا يمكن التراجع عن هذا الإجراء!`)) {
-                                  onDeleteInstallment(item.id);
-                                }
-                              }}
-                              className="p-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/20 rounded-xl transition-all cursor-pointer"
-                              title="حذف العقد"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              ) : (
-                <tr>
-                  <td colSpan={10} className="py-12 text-center text-slate-500 font-bold text-sm">
-                    <div className="flex flex-col items-center justify-center gap-2">
-                      <span className="text-3xl">📭</span>
-                      <span>لا توجد أي عقود مسجلة ومطابقة لشروط البحث والفلترة.</span>
+                      {/* Delete */}
+                      {(currentUser?.role === "admin" || finalPerms?.installmentsDelete) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (confirm(`هل أنت متأكد من حذف العقد الخاص بـ (${item.client}) ورقم العقد (${item.no}) بشكل نهائي؟`)) {
+                              onDeleteInstallment(item.id);
+                            }
+                          }}
+                          className="p-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/20 rounded-xl transition-all cursor-pointer"
+                          title="حذف العقد"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="col-span-full py-12 text-center text-slate-500 font-bold text-sm bg-slate-950/40 rounded-2xl border border-slate-850">
+                <span className="text-3xl block mb-2">📭</span>
+                <span>لا توجد أي عقود مسجلة ومطابقة لشروط البحث والفلترة.</span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Contract File Details Sheet Modal overlay */}

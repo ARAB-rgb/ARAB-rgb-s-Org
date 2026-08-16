@@ -5616,123 +5616,141 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       <div className="flex-1 flex flex-col overflow-hidden">
         
         {/* Responsive Navbar heading with glowing sparkles */}
-        <header className="bg-slate-950/40 backdrop-blur-2xl border-b border-amber-500/10 p-5 shrink-0 flex flex-col lg:flex-row gap-5 justify-between items-center z-10 text-right relative overflow-hidden before:absolute before:bottom-0 before:left-0 before:right-0 before:h-[1px] before:bg-gradient-to-r before:from-transparent before:via-amber-500/20 before:to-transparent">
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 w-full lg:w-auto">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-amber-500 to-yellow-500 rounded-xl flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.2)] shrink-0">
-                <Sparkles className="w-5 h-5 text-slate-950 animate-pulse" />
-              </div>
-              <div>
-                <h1 className="text-base md:text-lg font-black tracking-tight text-white flex items-center gap-2 font-sans flex-wrap">
-                  <span className="text-transparent bg-clip-text bg-gradient-to-l from-amber-400 via-yellow-200 to-amber-500 drop-shadow-[0_2px_10px_rgba(245,158,11,0.15)]">
-                    {(() => {
-                      const matched = selectedCompanyId === "all" || companies.length === 0
-                        ? null
-                        : companies.find((c) => c.id === selectedCompanyId);
-                      if (matched) return matched.name;
-                      return selectedCompanyId === "all" ? "منظومة كافة الشركات المصرحة" : "شركة عرب وورلد للمقاولات والعقود";
-                    })()}
-                  </span>
+        <header className="bg-slate-950/80 backdrop-blur-2xl border-b border-amber-500/15 px-4 py-4 md:px-7 md:py-5 shrink-0 z-10 text-right relative overflow-hidden shadow-2xl before:absolute before:bottom-0 before:left-0 before:right-0 before:h-[1px] before:bg-gradient-to-r before:from-transparent before:via-amber-500/30 before:to-transparent">
+          <div className="w-full flex flex-col xl:flex-row gap-5 xl:gap-8 justify-between items-stretch xl:items-center">
+            
+            {/* Top Brand & Company Identity Block (طولي، أنيق، غير مزنوق) */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="flex items-start gap-3.5">
+                <div className="w-12 h-12 bg-gradient-to-br from-amber-500 via-amber-400 to-yellow-600 rounded-2xl flex items-center justify-center shadow-[0_0_20px_rgba(245,158,11,0.25)] shrink-0 mt-0.5 border border-amber-300/30">
+                  <Sparkles className="w-6 h-6 text-slate-950 animate-pulse" />
+                </div>
+                
+                {/* Vertical Stack for Company Details */}
+                <div className="flex flex-col space-y-1 text-right">
+                  <h1 className="text-base sm:text-lg md:text-xl font-black tracking-tight font-sans">
+                    <span className="text-transparent bg-clip-text bg-gradient-to-l from-amber-300 via-yellow-100 to-amber-500 drop-shadow-[0_2px_10px_rgba(245,158,11,0.25)]">
+                      {(() => {
+                        const matched = selectedCompanyId === "all" || companies.length === 0
+                          ? null
+                          : companies.find((c) => c.id === selectedCompanyId);
+                        if (matched) return matched.name;
+                        return selectedCompanyId === "all" ? "منظومة كافة الشركات المصرحة" : "شركة عرب وورلد للمقاولات والعقود";
+                      })()}
+                    </span>
+                  </h1>
+                  
                   {(() => {
                     const matched = selectedCompanyId === "all" || companies.length === 0
                       ? null
                       : companies.find((c) => c.id === selectedCompanyId);
                     const subText = getCompanyActivity(matched);
                     return subText ? (
-                      <span className="text-xs font-bold text-slate-300">
+                      <p className="text-xs md:text-sm font-bold text-slate-200 leading-snug">
                         {subText}
-                      </span>
+                      </p>
                     ) : null;
                   })()}
-                </h1>
-                <p className="text-[9px] text-slate-400 font-medium tracking-wide mt-0.5">البوابة الإدارية والمنظومة الحسابية المتكاملة الموثقة</p>
+                  
+                  <p className="text-[10px] md:text-[11px] text-slate-400 font-medium tracking-wide">
+                    البوابة الإدارية والمنظومة الحسابية المتكاملة الموثقة
+                  </p>
+                </div>
               </div>
-            </div>
 
-            {currentUser && getAuthorizedCompanies().length > 0 && (
-              <div className="flex items-center gap-2 bg-slate-900/60 border border-amber-500/20 rounded-xl px-3 py-1.5 shadow-lg shadow-amber-500/5 hover:border-amber-500/40 transition-all font-sans">
-                <span className="text-[10px] text-amber-500 font-extrabold whitespace-nowrap">🏢 الشركة النشطة:</span>
-                {currentUser.role !== "admin" && getAuthorizedCompanies().length <= 1 ? (
-                  <span className="text-xs font-black text-amber-300">
-                    🏢 {getAuthorizedCompanies()[0]?.name || "شركة عرب وورلد للمقاولات والعقود"}
-                  </span>
-                ) : (
-                  <select
-                    value={selectedCompanyId}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setSelectedCompanyId(val);
-                      if (val === "all") {
-                        navigateToSlug(null);
-                      } else {
-                        const matched = companies.find((c) => c.id === val);
-                        if (matched) {
-                          navigateToSlug(matched.slug || matched.id);
-                        }
-                      }
-                    }}
-                    className="bg-transparent text-white font-extrabold text-xs focus:outline-none cursor-pointer text-slate-950 bg-white"
-                  >
-                    <option value="all" className="text-slate-950 font-bold">✨ كل الشركات المصرحة ({getAuthorizedCompanies().length})</option>
-                    {getAuthorizedCompanies().map((c) => (
-                      <option key={c.id} value={c.id} className="text-slate-950 font-bold">🏢 {c.name}</option>
-                    ))}
-                  </select>
-                )}
-              </div>
-            )}
-          </div>
-          
-          <div className="flex flex-wrap items-center gap-3.5">
-            {/* Dynamic Treasury Capital Cards strictly per Company */}
-            {activeCompanyTreasuries.map((tName, idx) => {
-              const theme = getTreasuryTheme(tName, idx);
-              const val = treasuryCapitals[tName] || 0;
-              const cleanLabel = tName.startsWith("خزنة ") ? tName.slice(5) : tName;
-              return (
-                <div
-                  key={tName}
-                  className={`bg-gradient-to-b from-slate-900/60 to-slate-950/60 border ${theme.border} px-4 py-2 rounded-2xl flex items-center gap-3 text-right shadow-lg ${theme.glow} relative before:absolute before:inset-0 before:rounded-2xl before:pointer-events-none transition-all hover:scale-[1.02]`}
-                  title={`إجمالي رأس المال الممول من (${tName}) في عقود الشركة النشطة`}
-                >
-                  <div className={`w-2.5 h-2.5 rounded-full ${theme.dot} animate-pulse shrink-0`} />
-                  <div>
-                    <span className={`block text-[8px] md:text-[9px] font-black ${theme.label} leading-normal uppercase truncate max-w-[150px]`}>
-                      رأس مال {cleanLabel} بالعقود
+              {/* Active Company Selector Pill */}
+              {currentUser && getAuthorizedCompanies().length > 0 && (
+                <div className="w-full sm:w-auto mt-2 sm:mt-0">
+                  <div className="flex items-center gap-2 bg-slate-900/90 border border-amber-500/30 hover:border-amber-400/60 rounded-2xl px-3.5 py-2 shadow-lg shadow-black/40 transition-all">
+                    <span className="text-xs font-black text-amber-400 shrink-0 flex items-center gap-1.5">
+                      <span>🏢</span>
+                      <span>الشركة النشطة:</span>
                     </span>
-                    <span className={`block text-sm font-black ${theme.text} font-mono`}>
-                      {val.toLocaleString()} <span className="text-[10px] font-bold text-slate-400">ريال</span>
-                    </span>
+                    {currentUser.role !== "admin" && getAuthorizedCompanies().length <= 1 ? (
+                      <span className="text-xs font-black text-white truncate max-w-[200px]">
+                        {getAuthorizedCompanies()[0]?.name || "شركة عرب وورلد للمقاولات والعقود"}
+                      </span>
+                    ) : (
+                      <select
+                        value={selectedCompanyId}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setSelectedCompanyId(val);
+                          if (val === "all") {
+                            navigateToSlug(null);
+                          } else {
+                            const matched = companies.find((c) => c.id === val);
+                            if (matched) {
+                              navigateToSlug(matched.slug || matched.id);
+                            }
+                          }
+                        }}
+                        className="bg-slate-950 border border-slate-700/80 text-amber-200 font-black text-xs rounded-xl px-2.5 py-1.5 focus:outline-none focus:border-amber-400 cursor-pointer w-full sm:w-auto"
+                      >
+                        <option value="all" className="bg-slate-950 text-amber-300 font-bold">✨ كل الشركات المصرحة ({getAuthorizedCompanies().length})</option>
+                        {getAuthorizedCompanies().map((c) => (
+                          <option key={c.id} value={c.id} className="bg-slate-950 text-slate-100 font-bold">🏢 {c.name}</option>
+                        ))}
+                      </select>
+                    )}
                   </div>
                 </div>
-              );
-            })}
+              )}
+            </div>
+            
+            {/* Treasury Capital Cards & System Badges (Responsive layout) */}
+            <div className="flex flex-wrap items-center gap-2.5 md:gap-3 justify-start xl:justify-end">
+              {/* Dynamic Treasury Capital Cards strictly per Company */}
+              {activeCompanyTreasuries.map((tName, idx) => {
+                const theme = getTreasuryTheme(tName, idx);
+                const val = treasuryCapitals[tName] || 0;
+                const cleanLabel = tName.startsWith("خزنة ") ? tName.slice(5) : tName;
+                return (
+                  <div
+                    key={tName}
+                    className={`bg-gradient-to-b from-slate-900/80 to-slate-950/90 border ${theme.border} px-3.5 py-2 rounded-2xl flex items-center gap-2.5 text-right shadow-lg ${theme.glow} transition-all hover:scale-[1.02] min-w-[140px]`}
+                    title={`إجمالي رأس المال الممول من (${tName}) في عقود الشركة النشطة`}
+                  >
+                    <div className={`w-2.5 h-2.5 rounded-full ${theme.dot} animate-pulse shrink-0`} />
+                    <div className="min-w-0">
+                      <span className={`block text-[8px] md:text-[9px] font-black ${theme.label} leading-tight uppercase truncate`}>
+                        رأس مال {cleanLabel} بالعقود
+                      </span>
+                      <span className={`block text-xs md:text-sm font-black ${theme.text} font-mono mt-0.5`}>
+                        {val.toLocaleString()} <span className="text-[9px] font-bold text-slate-400">ريال</span>
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
 
-            {(currentUser?.role === "admin" || can("treasury")) && (
+              {(currentUser?.role === "admin" || can("treasury")) && (
+                <button
+                  type="button"
+                  onClick={() => openAddTreasuryDialog(selectedCompanyId !== "all" ? selectedCompanyId : undefined)}
+                  className="text-[10px] md:text-xs font-black font-sans text-amber-300 bg-slate-900/90 hover:bg-slate-850 hover:text-amber-200 px-3.5 py-2 rounded-2xl border border-dashed border-amber-500/40 hover:border-amber-400 shadow-inner shrink-0 cursor-pointer flex items-center gap-1.5 transition-all"
+                  title="إضافة خزنة جديدة للشركة النشطة"
+                >
+                  <span className="text-xs font-black text-amber-400">➕</span>
+                  <span>إضافة خزنة</span>
+                </button>
+              )}
+
               <button
                 type="button"
-                onClick={() => openAddTreasuryDialog(selectedCompanyId !== "all" ? selectedCompanyId : undefined)}
-                className="text-[10px] font-black font-sans text-amber-300 bg-slate-900/80 hover:bg-slate-850 hover:text-amber-200 px-3 py-2 rounded-2xl border border-dashed border-amber-500/30 hover:border-amber-500/60 shadow-inner shrink-0 cursor-pointer flex items-center gap-1.5 transition-all"
-                title="إضافة خزنة جديدة للشركة النشطة"
+                onClick={() => setShowAuthModal(true)}
+                className="text-[10px] md:text-xs font-black font-sans text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 px-3.5 py-2 rounded-2xl border border-amber-500/30 shadow-inner shrink-0 cursor-pointer flex items-center gap-1.5 transition-all"
+                title="إعدادات المصادقة والباركود Authenticator"
               >
-                <span className="text-xs font-black text-amber-400">➕</span>
-                <span>إضافة خزنة</span>
+                <span className="text-xs">📱</span>
+                <span>الباركود / Authenticator</span>
               </button>
-            )}
 
-            <button
-              type="button"
-              onClick={() => setShowAuthModal(true)}
-              className="text-[10px] font-black font-sans text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 px-3.5 py-2.5 rounded-xl border border-amber-500/30 shadow-inner shrink-0 cursor-pointer flex items-center gap-1.5 transition-all"
-              title="إعدادات المصادقة والباركود Authenticator"
-            >
-              <span className="text-xs">📱</span>
-              <span>الباركود / Authenticator</span>
-            </button>
+              <span className="text-[10px] md:text-xs font-black font-sans text-amber-400 bg-amber-500/10 px-3.5 py-2 rounded-2xl border border-amber-500/20 shadow-inner shrink-0 whitespace-nowrap">
+                🏛️ نظام ذهبي موحد • V27
+              </span>
+            </div>
 
-            <span className="text-[10px] font-black font-sans text-amber-400 bg-amber-500/10 px-4 py-2.5 rounded-xl border border-amber-500/20 shadow-inner shrink-0">
-              🏛️ نظام ذهبي موحد • V27
-            </span>
           </div>
         </header>
 
