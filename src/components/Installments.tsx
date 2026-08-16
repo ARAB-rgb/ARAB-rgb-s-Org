@@ -1524,52 +1524,101 @@ export const Installments: React.FC<InstallmentsProps> = ({
         </div>
 
         {/* Contract log list table */}
-        <div className="overflow-x-auto rounded-2xl border border-slate-800">
-          <table className="w-full text-right text-xs md:text-sm">
+        <div className="overflow-x-auto rounded-2xl border border-slate-800/80 shadow-2xl bg-slate-950/70">
+          <table className="min-w-[1250px] w-full text-right text-xs md:text-sm border-collapse">
             <thead>
-              <tr className="bg-slate-950/80 border-b border-slate-800 text-slate-300">
-                <th className="py-3 px-4 font-black">العميل والجنسية</th>
-                <th className="py-3 px-4 font-black">رقم العقد والفرع</th>
-                <th className="py-3 px-4 font-black">تاريخ العقد</th>
-                <th className="py-3 px-4 font-black">آخر سداد</th>
-                <th className="py-3 px-4 font-black text-center">التأخر</th>
-                <th className="py-3 px-4 font-black">الإجمالي</th>
-                <th className="py-3 px-4 font-black">المستلم</th>
-                <th className="py-3 px-4 font-black">المتبقي</th>
-                <th className="py-3 px-4 font-black">الحالة</th>
-                <th className="py-3 px-4 font-black text-center">الإجراءات</th>
+              <tr className="bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 border-b border-slate-800 text-slate-300">
+                <th className="py-3.5 px-4 font-black min-w-[240px] text-amber-400">
+                  <div className="flex items-center gap-2">
+                    <User className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>العميل والتصنيف</span>
+                  </div>
+                </th>
+                <th className="py-3.5 px-4 font-black min-w-[170px] text-slate-300">
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-blue-400 shrink-0" />
+                    <span>رقم العقد والفرع</span>
+                  </div>
+                </th>
+                <th className="py-3.5 px-4 font-black min-w-[120px] text-slate-300">
+                  <div className="flex items-center gap-1.5">
+                    <span>📅</span>
+                    <span>تاريخ العقد</span>
+                  </div>
+                </th>
+                <th className="py-3.5 px-4 font-black min-w-[120px] text-slate-300">
+                  <div className="flex items-center gap-1.5">
+                    <span>⏱️</span>
+                    <span>آخر سداد</span>
+                  </div>
+                </th>
+                <th className="py-3.5 px-4 font-black text-center min-w-[90px] text-slate-300">التأخر</th>
+                <th className="py-3.5 px-4 font-black min-w-[120px] text-slate-200">
+                  <div className="flex items-center gap-1.5">
+                    <span>💵</span>
+                    <span>إجمالي العقد</span>
+                  </div>
+                </th>
+                <th className="py-3.5 px-4 font-black min-w-[110px] text-emerald-400">
+                  <div className="flex items-center gap-1.5">
+                    <span>🟢</span>
+                    <span>المستلم</span>
+                  </div>
+                </th>
+                <th className="py-3.5 px-4 font-black min-w-[110px] text-amber-400">
+                  <div className="flex items-center gap-1.5">
+                    <span>🔴</span>
+                    <span>المتبقي</span>
+                  </div>
+                </th>
+                <th className="py-3.5 px-4 font-black text-center min-w-[130px] text-slate-300">حالة السداد</th>
+                <th className="py-3.5 px-4 font-black text-center min-w-[240px] text-slate-300">الإجراءات</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-850/30">
+            <tbody className="divide-y divide-slate-850/60">
               {listToRender.length > 0 ? (
                 listToRender.map((item, idx) => {
                   const t = getContractTiming(item);
                   const isFullyPaid = Number(item.remaining || 0) <= 0 || item.status === "مكتمل";
                   const computedStatus = isFullyPaid ? "مكتمل" : (t.overdueDays > 0 ? "متأخر" : item.status);
                   const itemRegion = awExtractRegion(item.notes || "");
+                  const itemTreasury = awExtractTreasury(item.notes || "");
+                  const itemClassification = awExtractClassification(item.notes || "");
+                  const renewedFrom = awExtractRenewedFrom(item.notes || "");
 
                   return (
                     <tr
                       key={idx}
-                      className={`hover:bg-slate-800/10 transition-colors ${
-                        isFullyPaid ? "bg-emerald-950/10" : computedStatus === "متأخر" ? "bg-rose-950/5" : ""
+                      className={`transition-all duration-150 group ${
+                        isFullyPaid
+                          ? "bg-emerald-950/15 hover:bg-emerald-950/30 border-r-4 border-r-emerald-500"
+                          : computedStatus === "متأخر"
+                          ? "bg-rose-950/15 hover:bg-rose-950/30 border-r-4 border-r-rose-500"
+                          : idx % 2 === 0
+                          ? "bg-slate-900/30 hover:bg-slate-800/40"
+                          : "bg-slate-950/40 hover:bg-slate-800/40"
                       }`}
                     >
-                      <td className="py-3.5 px-4">
+                      {/* Client Name & Category Badges */}
+                      <td className="py-3.5 px-4 align-middle">
                         <div className="flex items-center gap-2">
-                          <span className="block font-black text-white">{item.client}</span>
+                          <span className="font-black text-white text-sm tracking-wide leading-tight group-hover:text-amber-300 transition-colors">
+                            {item.client}
+                          </span>
                           {isFullyPaid && (
-                            <span className="inline-flex items-center gap-1 text-[8px] font-black text-emerald-300 bg-emerald-950/80 border border-emerald-700/60 px-1.5 py-0.5 rounded shadow-sm whitespace-nowrap">
+                            <span className="inline-flex items-center gap-1 text-[9px] font-black text-emerald-300 bg-emerald-900/60 border border-emerald-600/50 px-2 py-0.5 rounded-md shadow-sm whitespace-nowrap">
                               <span>✅</span> منتهي
                             </span>
                           )}
                         </div>
-                        <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                          <span className="text-[10px] text-slate-400 font-bold">{item.nationality || "غير محدد"}</span>
-                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 text-blue-400 font-bold font-sans">
+                        <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                          <span className="text-[10px] text-slate-300 bg-slate-900/80 px-2 py-0.5 rounded-md border border-slate-800 font-bold whitespace-nowrap">
+                            {item.nationality || "غير محدد"}
+                          </span>
+                          <span className="text-[9px] px-2 py-0.5 rounded-md bg-blue-500/15 border border-blue-500/30 text-blue-300 font-black font-sans whitespace-nowrap">
                             {item.type === "daily" || !item.type ? "تقسيط" : item.type}
                           </span>
-                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-400 font-bold font-sans">
+                          <span className="text-[9px] px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-300 font-black font-sans whitespace-nowrap">
                             {(() => {
                               const c = awExtractCycle(item.notes || "") || "يومي";
                               return c === "يومي" ? "يومي" :
@@ -1577,89 +1626,180 @@ export const Installments: React.FC<InstallmentsProps> = ({
                                      c === "نصف شهر" ? "نصف شهري" : "شهري";
                             })()}
                           </span>
-                          <span className={`text-[9px] px-1.5 py-0.5 rounded font-black font-sans ${
-                            awExtractClassification(item.notes || "") === "دائن"
-                              ? "bg-rose-500/10 border border-rose-500/20 text-rose-400"
-                              : "bg-emerald-500/10 border border-emerald-500/20 text-emerald-400"
+                          <span className={`text-[9px] px-2 py-0.5 rounded-md font-black font-sans whitespace-nowrap ${
+                            itemClassification === "دائن"
+                              ? "bg-rose-500/15 border border-rose-500/30 text-rose-300"
+                              : "bg-emerald-500/15 border border-emerald-500/30 text-emerald-300"
                           }`}>
-                            {awExtractClassification(item.notes || "")}
+                            {itemClassification}
                           </span>
                         </div>
                       </td>
-                      <td className="py-3.5 px-4 font-mono">
-                        <span className="block text-slate-200 font-bold">{item.no}</span>
-                        {(() => {
-                          const renewedFrom = awExtractRenewedFrom(item.notes || "");
-                          return renewedFrom ? (
-                            <span className="inline-flex items-center gap-1 text-[9px] font-black text-cyan-400 bg-cyan-950/70 border border-cyan-800/60 px-1.5 py-0.5 rounded mt-0.5 whitespace-nowrap" title={`مجدد من العقد: ${renewedFrom}`}>
+
+                      {/* Contract Number, Branch & Treasury */}
+                      <td className="py-3.5 px-4 align-middle">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-mono text-xs font-black text-amber-400 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800 shadow-inner whitespace-nowrap">
+                            {item.no}
+                          </span>
+                          {renewedFrom && (
+                            <span className="inline-flex items-center gap-1 text-[9px] font-black text-cyan-300 bg-cyan-950/80 border border-cyan-700/60 px-1.5 py-0.5 rounded-md whitespace-nowrap" title={`مجدد من العقد: ${renewedFrom}`}>
                               🔄 مجدد من: {renewedFrom}
                             </span>
-                          ) : null;
-                        })()}
-                        <div className="flex flex-col gap-0.5 mt-0.5">
-                          <span className="block text-[10px] text-amber-500/80 font-sans font-bold">{itemRegion || "القرية الرئيسية"}</span>
-                          <span className="block text-[9px] text-blue-400 font-sans font-black">🏢 {awExtractTreasury(item.notes || "") || "خزنة التحصيل"}</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 mt-1.5">
+                          <span className="text-[10px] text-amber-400/90 font-bold bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 whitespace-nowrap">
+                            📍 {itemRegion || "القرية الرئيسية"}
+                          </span>
+                          <span className="text-[10px] text-blue-300 font-bold bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/20 whitespace-nowrap">
+                            🏢 {itemTreasury || "خزنة التحصيل"}
+                          </span>
                         </div>
                       </td>
-                      <td className="py-3.5 px-4 font-mono text-slate-400">{item.start_date}</td>
-                      <td className="py-3.5 px-4 font-mono text-slate-400">{t.lastPaid}</td>
-                      <td className="py-3.5 px-4 text-center">
+
+                      {/* Start Date */}
+                      <td className="py-3.5 px-4 align-middle font-mono whitespace-nowrap">
+                        <span className="px-2.5 py-1 rounded-lg bg-slate-950/60 border border-slate-800/80 text-slate-300 text-xs font-bold inline-block shadow-inner">
+                          {item.start_date || "—"}
+                        </span>
+                      </td>
+
+                      {/* Last Paid Date */}
+                      <td className="py-3.5 px-4 align-middle font-mono whitespace-nowrap">
+                        <span className={`px-2.5 py-1 rounded-lg border text-xs font-bold inline-block shadow-inner ${
+                          t.lastPaid && t.lastPaid !== "غير مسدد"
+                            ? "bg-slate-950/60 border-slate-800 text-slate-300"
+                            : "bg-amber-950/20 border-amber-500/30 text-amber-400/90 font-sans"
+                        }`}>
+                          {t.lastPaid || "غير مسدد"}
+                        </span>
+                      </td>
+
+                      {/* Overdue Days */}
+                      <td className="py-3.5 px-4 align-middle text-center whitespace-nowrap">
                         {t.overdueDays > 0 ? (
-                          <span className="inline-block px-2.5 py-0.5 rounded bg-rose-500/10 border border-rose-500/20 text-rose-400 font-black font-mono">
-                            {t.overdueDays} {(() => {
-                              const c = awExtractCycle(item.notes || "") || "يومي";
-                              return c === "يومي" ? "يوم" :
-                                     c === "اسبوعي" ? "أسبوع" :
-                                     c === "نصف شهر" ? "نصف شهر" : "شهر";
-                            })()}
+                          <span className="inline-flex items-center justify-center gap-1 px-2.5 py-1 rounded-lg bg-rose-500/20 border border-rose-500/40 text-rose-300 font-black font-mono text-xs shadow-sm">
+                            <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                            <span>{t.overdueDays}</span>
+                            <span className="text-[10px] font-sans">
+                              {(() => {
+                                const c = awExtractCycle(item.notes || "") || "يومي";
+                                return c === "يومي" ? "يوم" :
+                                       c === "اسبوعي" ? "أسبوع" :
+                                       c === "نصف شهر" ? "نصف شهر" : "شهر";
+                              })()}
+                            </span>
                           </span>
                         ) : (
-                          <span className="text-slate-500 font-bold">0</span>
+                          <span className="inline-block px-2 py-0.5 rounded-md bg-slate-900/50 border border-slate-800 text-slate-500 font-mono font-bold text-xs">
+                            0
+                          </span>
                         )}
                       </td>
-                      <td className={`py-3.5 px-4 font-bold font-mono ${
-                        awExtractClassification(item.notes || "") === "دائن"
-                          ? "text-rose-400"
-                          : "text-emerald-400"
-                      }`}>{Number(item.amount || 0).toLocaleString()}</td>
-                      <td className="py-3.5 px-4 font-bold text-emerald-400 font-mono">{Number(item.paid || 0).toLocaleString()}</td>
-                      <td className={`py-3.5 px-4 font-bold font-mono ${
-                        awExtractClassification(item.notes || "") === "دائن"
-                          ? "text-rose-400"
-                          : "text-emerald-400"
-                      }`}>{Number(item.remaining || 0).toLocaleString()}</td>
-                      <td className="py-3.5 px-4">
+
+                      {/* Total Amount */}
+                      <td className="py-3.5 px-4 align-middle whitespace-nowrap">
+                        <div className="flex items-baseline gap-1">
+                          <span className={`font-mono font-black text-sm ${
+                            itemClassification === "دائن" ? "text-rose-400" : "text-slate-100"
+                          }`}>
+                            {Number(item.amount || 0).toLocaleString()}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-bold">ريال</span>
+                        </div>
+                      </td>
+
+                      {/* Paid Amount */}
+                      <td className="py-3.5 px-4 align-middle whitespace-nowrap">
+                        <div className="flex items-baseline gap-1">
+                          <span className="font-mono font-black text-sm text-emerald-400">
+                            {Number(item.paid || 0).toLocaleString()}
+                          </span>
+                          <span className="text-[10px] text-emerald-500/80 font-bold">ريال</span>
+                        </div>
+                      </td>
+
+                      {/* Remaining Amount */}
+                      <td className="py-3.5 px-4 align-middle whitespace-nowrap">
+                        <div className="flex items-baseline gap-1">
+                          <span className={`font-mono font-black text-sm ${
+                            Number(item.remaining || 0) <= 0
+                              ? "text-emerald-400"
+                              : itemClassification === "دائن"
+                              ? "text-rose-400"
+                              : "text-amber-400"
+                          }`}>
+                            {Number(item.remaining || 0).toLocaleString()}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-bold">ريال</span>
+                        </div>
+                      </td>
+
+                      {/* Status */}
+                      <td className="py-3.5 px-4 align-middle text-center whitespace-nowrap">
                         {isFullyPaid ? (
                           <span
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm whitespace-nowrap"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 shadow-md shadow-emerald-950/40"
                             title="تم سداد هذا العقد بالكامل وهو الآن عقد منتهي ومكتمل"
                           >
                             <CheckCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                             <span>منتهي ومسدد</span>
                           </span>
+                        ) : computedStatus === "منتظم" ? (
+                          <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                            <span>منتظم</span>
+                          </span>
+                        ) : computedStatus === "متأخر" ? (
+                          <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-black bg-rose-600 text-white shadow-md shadow-rose-950/50 animate-pulse">
+                            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                            <span>متأخر</span>
+                          </span>
                         ) : (
-                          <span
-                            className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${
-                              computedStatus === "منتظم"
-                                ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                                : computedStatus === "متأخر"
-                                ? "bg-rose-500 text-white"
-                                : "bg-amber-500/10 text-amber-500 border border-amber-500/20"
-                            }`}
-                          >
-                            {computedStatus}
+                          <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                            <span>{computedStatus}</span>
                           </span>
                         )}
                       </td>
-                      <td className="py-3.5 px-4 text-center">
+
+                      {/* Actions */}
+                      <td className="py-3.5 px-4 align-middle text-center whitespace-nowrap">
                         <div className="flex items-center justify-center gap-1.5">
+                          {/* File Details Button */}
+                          <button
+                            type="button"
+                            onClick={() => setSelectedFileContract(item)}
+                            className="px-3 py-1.5 bg-slate-900 hover:bg-blue-600 text-slate-300 hover:text-white border border-slate-700/80 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                            title="فتح ملف العقد وتفاصيل الأقساط"
+                          >
+                            <FileText className="w-3.5 h-3.5 text-blue-400 group-hover:text-white" />
+                            <span>فتح الملف</span>
+                          </button>
+
+                          {/* Quick Receipt Button (if not fully paid) */}
+                          {onCreateReceiptForContract && !isFullyPaid && (
+                            <button
+                              type="button"
+                              onClick={() => onCreateReceiptForContract(item)}
+                              className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-md shadow-emerald-500/20 hover:scale-105 active:scale-95"
+                              title="تحرير سند قبض لهذا العقد فوراً"
+                            >
+                              <span>💰</span>
+                              <span>سند قبض</span>
+                            </button>
+                          )}
+
+                          {/* Renewal Button */}
                           {((finalPerms?.installmentsAdd) || currentUser?.role === "admin") && (
                             <button
+                              type="button"
                               onClick={() => openRenewModal(item)}
-                              className={`px-2.5 py-1.5 rounded-lg text-xs font-black transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap ${
+                              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
                                 isFullyPaid
-                                  ? "bg-cyan-500 hover:bg-cyan-400 text-slate-950 shadow-md shadow-cyan-500/20 ring-1 ring-cyan-300"
-                                  : "bg-cyan-500/15 hover:bg-cyan-500 text-cyan-400 hover:text-slate-950 border border-cyan-500/30"
+                                  ? "bg-cyan-500 hover:bg-cyan-400 text-slate-950 shadow-md shadow-cyan-500/25 ring-1 ring-cyan-300 hover:scale-105"
+                                  : "bg-cyan-500/15 hover:bg-cyan-500 text-cyan-300 hover:text-slate-950 border border-cyan-500/30"
                               }`}
                               title={isFullyPaid ? "تجديد العقد المنتهي لعميلك" : "تجديد العقد أو تمديد فترته"}
                             >
@@ -1667,31 +1807,17 @@ export const Installments: React.FC<InstallmentsProps> = ({
                               <span>تجديد</span>
                             </button>
                           )}
-                          {onCreateReceiptForContract && !isFullyPaid && (
-                            <button
-                              onClick={() => onCreateReceiptForContract(item)}
-                              className="px-2.5 py-1.5 bg-emerald-500/15 hover:bg-emerald-500 text-emerald-400 hover:text-slate-950 border border-emerald-500/30 rounded-lg text-xs font-black transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap"
-                              title="تحرير سند قبض لهذا العقد فوراً"
-                            >
-                              <span>💰</span>
-                              <span>سند قبض</span>
-                            </button>
-                          )}
-                          <button
-                            onClick={() => setSelectedFileContract(item)}
-                            className="px-3 py-1.5 bg-slate-950/40 border border-slate-800 text-xs font-bold text-blue-400 hover:text-white rounded-lg hover:bg-blue-600/25 transition-all cursor-pointer whitespace-nowrap"
-                            title="فتح ملف العقد"
-                          >
-                            فتح الملف
-                          </button>
+
+                          {/* Delete Button */}
                           {(currentUser?.role === "admin" || finalPerms?.installmentsDelete) && (
                             <button
+                              type="button"
                               onClick={() => {
                                 if (confirm(`هل أنت متأكد من حذف العقد الخاص بـ (${item.client}) ورقم العقد (${item.no}) بشكل نهائي؟ لا يمكن التراجع عن هذا الإجراء!`)) {
                                   onDeleteInstallment(item.id);
                                 }
                               }}
-                              className="p-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/20 rounded-lg transition-all cursor-pointer"
+                              className="p-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/20 rounded-xl transition-all cursor-pointer"
                               title="حذف العقد"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -1704,8 +1830,11 @@ export const Installments: React.FC<InstallmentsProps> = ({
                 })
               ) : (
                 <tr>
-                  <td colSpan={10} className="py-10 text-center text-slate-500 font-bold">
-                    لا توجد أي عقود مسجلة ومطابقة للتصنيفات.
+                  <td colSpan={10} className="py-12 text-center text-slate-500 font-bold text-sm">
+                    <div className="flex flex-col items-center justify-center gap-2">
+                      <span className="text-3xl">📭</span>
+                      <span>لا توجد أي عقود مسجلة ومطابقة لشروط البحث والفلترة.</span>
+                    </div>
                   </td>
                 </tr>
               )}
