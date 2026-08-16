@@ -346,6 +346,7 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
   const getCompiledTransactionsForSafe = (safeName: string) => {
     let items: {
       date: string;
+      createdAt: string;
       type: "قبض" | "صرف" | "مصروف" | "رأس مال";
       desc: string;
       inbound: number;
@@ -357,6 +358,7 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
       if (getReceiptTreasury(r) === safeName) {
         items.push({
           date: r.date || "",
+          createdAt: r.created_at || r.date || "",
           type: "قبض",
           desc: r.from_name ? `${r.from_name} — سند قبض لعقد ${r.contract_no || ""}` : `دفعة عقد ${r.contract_no || ""}`,
           inbound: Number(r.amount || 0),
@@ -370,6 +372,7 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
       if (getPaymentTreasury(p) === safeName) {
         items.push({
           date: p.date || "",
+          createdAt: p.created_at || p.date || "",
           type: "صرف",
           desc: p.to_name ? `سند صرف إلى: ${p.to_name} — مبرر: ${p.notes || "مسجل في الخصم"}` : "سند صرف مالي",
           inbound: 0,
@@ -383,6 +386,7 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
       if (getExpenseTreasury(e) === safeName) {
         items.push({
           date: e.date || "",
+          createdAt: e.created_at || e.date || "",
           type: "مصروف",
           desc: `${e.name || "مصروف"} [${e.category || "عام"}] — المورد: ${e.supplier || "غير مسجل"}`,
           inbound: 0,
@@ -411,6 +415,7 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
 
         items.push({
           date: x.start_date || "",
+          createdAt: x.created_at || x.start_date || "",
           type: "رأس مال",
           desc: `تأسيس رأس مال العقد رقم: ${x.no} — العميل: ${x.client}${descSuffix}`,
           inbound: 0,
@@ -420,8 +425,12 @@ export const Treasury: React.FC<TreasuryProps> = ({ receipts, payments, expenses
       }
     });
 
-    // Sort ascending to compute chronological running balances
-    items.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    // Sort ascending by date and created_at timestamp to compute precise chronological running balances
+    items.sort((a, b) => {
+      const dComp = String(a.date).localeCompare(String(b.date));
+      if (dComp !== 0) return dComp;
+      return String(a.createdAt).localeCompare(String(b.createdAt));
+    });
 
     let running = 0;
     const itemsWithBalance = items.map((item) => {

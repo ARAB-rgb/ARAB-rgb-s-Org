@@ -276,6 +276,12 @@ class SupabaseEmulationChain {
     if (this.action === 'insert') {
       const { data, error } = await queryBuilder.insert(this.payload).select();
       if (error) throw error;
+      const records = Array.isArray(this.payload) ? this.payload : [this.payload];
+      for (const rec of records) {
+        if (rec && rec.id) {
+          setDoc(doc(db, this.table, rec.id), { id: rec.id, ...rec, created_at: rec.created_at || new Date().toISOString() }, { merge: true }).catch(() => {});
+        }
+      }
       return { data: Array.isArray(this.payload) ? data : data?.[0], error: null };
     }
 
@@ -286,12 +292,22 @@ class SupabaseEmulationChain {
       }
       const { data, error } = await q.select();
       if (error) throw error;
+      const idFilter = this.filters.find(f => f.field === 'id');
+      if (idFilter) {
+        setDoc(doc(db, this.table, idFilter.val), this.payload, { merge: true }).catch(() => {});
+      }
       return { data: data?.[0] || null, error: null };
     }
 
     if (this.action === 'upsert') {
       const { data, error } = await queryBuilder.upsert(this.payload).select();
       if (error) throw error;
+      const records = Array.isArray(this.payload) ? this.payload : [this.payload];
+      for (const rec of records) {
+        if (rec && rec.id) {
+          setDoc(doc(db, this.table, rec.id), { id: rec.id, ...rec, created_at: rec.created_at || new Date().toISOString() }, { merge: true }).catch(() => {});
+        }
+      }
       return { data: Array.isArray(this.payload) ? data : data?.[0], error: null };
     }
 
@@ -302,6 +318,10 @@ class SupabaseEmulationChain {
       }
       const { data, error } = await q;
       if (error) throw error;
+      const idFilter = this.filters.find(f => f.field === 'id');
+      if (idFilter) {
+        deleteDoc(doc(db, this.table, idFilter.val)).catch(() => {});
+      }
       return { data: null, error: null };
     }
 
@@ -400,12 +420,33 @@ class SupabaseEmulationChain {
         for (const f of this.filters) {
           qConstraints.push(where(f.field, '==', f.val));
         }
-        if (this.orderField) {
-          qConstraints.push(orderBy(this.orderField, this.orderAscending ? 'asc' : 'desc'));
+        
+        let snap;
+        try {
+          const qOrderedConstraints = [...qConstraints];
+          if (this.orderField) {
+            qOrderedConstraints.push(orderBy(this.orderField, this.orderAscending ? 'asc' : 'desc'));
+          }
+          const q = qOrderedConstraints.length > 0 ? query(colRef, ...qOrderedConstraints) : colRef;
+          snap = await getDocs(q);
+        } catch (queryErr) {
+          // Fallback if orderBy or compound index is missing in Firestore
+          const qSimple = qConstraints.length > 0 ? query(colRef, ...qConstraints) : colRef;
+          snap = await getDocs(qSimple);
         }
-        const q = qConstraints.length > 0 ? query(colRef, ...qConstraints) : colRef;
-        const snap = await getDocs(q);
-        const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+        let data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        if (this.orderField) {
+          const orderKey = this.orderField;
+          const asc = this.orderAscending;
+          data.sort((a: any, b: any) => {
+            const valA = a[orderKey] ?? "";
+            const valB = b[orderKey] ?? "";
+            if (valA < valB) return asc ? -1 : 1;
+            if (valA > valB) return asc ? 1 : -1;
+            return 0;
+          });
+        }
         return { data, error: null };
       } catch (err: any) {
         handleFirestoreError(err, OperationType.LIST, this.table);
@@ -687,6 +728,18 @@ export function awGetSafeCapitalOutflow(notes: string, safeName: string): number
   return 0;
 }
 
+export function awExtractDownPayment(notes: string): number {
+  const text = String(notes || "");
+  const m = text.match(/\[دفعة_مقدمة:\s*([\d\.]+)\]/);
+  return m ? Number(m[1]) : 0;
+}
+
+export function awExtractRenewedFrom(notes: string): string | null {
+  const text = String(notes || "");
+  const m = text.match(/\[تجديد_من_عقد:\s*([^\]]+)\]/);
+  return m ? m[1].trim() : null;
+}
+
 export function awExtractAttachment(notes: string): string | null {
   const match = String(notes || "").match(/\[مرفق:\s*([^\]]+)\]/);
   return match ? match[1].trim() : null;
@@ -707,6 +760,11 @@ export function awCleanNotes(notes: string): string {
     .replace(/\s*\[السند_الخارجي:\s*[^\]]+\]\s*/g, " ")
     .replace(/\s*\[الدورية:\s*[^\]]+\]\s*/g, " ")
     .replace(/\s*\[التصنيف:\s*[^\]]+\]\s*/g, " ")
+    .replace(/\s*\[دفعة_مقدمة:\s*[^\]]+\]\s*/g, " ")
+    .replace(/\s*\[تجديد_من_عقد:\s*[^\]]+\]\s*/g, " ")
+    .replace(/\s*\[اتجاه العقد:\s*[^\]]+\]\s*/g, " ")
+    .replace(/\s*\[رمز العامل:\s*[^\]]+\]\s*/g, " ")
+    .replace(/\s*\[رمز المشروع:\s*[^\]]+\]\s*/g, " ")
     .replace(/\s*\[\[?AW_BRANCH:\s*[^\]\s]+\]?\]\s*/gi, " ")
     .trim();
 }
@@ -801,14 +859,35 @@ export function awBuildNotesWithRegionAndTreasuryAndCapital(
 }
 
 export function generateNextNo(prefix: string, list: any[], field: string = "no"): string {
-  const nums = list
+  const existingSet = new Set(
+    (list || [])
+      .map(x => String(x?.[field] || "").trim().toUpperCase())
+      .filter(Boolean)
+  );
+
+  const nums = (list || [])
     .map(x => {
-      const match = String(x[field] || "").match(/(\d+)$/);
+      const match = String(x?.[field] || "").match(/(\d+)$/);
       return match ? Number(match[1]) : 0;
     })
     .filter(Boolean);
-  const nextNum = (nums.length ? Math.max(...nums) : 0) + 1;
-  return `${prefix}-${String(nextNum).padStart(4, "0")}`;
+
+  let nextNum = (nums.length ? Math.max(...nums) : 0) + 1;
+  let candidate = `${prefix}-${String(nextNum).padStart(4, "0")}`;
+  while (existingSet.has(candidate.toUpperCase())) {
+    nextNum++;
+    candidate = `${prefix}-${String(nextNum).padStart(4, "0")}`;
+  }
+  return candidate;
+}
+
+export function isNoUnique(no: string, list: any[], excludeId?: string, field: string = "no"): boolean {
+  if (!no) return true;
+  const target = String(no).trim().toUpperCase();
+  return !(list || []).some(x => {
+    if (excludeId && x?.id === excludeId) return false;
+    return String(x?.[field] || "").trim().toUpperCase() === target;
+  });
 }
 
 export function getContractTiming(x: Installment) {

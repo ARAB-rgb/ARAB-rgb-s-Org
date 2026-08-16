@@ -21,7 +21,7 @@ import {
   getSupabaseCredentials, saveSupabaseCredentials, checkSupabaseHealth, isSupabaseHealthy,
   awExtractExternalNo, awBuildNotesWithRegionAndTreasuryAndExternalNo, awExtractClassification, awExtractCycle, awExtractReceiptType,
   awExtractContractDirection, awExtractWorkerId, awExtractProjectId,
-  serializeQuoteNotes, deserializeQuoteNotes, auth, awExtractBeneficiaryType
+  serializeQuoteNotes, deserializeQuoteNotes, auth, awExtractBeneficiaryType, awExtractDownPayment, awExtractRenewedFrom
 } from "./db";
 
 import { Toast, ToastItem, ToastType } from "./components/Shared/Toast";
@@ -1547,6 +1547,197 @@ export default function App() {
   };
 
   // Queries sync
+  // Audit & Recalculate All Contracts and Receipts to fix corrupted linkages and restore true amounts
+  const auditAndRecalculateAllContractsAndReceipts = async (
+    rawInstallments: Installment[],
+    rawReceipts: Receipt[],
+    rawPayments: Payment[]
+  ) => {
+    if (!rawInstallments || rawInstallments.length === 0) {
+      return { updatedInstallments: rawInstallments, updatedReceipts: rawReceipts };
+    }
+
+    const newReceipts = rawReceipts.map(r => ({ ...r }));
+    const newInstallments = rawInstallments.map(i => ({ ...i }));
+
+    // 0. Audit and Deduplicate Contract Numbers (Ensure each contract has a unique AW-CON-XXXX)
+    const claimedNos = new Set<string>();
+    for (let idx = 0; idx < newInstallments.length; idx++) {
+      const inst = newInstallments[idx];
+      const curNo = String(inst.no || "").trim().toUpperCase();
+
+      if (!curNo || claimedNos.has(curNo)) {
+        // Duplicate or missing contract number detected - generate a guaranteed unique number
+        const allExisting = new Set([...claimedNos, ...newInstallments.map(x => String(x.no || "").trim().toUpperCase()).filter(Boolean)]);
+        const allNums = newInstallments
+          .map(x => {
+            const m = String(x.no || "").match(/(\d+)$/);
+            return m ? Number(m[1]) : 0;
+          })
+          .filter(Boolean);
+        let nextN = (allNums.length ? Math.max(...allNums) : 0) + 1;
+        let generatedNo = `AW-CON-${String(nextN).padStart(4, "0")}`;
+        while (allExisting.has(generatedNo.toUpperCase())) {
+          nextN++;
+          generatedNo = `AW-CON-${String(nextN).padStart(4, "0")}`;
+        }
+
+        const oldNo = inst.no;
+        newInstallments[idx] = {
+          ...inst,
+          no: generatedNo
+        };
+        claimedNos.add(generatedNo.toUpperCase());
+
+        // Update database for the duplicate contract
+        sb.from("installments").update({ no: generatedNo }).eq("id", inst.id).then(() => {}).catch(() => {});
+
+        // Update any receipts that were specifically linked to this contract's old ID or old number
+        for (let rIdx = 0; rIdx < newReceipts.length; rIdx++) {
+          if (newReceipts[rIdx].installment_id === inst.id || (oldNo && newReceipts[rIdx].contract_no === oldNo)) {
+            newReceipts[rIdx] = {
+              ...newReceipts[rIdx],
+              contract_no: generatedNo,
+              installment_id: inst.id
+            };
+            sb.from("receipts").update({ contract_no: generatedNo, installment_id: inst.id }).eq("id", newReceipts[rIdx].id).then(() => {}).catch(() => {});
+          }
+        }
+      } else {
+        claimedNos.add(curNo);
+      }
+    }
+
+    // 1. Audit receipt linkages to match the exact contract
+    for (let idx = 0; idx < newReceipts.length; idx++) {
+      const r = newReceipts[idx];
+      const normName = String(r.from_name || "").trim().replace(/\s+/g, " ").toLowerCase();
+      const normIdentity = String(r.identity || "").trim();
+      const normContractNo = String(r.contract_no || "").trim().toUpperCase();
+
+      let targetInst: Installment | null = null;
+
+      // Priority 1: Direct link by installment_id
+      if (r.installment_id) {
+        targetInst = newInstallments.find(i => i.id === r.installment_id) || null;
+      }
+
+      // Priority 2: Direct link by Contract Number (e.g. AW-CON-0008)
+      if (!targetInst && normContractNo && normContractNo.startsWith("AW-CON-")) {
+        targetInst = newInstallments.find(i => String(i.no || "").trim().toUpperCase() === normContractNo) || null;
+      }
+
+      // Priority 3: Fallback match by Identity if no direct contract link was established
+      if (!targetInst && normIdentity && normIdentity.length > 5) {
+        const matchingByIdent = newInstallments.filter(i => {
+          const iIdent = String(i.identity || "").trim();
+          return iIdent === normIdentity;
+        });
+        if (matchingByIdent.length === 1) {
+          targetInst = matchingByIdent[0];
+        }
+      }
+
+      // Priority 4: Fallback match by exact Client Name if no direct contract link was established
+      if (!targetInst && normName && !r.contract_no && !r.installment_id) {
+        const matchingByName = newInstallments.filter(i => {
+          const cName = String(i.client || "").trim().replace(/\s+/g, " ").toLowerCase();
+          return cName === normName;
+        });
+        if (matchingByName.length === 1) {
+          targetInst = matchingByName[0];
+        }
+      }
+
+      if (targetInst) {
+        if (
+          r.installment_id !== targetInst.id ||
+          r.contract_no !== targetInst.no
+        ) {
+          newReceipts[idx] = {
+            ...r,
+            installment_id: targetInst.id,
+            contract_no: targetInst.no,
+            identity: targetInst.identity || r.identity || "",
+            phone: targetInst.phone || r.phone || "",
+            nationality: targetInst.nationality || r.nationality || ""
+          };
+          sb.from("receipts").update({
+            installment_id: targetInst.id,
+            contract_no: targetInst.no,
+            identity: targetInst.identity || r.identity || "",
+            phone: targetInst.phone || r.phone || "",
+            nationality: targetInst.nationality || r.nationality || ""
+          }).eq("id", r.id).then(() => {}).catch(() => {});
+        }
+      } else {
+        if (r.installment_id && !r.contract_no && !normName) {
+          newReceipts[idx] = { ...r, installment_id: null, contract_no: "" };
+          sb.from("receipts").update({ installment_id: null, contract_no: "" }).eq("id", r.id).then(() => {}).catch(() => {});
+        }
+      }
+    }
+
+    // 2. Recalculate paid, remaining, status for EVERY contract
+    for (let idx = 0; idx < newInstallments.length; idx++) {
+      const inst = newInstallments[idx];
+
+      const linkedRecs = newReceipts.filter(r => r.installment_id === inst.id || (inst.no && r.contract_no === inst.no));
+      const linkedPays = rawPayments.filter(p => p.installment_id === inst.id || (inst.no && p.contract_no === inst.no));
+
+      const contractDir = inst.contract_direction || awExtractContractDirection(inst.notes || "") || "لنا";
+      const isExpenseDir = contractDir === "علينا" || contractDir === "مصروفات عمالة";
+
+      const paidFromReceipts = linkedRecs.reduce((sum, x) => {
+        const isOutgoing = awExtractReceiptType(x.notes || "") === "صادر";
+        const amt = Number(x.amount || 0);
+        return sum + (isOutgoing ? -amt : amt);
+      }, 0);
+
+      const paidOutFromPayments = linkedPays.reduce((sum, x) => sum + Number(x.amount || 0), 0);
+
+      const initialDownPayment = awExtractDownPayment(inst.notes || "");
+
+      const hasDownPaymentReceipt = linkedRecs.some(r => {
+        const notes = String(r.notes || "");
+        return notes.includes("دفعة_مقدمة") || notes.includes("دفعة مقدمة");
+      });
+      const effectiveDownPayment = hasDownPaymentReceipt ? 0 : initialDownPayment;
+
+      let netPaid = 0;
+      if (linkedRecs.length === 0 && linkedPays.length === 0) {
+        netPaid = effectiveDownPayment > 0 ? effectiveDownPayment : Number(inst.paid || 0);
+      } else {
+        if (isExpenseDir) {
+          netPaid = effectiveDownPayment + (paidOutFromPayments - paidFromReceipts);
+        } else {
+          netPaid = effectiveDownPayment + (paidFromReceipts - paidOutFromPayments);
+        }
+      }
+
+      const totalAmt = Number(inst.amount || 0);
+      const newRemaining = Math.max(0, totalAmt - netPaid);
+      const newStatus = newRemaining <= 0 ? "مكتمل" : "منتظم";
+
+      if (Number(inst.paid) !== netPaid || Number(inst.remaining) !== newRemaining || inst.status !== newStatus) {
+        newInstallments[idx] = {
+          ...inst,
+          paid: netPaid,
+          remaining: newRemaining,
+          status: newStatus
+        };
+
+        sb.from("installments").update({
+          paid: netPaid,
+          remaining: newRemaining,
+          status: newStatus
+        }).eq("id", inst.id).then(() => {}).catch(() => {});
+      }
+    }
+
+    return { updatedInstallments: newInstallments, updatedReceipts: newReceipts };
+  };
+
   const loadEverything = async () => {
     if (!currentUser) return;
     try {
@@ -1566,10 +1757,17 @@ export default function App() {
 
       const uList = u.data || [];
       setUsers(uList);
-      setInstallments(inst.data || []);
+
+      const rawInst = inst.data || [];
+      const rawRec = rec.data || [];
+      const rawPay = pay.data || [];
+
+      const { updatedInstallments, updatedReceipts } = await auditAndRecalculateAllContractsAndReceipts(rawInst, rawRec, rawPay);
+
+      setInstallments(updatedInstallments);
+      setReceipts(updatedReceipts);
       setQuotes(q.data || []);
-      setReceipts(rec.data || []);
-      setPayments(pay.data || []);
+      setPayments(rawPay);
       setExpenses(exp.data || []);
       setProjects(pr.data || []);
       setWorkers(w.data || []);
@@ -2484,7 +2682,9 @@ export default function App() {
   const recalcLinkedContractFromReceipts = async (installmentId: string) => {
     if (!installmentId) return;
 
-    const linked = installments.find((x) => x.id === installmentId);
+    // Always fetch fresh contract data directly from database to avoid stale state overwriting
+    const { data: freshInstData } = await sb.from("installments").select("*").eq("id", installmentId);
+    const linked = Array.isArray(freshInstData) ? freshInstData[0] : freshInstData;
     if (!linked) return;
 
     const [recByInst, recByNo, payByInst, payByNo] = await Promise.all([
@@ -2520,21 +2720,26 @@ export default function App() {
       return sum + amt;
     }, 0);
 
-    const initialDownPayment = (linked.notes || "").match(/\[دفعة_مقدمة:\s*([\d\.]+)\]/) 
-      ? Number((linked.notes || "").match(/\[دفعة_مقدمة:\s*([\d\.]+)\]/)?.[1] || 0)
-      : 0;
+    const initialDownPayment = awExtractDownPayment(linked.notes || "");
+
+    // Check if any receipt already explicitly represents the down payment to prevent double counting
+    const hasDownPaymentReceipt = allReceipts.some(r => {
+      const notes = String(r.notes || "");
+      return notes.includes("دفعة_مقدمة") || notes.includes("دفعة مقدمة");
+    });
+    const effectiveDownPayment = hasDownPaymentReceipt ? 0 : initialDownPayment;
 
     let netPaid = 0;
     if (allReceipts.length === 0 && allPayments.length === 0) {
-      // No linked vouchers created yet; preserve the contract's initial paid amount
-      netPaid = Number(linked.paid || 0);
+      // No linked vouchers created yet; preserve the contract's down payment or initial amount
+      netPaid = effectiveDownPayment > 0 ? effectiveDownPayment : Number(linked.paid || 0);
     } else {
       if (isExpenseDir) {
         // For "علينا" / "مصروفات عمالة": Payments (+) add to paid, Receipts (-) deduct from paid
-        netPaid = initialDownPayment + (paidOutFromPayments - paidFromReceipts);
+        netPaid = effectiveDownPayment + (paidOutFromPayments - paidFromReceipts);
       } else {
         // For "لنا": Receipts (+) add to paid, Payments (-) deduct from paid
-        netPaid = initialDownPayment + (paidFromReceipts - paidOutFromPayments);
+        netPaid = effectiveDownPayment + (paidFromReceipts - paidOutFromPayments);
       }
     }
 
@@ -2547,86 +2752,6 @@ export default function App() {
       .update({ paid: netPaid, remaining: newRemaining, status: newStatus })
       .eq("id", installmentId);
   };
-
-  // Self-healing function for mismatched receipts
-  const autoRepairMismatchedReceipts = async (loadedReceipts: Receipt[], loadedInstallments: Installment[]) => {
-    const mismatched = loadedReceipts.filter(r => {
-      if (!r.installment_id || !r.from_name) return false;
-      const linked = loadedInstallments.find(i => i.id === r.installment_id);
-      if (!linked || !linked.client) return false;
-      
-      const normFromName = String(r.from_name).trim().replace(/\s+/g, ' ').toLowerCase();
-      const normClientName = String(linked.client).trim().replace(/\s+/g, ' ').toLowerCase();
-      
-      if (normFromName === normClientName) return false;
-      
-      // Check if payee name shares any substantial common words with the client name
-      const wordsA = normFromName.split(' ').filter(w => w.length > 2);
-      const wordsB = normClientName.split(' ').filter(w => w.length > 2);
-      const sharesCommon = wordsA.some(w => wordsB.includes(w));
-      
-      return !sharesCommon; // True if completely different names
-    });
-
-    if (mismatched.length === 0) return;
-
-    let repairedCount = 0;
-    const installmentsToRecalc = new Set<string>();
-
-    for (const r of mismatched) {
-      // Find the correct installment belonging to the from_name
-      const correctInstallment = loadedInstallments.find(i => {
-        if (!i.client) return false;
-        const normFromName = String(r.from_name).trim().replace(/\s+/g, ' ').toLowerCase();
-        const normClientName = String(i.client).trim().replace(/\s+/g, ' ').toLowerCase();
-        
-        return normClientName === normFromName || normClientName.includes(normFromName) || normFromName.includes(normClientName);
-      });
-
-      if (correctInstallment) {
-        const beforeAmt = Number(correctInstallment.remaining || 0);
-        const isOutgoing = awExtractReceiptType(r.notes || "") === "صادر";
-        const afterAmt = Math.max(0, beforeAmt + (isOutgoing ? Number(r.amount || 0) : -Number(r.amount || 0)));
-        
-        const updatedRow = {
-          installment_id: correctInstallment.id,
-          contract_no: correctInstallment.no,
-          identity: correctInstallment.identity || "",
-          phone: correctInstallment.phone || "",
-          nationality: correctInstallment.nationality || "",
-          remaining_before: beforeAmt,
-          remaining_after: afterAmt
-        };
-
-        try {
-          await sb.from("receipts").update(updatedRow).eq("id", r.id);
-          if (r.installment_id) {
-            installmentsToRecalc.add(r.installment_id);
-          }
-          installmentsToRecalc.add(correctInstallment.id);
-          repairedCount++;
-        } catch (err) {
-          console.error("[Auto Repair Error]", err);
-        }
-      }
-    }
-
-    if (repairedCount > 0) {
-      for (const instId of Array.from(installmentsToRecalc)) {
-        await recalcLinkedContractFromReceipts(instId);
-      }
-      await loadEverything();
-      showToast(`🟢 تم تلقائياً نقل ${repairedCount} سند قبض مفقود لملفات العملاء الصحيحة وإعادة توازن رصيد العقود!`, "success");
-    }
-  };
-
-  const hasRunRepair = useRef(false);
-  useEffect(() => {
-    if (installments.length > 0 && receipts.length > 0 && !hasRunRepair.current) {
-      hasRunRepair.current = true;
-      autoRepairMismatchedReceipts(receipts, installments);
-    }
-  }, [installments, receipts]);
 
 
   // Interactive CRUD operations
@@ -2676,12 +2801,35 @@ export default function App() {
     if (row.project_id_input) {
       finalNotes = `[رمز المشروع: ${row.project_id_input}] ` + finalNotes;
     }
+    if (row.renewed_from_input) {
+      finalNotes = `[تجديد_من_عقد: ${row.renewed_from_input}] ` + finalNotes;
+    }
     if (Number(row.paid) > 0) {
       finalNotes = `[دفعة_مقدمة: ${Number(row.paid)}] ` + finalNotes;
     }
 
+    // Strictly ensure contract number uniqueness
+    const rawNo = String(row.no || "").trim().toUpperCase();
+    const isDuplicate = installments.some(
+      (i) => i.id !== editId && String(i.no || "").trim().toUpperCase() === rawNo
+    );
+
+    let finalContractNo = row.no;
+    if (isDuplicate) {
+      if (editId) {
+        showToast(`⚠️ رقم العقد (${rawNo}) مسجل مسبقاً لعقد آخر! لا يمكن تكرار رقم العقد.`, "error");
+        return false;
+      } else {
+        // Automatically generate next non-colliding unique contract number
+        finalContractNo = generateNextNo("AW-CON", installments, "no");
+      }
+    } else if (!finalContractNo) {
+      finalContractNo = generateNextNo("AW-CON", installments, "no");
+    }
+
     const payload = {
       ...row,
+      no: finalContractNo,
       notes: finalNotes,
       contract_direction: activeDirection,
       worker_id: row.worker_id_input || null,
@@ -2700,6 +2848,7 @@ export default function App() {
     delete payload.contract_direction_input;
     delete payload.worker_id_input;
     delete payload.project_id_input;
+    delete payload.renewed_from_input;
 
     setIsLoading(true);
     try {
@@ -3375,12 +3524,15 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
 
     let linked = rSelectedInstallment;
     if (!linked && rContractQuery) {
+      const cleanQ = rContractQuery.trim();
       linked = installments.find(
         (x) =>
-          x.no === rContractQuery ||
-          x.client === rContractQuery ||
-          x.identity === rContractQuery ||
-          `${x.no} | ${x.client} | ${x.identity}` === rContractQuery
+          (x.no && x.no.trim().toUpperCase() === cleanQ.toUpperCase()) ||
+          (x.client && x.client.trim() === cleanQ) ||
+          (x.identity && x.identity.trim() === cleanQ) ||
+          `${x.no} | ${x.client} | ${x.identity}` === cleanQ ||
+          (x.no && cleanQ.toUpperCase().includes(x.no.trim().toUpperCase())) ||
+          (x.client && cleanQ.includes(x.client.trim()))
       ) || null;
     }
 
@@ -3399,6 +3551,9 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       amount: amt,
       method: rMethod,
       date: rDate,
+      created_at: editReceiptId
+        ? (receipts.find(r => r.id === editReceiptId)?.created_at || new Date().toISOString())
+        : new Date().toISOString(),
       project: rProject,
       notes: rAttachment ? `${notesAppended} [مرفق: ${rAttachment}]` : notesAppended,
       installment_id: linked ? linked.id : null,
@@ -3568,6 +3723,9 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       amount: Number(payAmount),
       method: payMethod,
       date: payDate,
+      created_at: editPaymentId
+        ? (payments.find(p => p.id === editPaymentId)?.created_at || new Date().toISOString())
+        : new Date().toISOString(),
       project: payProject.trim(),
       notes: payAttachment ? `${notesAppended} [مرفق: ${payAttachment}]` : notesAppended,
       company_id: getTargetCompanyId(paymentCompanyId),
@@ -3751,6 +3909,9 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       category: eCategory,
       amount: Number(eAmount),
       date: eDate,
+      created_at: editExpenseId
+        ? (expenses.find(ex => ex.id === editExpenseId)?.created_at || new Date().toISOString())
+        : new Date().toISOString(),
       project: eProject.trim(),
       supplier: eSupplier.trim(),
       notes: eAttachment ? `${notesAppended} [مرفق: ${eAttachment}]` : notesAppended,
@@ -4431,6 +4592,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
         amount: amt,
         method: "نقدي",
         date: advDate,
+        created_at: new Date().toISOString(),
         project: selectedWorkerForHr.project || "عام",
         notes: awBuildNotesWithRegionAndTreasury(
           `قيد سلفة مستحقة للموظف. ${advNotes}`.trim(),
@@ -4530,6 +4692,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
         amount: amt,
         method: "نقدي",
         date: advDate,
+        created_at: new Date().toISOString(),
         project: targetWorker.project || "عام",
         notes: awBuildNotesWithRegionAndTreasury(
           `طلب سلفة موظف (خدمة ذاتية/ربط مباشر). ${advNotes}`.trim(),
@@ -4930,21 +5093,53 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
     }
   };
 
+  // Create receipt directly from a contract card/row
+  const handleCreateReceiptForContract = (contract: Installment) => {
+    setActiveSection("receipts");
+    const queryStr = `${contract.no} | ${contract.client} | ${contract.identity || ""}`;
+    setTimeout(() => {
+      handleAutoFillReceipt(queryStr);
+      document.getElementById("receipts-tab-view")?.scrollIntoView({ behavior: "smooth" });
+    }, 50);
+    showToast(`تم ربط العقد ${contract.no} بنجاح لتحرير سند القبض!`, "info");
+  };
+
   // Fill in active inputs of receipts once linked installment matched
   const handleAutoFillReceipt = (val: string) => {
     setRContractQuery(val);
-    const linked = getInstallmentsForReceipt().find(
+    const cleanVal = (val || "").trim();
+    if (!cleanVal) {
+      setRSelectedInstallment(null);
+      return;
+    }
+    const targetList = getInstallmentsForReceipt();
+    const linked = targetList.find(
       (x) =>
-        x.no === val ||
-        x.client === val ||
-        x.identity === val ||
-        `${x.no} | ${x.client} | ${x.identity}` === val
+        (x.no && x.no.trim().toUpperCase() === cleanVal.toUpperCase()) ||
+        (x.client && x.client.trim() === cleanVal) ||
+        (x.identity && x.identity.trim() === cleanVal) ||
+        `${x.no} | ${x.client} | ${x.identity}` === cleanVal ||
+        (x.no && cleanVal.toUpperCase().includes(x.no.trim().toUpperCase())) ||
+        (x.client && cleanVal.includes(x.client.trim()))
+    ) || installments.find(
+      (x) =>
+        (x.no && x.no.trim().toUpperCase() === cleanVal.toUpperCase()) ||
+        (x.client && x.client.trim() === cleanVal) ||
+        (x.identity && x.identity.trim() === cleanVal) ||
+        `${x.no} | ${x.client} | ${x.identity}` === cleanVal ||
+        (x.no && cleanVal.toUpperCase().includes(x.no.trim().toUpperCase()))
     );
+
     if (linked) {
       setRSelectedInstallment(linked);
       setRFrom(linked.client);
       setRProject(linked.project || "عام");
-      setRAmount(linked.installment || "");
+      if (linked.company_id) {
+        setReceiptCompanyId(linked.company_id);
+      }
+      if (!rAmount) {
+        setRAmount(linked.installment || linked.remaining || "");
+      }
     } else {
       setRSelectedInstallment(null);
     }
@@ -4953,17 +5148,39 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
   // Fill in active inputs of payments once linked installment matched (optional)
   const handleAutoFillPayment = (val: string) => {
     setPayContractQuery(val);
-    const linked = getInstallmentsForReceipt().find(
+    const cleanVal = (val || "").trim();
+    if (!cleanVal) {
+      setPaySelectedInstallment(null);
+      return;
+    }
+    const targetList = getInstallmentsForReceipt();
+    const linked = targetList.find(
       (x) =>
-        x.no === val ||
-        x.client === val ||
-        x.identity === val ||
-        `${x.no} | ${x.client} | ${x.identity}` === val
+        (x.no && x.no.trim().toUpperCase() === cleanVal.toUpperCase()) ||
+        (x.client && x.client.trim() === cleanVal) ||
+        (x.identity && x.identity.trim() === cleanVal) ||
+        `${x.no} | ${x.client} | ${x.identity}` === cleanVal ||
+        (x.no && cleanVal.toUpperCase().includes(x.no.trim().toUpperCase())) ||
+        (x.client && cleanVal.includes(x.client.trim()))
+    ) || installments.find(
+      (x) =>
+        (x.no && x.no.trim().toUpperCase() === cleanVal.toUpperCase()) ||
+        (x.client && x.client.trim() === cleanVal) ||
+        (x.identity && x.identity.trim() === cleanVal) ||
+        `${x.no} | ${x.client} | ${x.identity}` === cleanVal ||
+        (x.no && cleanVal.toUpperCase().includes(x.no.trim().toUpperCase()))
     );
+
     if (linked) {
       setPaySelectedInstallment(linked);
       setPayTo(linked.client);
       setPayProject(linked.project || "عام");
+      if (linked.company_id) {
+        setPaymentCompanyId(linked.company_id);
+      }
+      if (!payAmount) {
+        setPayAmount(linked.installment || linked.remaining || "");
+      }
     } else {
       setPaySelectedInstallment(null);
     }
@@ -5438,6 +5655,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
               onDeleteInstallment={onDeleteInstallment}
               onPrintContract={onPrintContract}
               onMigrateInstallment={onMigrateInstallment}
+              onCreateReceiptForContract={handleCreateReceiptForContract}
               receipts={getVisibleReceipts()}
               companies={getAuthorizedCompanies()}
               selectedCompanyId={selectedCompanyId}
@@ -5730,25 +5948,48 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div className="space-y-1 sm:col-span-2">
-                    <label className="text-[10px] font-black text-slate-400">ربط العقد التابع (رقم العقد أو الاسم المعين لتوليد الحسابات)</label>
-                    <input
-                      placeholder="ابحث واختر لربط الحساب ومتبقياته تلقائياً..."
-                      value={rContractQuery}
-                      onChange={(e) => handleAutoFillReceipt(e.target.value)}
-                      maxLength={180}
-                      list="contractsListDatalist"
-                      className="w-full px-3.5 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-amber-400 focus:outline-none"
-                    />
-                    <datalist id="contractsListDatalist">
-                      {getInstallmentsForReceipt().map((x, idx) => (
-                        <option key={idx} value={`${x.no} | ${x.client} | ${x.identity}`} />
-                      ))}
-                    </datalist>
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-black text-slate-400">ربط العقد التابع (رقم العقد أو الاسم المعين لتوليد الحسابات)</label>
+                      {rSelectedInstallment && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRSelectedInstallment(null);
+                            setRContractQuery("");
+                          }}
+                          className="text-[10px] text-rose-400 hover:text-rose-300 font-bold underline cursor-pointer"
+                        >
+                          ✕ إلغاء ربط العقد
+                        </button>
+                      )}
+                    </div>
+                    <div className="relative">
+                      <input
+                        placeholder="ابحث برقم العقد (AW-CON-...) أو اسم العميل أو الهوية..."
+                        value={rContractQuery}
+                        onChange={(e) => handleAutoFillReceipt(e.target.value)}
+                        maxLength={180}
+                        list="contractsListDatalist"
+                        className="w-full px-3.5 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-amber-400 focus:outline-none focus:border-amber-500"
+                      />
+                      <datalist id="contractsListDatalist">
+                        {getInstallmentsForReceipt().map((x, idx) => (
+                          <option key={idx} value={`${x.no} | ${x.client} | ${x.identity}`} />
+                        ))}
+                      </datalist>
+                    </div>
+                    {rSelectedInstallment && (
+                      <div className="flex items-center gap-2 pt-1 text-[11px] font-black text-emerald-400">
+                        <span>✅ مرتبط بالعقد:</span>
+                        <span className="font-mono text-white bg-slate-950 px-2 py-0.5 rounded border border-slate-800">{rSelectedInstallment.no}</span>
+                        <span className="text-amber-300">{rSelectedInstallment.client}</span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Financial Summary Header Card for Linked Contract */}
                   {rSelectedInstallment && (
-                    <div className="sm:col-span-4 bg-slate-950/80 border border-emerald-500/30 rounded-2xl p-4 grid grid-cols-1 sm:grid-cols-3 gap-3 text-center">
+                    <div className="sm:col-span-4 bg-slate-950/80 border border-emerald-500/30 rounded-2xl p-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
                       <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800">
                         <span className="text-[10px] font-black text-slate-400 block">إجمالي قيمة العقد/المشروع</span>
                         <span className="text-sm font-black text-white font-mono">{Number(rSelectedInstallment.amount || 0).toLocaleString()} ريال</span>
@@ -5758,8 +5999,14 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                         <span className="text-sm font-black text-emerald-400 font-mono">{Number(rSelectedInstallment.paid || 0).toLocaleString()} ريال</span>
                       </div>
                       <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800">
-                        <span className="text-[10px] font-black text-slate-400 block">المبلغ المتبقي للتحصيل</span>
+                        <span className="text-[10px] font-black text-slate-400 block">المتبقي للتحصيل (قبل السند)</span>
                         <span className="text-sm font-black text-amber-400 font-mono">{Number(rSelectedInstallment.remaining || 0).toLocaleString()} ريال</span>
+                      </div>
+                      <div className="bg-slate-900/60 p-3 rounded-xl border border-emerald-500/40">
+                        <span className="text-[10px] font-black text-emerald-400 block">المتبقي المتوقع بعد القبض</span>
+                        <span className="text-sm font-black text-emerald-300 font-mono">
+                          {Math.max(0, Number(rSelectedInstallment.remaining || 0) - (rType === "صادر" ? -Number(rAmount || 0) : Number(rAmount || 0))).toLocaleString()} ريال
+                        </span>
                       </div>
                     </div>
                   )}
@@ -5904,7 +6151,12 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
 
                   <div className="space-y-1">
                     <label className="text-[10px] font-black text-slate-400">ماتبقى من العقد (قبل القبض)</label>
-                    <input readOnly value={rSelectedInstallment ? `${Number(rSelectedInstallment.remaining).toLocaleString()} ريال` : "غير مرتبط"} className="w-full px-3 py-2.5 bg-slate-950/70 border border-slate-800 rounded-xl text-xs font-bold text-slate-400" />
+                    <input readOnly value={rSelectedInstallment ? `${Number(rSelectedInstallment.remaining).toLocaleString()} ريال` : "غير مرتبط"} className="w-full px-3 py-2.5 bg-slate-950/70 border border-slate-800 rounded-xl text-xs font-bold text-slate-400 font-mono" />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-emerald-400">المتبقي المباشر بعد السند</label>
+                    <input readOnly value={rSelectedInstallment ? `${Math.max(0, Number(rSelectedInstallment.remaining || 0) - (rType === "صادر" ? -Number(rAmount || 0) : Number(rAmount || 0))).toLocaleString()} ريال` : "غير مرتبط"} className="w-full px-3 py-2.5 bg-slate-950/70 border border-emerald-500/30 rounded-xl text-xs font-bold text-emerald-400 font-mono" />
                   </div>
 
                   <div className="space-y-1">

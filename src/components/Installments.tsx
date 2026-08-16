@@ -6,14 +6,15 @@
 import React, { useState, useEffect } from "react";
 import {
   Plus, Search, User, Phone, MapPin, ClipboardList, Shield,
-  Printer, Trash2, Edit2, FileText, CheckCircle, AlertTriangle, Eye, X, Globe
+  Printer, Trash2, Edit2, FileText, CheckCircle, AlertTriangle, Eye, X, Globe,
+  RotateCw, RefreshCw, CalendarCheck
 } from "lucide-react";
 import { Installment, Project, User as AuthUser, Company, Worker } from "../types";
 import {
   getContractTiming, awExtractRegion, awCleanNotes, generateNextNo, awExtractTreasury,
   awExtractCapital, awExtractCapitalSource, awExtractCapitalCompany, awExtractCapitalCollection,
   awExtractCapitalSplit, awExtractCycle, awExtractClassification, awExtractContractDirection,
-  awExtractWorkerId, awExtractProjectId
+  awExtractWorkerId, awExtractProjectId, awExtractDownPayment, awExtractRenewedFrom
 } from "../db";
 import { safeStorage } from "../safeStorage";
 
@@ -29,6 +30,7 @@ interface InstallmentsProps {
   onDeleteInstallment: (id: string) => void;
   onPrintContract: (id: string) => void;
   onMigrateInstallment?: (installmentId: string, targetCompanyId: string, reason?: string) => Promise<boolean>;
+  onCreateReceiptForContract?: (installment: Installment) => void;
   receipts: any[];
   companies?: Company[];
   selectedCompanyId?: string;
@@ -79,6 +81,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
   onDeleteInstallment,
   onPrintContract,
   onMigrateInstallment,
+  onCreateReceiptForContract,
   receipts,
   companies,
   selectedCompanyId,
@@ -231,6 +234,189 @@ export const Installments: React.FC<InstallmentsProps> = ({
   const [fRegion, setFRegion] = useState("");
   const [fSort, setFSort] = useState("date_desc");
 
+  // Contract Renewal State
+  const [renewTarget, setRenewTarget] = useState<Installment | null>(null);
+  const [renewMode, setRenewMode] = useState<"new_contract" | "extend_contract">("new_contract");
+  const [renewNewContractNo, setRenewNewContractNo] = useState<string>("");
+  const [renewStartDate, setRenewStartDate] = useState<string>("");
+  const [renewPeriods, setRenewPeriods] = useState<string>("30");
+  const [renewCycle, setRenewCycle] = useState<string>("يومي");
+  const [renewAmount, setRenewAmount] = useState<string>("");
+  const [renewDownPayment, setRenewDownPayment] = useState<string>("0");
+  const [renewIncludeRemaining, setRenewIncludeRemaining] = useState<boolean>(false);
+  const [renewDiscount, setRenewDiscount] = useState<string>("0");
+  const [renewNotes, setRenewNotes] = useState<string>("");
+  const [renewCloseOld, setRenewCloseOld] = useState<boolean>(true);
+  const [isRenewing, setIsRenewing] = useState<boolean>(false);
+
+  const openRenewModal = (c: Installment) => {
+    setRenewTarget(c);
+    setRenewMode("new_contract");
+    const nextNo = generateNextNo("AW-CON", installments, "no");
+    setRenewNewContractNo(nextNo);
+
+    // Compute start date: if contract has end_date, start from next day or today
+    let defaultStart = new Date().toISOString().slice(0, 10);
+    if (c.end_date) {
+      const endDateObj = new Date(c.end_date);
+      if (!isNaN(endDateObj.getTime())) {
+        endDateObj.setDate(endDateObj.getDate() + 1);
+        defaultStart = endDateObj.toISOString().slice(0, 10);
+      }
+    }
+    setRenewStartDate(defaultStart);
+
+    const oldPeriods = c.periods ? String(c.periods) : "30";
+    setRenewPeriods(oldPeriods);
+
+    const oldCycle = awExtractCycle(c.notes || "") || "يومي";
+    setRenewCycle(oldCycle);
+
+    setRenewAmount(c.amount ? String(c.amount) : "");
+    setRenewDownPayment("0");
+    setRenewIncludeRemaining(false);
+    setRenewDiscount("0");
+    setRenewNotes(`تجديد وتمديد للعقد السابق (${c.no})`);
+    setRenewCloseOld(true);
+  };
+
+  const handleExecuteRenewal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!renewTarget) return;
+
+    setIsRenewing(true);
+    try {
+      const periodsNum = Number(renewPeriods || 0);
+      const baseAmount = Number(renewAmount || 0);
+      const remainingToAdd = renewIncludeRemaining ? Number(renewTarget.remaining || 0) : 0;
+      const totalAmount = baseAmount + remainingToAdd;
+      const downPaymentNum = Number(renewDownPayment || 0);
+      const discountNum = Number(renewDiscount || 0);
+      const finalRemaining = Math.max(0, totalAmount - downPaymentNum - discountNum);
+      const installmentVal = periodsNum > 0 ? Math.ceil(finalRemaining / periodsNum) : 0;
+
+      // Calculate end date
+      let calcEndDate = "";
+      if (periodsNum > 0 && renewStartDate) {
+        const d = new Date(renewStartDate);
+        if (renewCycle === "اسبوعي") {
+          d.setDate(d.getDate() + (periodsNum * 7) - 1);
+        } else if (renewCycle === "نصف شهر") {
+          d.setDate(d.getDate() + (periodsNum * 15) - 1);
+        } else if (renewCycle === "شهري") {
+          d.setMonth(d.getMonth() + periodsNum);
+          d.setDate(d.getDate() - 1);
+        } else {
+          d.setDate(d.getDate() + periodsNum - 1);
+        }
+        calcEndDate = d.toISOString().slice(0, 10);
+      }
+
+      if (renewMode === "new_contract") {
+        let finalNo = (renewNewContractNo || generateNextNo("AW-CON", installments, "no")).trim().toUpperCase();
+        const isDup = installments.some(
+          (i) => String(i.no || "").trim().toUpperCase() === finalNo
+        );
+        if (isDup) {
+          finalNo = generateNextNo("AW-CON", installments, "no");
+        }
+
+        const newRow = {
+          client: renewTarget.client,
+          identity: renewTarget.identity || "",
+          nationality: renewTarget.nationality || "",
+          phone: renewTarget.phone || "",
+          no: finalNo,
+          amount: totalAmount,
+          paid: downPaymentNum,
+          remaining: finalRemaining,
+          type: renewTarget.type || "تقسيط",
+          start_date: renewStartDate,
+          end_date: calcEndDate,
+          periods: periodsNum,
+          installment: installmentVal,
+          discount: discountNum,
+          after_discount: finalRemaining,
+          project: renewTarget.project || "",
+          workplace: renewTarget.workplace || "",
+          guarantor: renewTarget.guarantor || "",
+          status: "منتظم",
+          notes: renewNotes.trim(),
+          region_input: awExtractRegion(renewTarget.notes || "") || (finalPerms?.region || ""),
+          treasury_input: awExtractTreasury(renewTarget.notes || "") || "خزنة التحصيل",
+          cycle_input: renewCycle,
+          classification_input: awExtractClassification(renewTarget.notes || "") || "مدين",
+          contract_direction_input: (renewTarget.contract_direction as any) || awExtractContractDirection(renewTarget.notes || "") || "لنا",
+          worker_id_input: renewTarget.worker_id || awExtractWorkerId(renewTarget.notes || "") || "",
+          project_id_input: renewTarget.project_id || awExtractProjectId(renewTarget.notes || "") || "",
+          renewed_from_input: renewTarget.no,
+          capital_input: 0,
+          capital_source_input: "",
+          capital_company_input: 0,
+          capital_collection_input: 0,
+          capital_splits_input: {},
+          company_id: renewTarget.company_id || undefined,
+        };
+
+        const success = await onSaveInstallment(newRow, null);
+        if (success) {
+          if (renewCloseOld) {
+            const oldRowUpdated = {
+              ...renewTarget,
+              status: "مكتمل",
+              region_input: awExtractRegion(renewTarget.notes || ""),
+              treasury_input: awExtractTreasury(renewTarget.notes || ""),
+              cycle_input: awExtractCycle(renewTarget.notes || ""),
+              classification_input: awExtractClassification(renewTarget.notes || ""),
+              contract_direction_input: renewTarget.contract_direction || awExtractContractDirection(renewTarget.notes || ""),
+              worker_id_input: renewTarget.worker_id || awExtractWorkerId(renewTarget.notes || ""),
+              project_id_input: renewTarget.project_id || awExtractProjectId(renewTarget.notes || ""),
+            };
+            await onSaveInstallment(oldRowUpdated, renewTarget.id);
+          }
+          setRenewTarget(null);
+          if (selectedFileContract) {
+            setSelectedFileContract(null);
+          }
+        }
+      } else {
+        // Extend existing contract
+        const updatedPeriods = Number(renewTarget.periods || 0) + periodsNum;
+        const updatedAmount = Number(renewTarget.amount || 0) + baseAmount;
+        const updatedRemaining = Math.max(0, updatedAmount - Number(renewTarget.paid || 0) - discountNum);
+        const updatedInstallmentVal = updatedPeriods > 0 ? Math.ceil(updatedRemaining / updatedPeriods) : 0;
+
+        const updatedRow = {
+          ...renewTarget,
+          amount: updatedAmount,
+          remaining: updatedRemaining,
+          periods: updatedPeriods,
+          installment: updatedInstallmentVal,
+          end_date: calcEndDate || renewTarget.end_date,
+          status: "منتظم",
+          notes: `${awCleanNotes(renewTarget.notes || "")} | تم تمديد وتجديد العقد بتاريخ ${renewStartDate}`,
+          region_input: awExtractRegion(renewTarget.notes || ""),
+          treasury_input: awExtractTreasury(renewTarget.notes || ""),
+          cycle_input: renewCycle,
+          classification_input: awExtractClassification(renewTarget.notes || ""),
+          contract_direction_input: renewTarget.contract_direction || awExtractContractDirection(renewTarget.notes || ""),
+          worker_id_input: renewTarget.worker_id || awExtractWorkerId(renewTarget.notes || ""),
+          project_id_input: renewTarget.project_id || awExtractProjectId(renewTarget.notes || ""),
+        };
+
+        const success = await onSaveInstallment(updatedRow, renewTarget.id);
+        if (success) {
+          setRenewTarget(null);
+          if (selectedFileContract) {
+            setSelectedFileContract(null);
+          }
+        }
+      }
+    } finally {
+      setIsRenewing(false);
+    }
+  };
+
   // Modal Detail State
   const [selectedFileContract, setSelectedFileContract] = useState<Installment | null>(null);
 
@@ -249,11 +435,11 @@ export const Installments: React.FC<InstallmentsProps> = ({
   }, [amount, paid, discount, periods, startDate, installmentCycle]);
 
   useEffect(() => {
-    // Fill custom auto sequence code on startup
-    if (!contractNo) {
+    // Automatically guarantee unique sequence number for new contracts
+    if (!editId) {
       setContractNo(generateNextNo("AW-CON", installments, "no"));
     }
-  }, [installments, contractNo]);
+  }, [installments, editId]);
 
   const recalcLogic = () => {
     const amt = Number(amount || 0);
@@ -342,7 +528,8 @@ export const Installments: React.FC<InstallmentsProps> = ({
     setPhone(x.phone || "");
     setContractNo(x.no || "");
     setAmount(x.amount || "");
-    setPaid(x.paid || "");
+    const recordedDownPayment = awExtractDownPayment(x.notes || "");
+    setPaid(recordedDownPayment > 0 ? recordedDownPayment : "");
     setStartDate(x.start_date || "");
     setPeriods(x.periods || "");
     setDiscount(x.discount || "");
@@ -375,12 +562,28 @@ export const Installments: React.FC<InstallmentsProps> = ({
     e.preventDefault();
     if (!client.trim()) return;
 
+    // Guarantee unique contract number
+    let finalContractNo = (contractNo || generateNextNo("AW-CON", installments, "no")).trim().toUpperCase();
+    const isDup = installments.some(
+      (i) => i.id !== editId && String(i.no || "").trim().toUpperCase() === finalContractNo
+    );
+
+    if (isDup) {
+      if (!editId) {
+        finalContractNo = generateNextNo("AW-CON", installments, "no");
+        setContractNo(finalContractNo);
+      } else {
+        alert("⚠️ رقم العقد مسجل مسبقاً لعقد آخر! يرجى استخدام رقم عقد فريد.");
+        return;
+      }
+    }
+
     const row = {
       client: client.trim(),
       identity: identity.trim(),
       nationality,
       phone: phone.trim(),
-      no: contractNo || generateNextNo("AW-CON", installments, "no"),
+      no: finalContractNo,
       amount: Number(amount || 0),
       paid: Number(paid || 0),
       remaining: Math.max(0, Number(amount || 0) - Number(paid || 0)),
@@ -674,12 +877,16 @@ export const Installments: React.FC<InstallmentsProps> = ({
             </div>
 
             <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-400">رقم العقد</label>
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-black text-slate-400">رقم العقد</label>
+                <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">فريد تلقائي</span>
+              </div>
               <input
                 readOnly
                 type="text"
                 value={contractNo}
-                className="w-full px-3.5 py-2.5 bg-slate-950/80 border border-slate-850 rounded-xl text-xs font-bold text-slate-400 focus:outline-none"
+                title="رقم العقد التسلسلي المضمون عدم تكراره"
+                className="w-full px-3.5 py-2.5 bg-slate-950/80 border border-slate-850 rounded-xl text-xs font-mono font-bold text-emerald-400 focus:outline-none select-all"
               />
             </div>
 
@@ -696,10 +903,13 @@ export const Installments: React.FC<InstallmentsProps> = ({
             </div>
 
             <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-400">الدفعة المدفوعة مقدماً</label>
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-black text-slate-400">الدفعة المدفوعة مقدماً عند توقيع العقد</label>
+                <span className="text-[9px] text-slate-500 font-bold">0 إذا لم توجد دفعة أولى</span>
+              </div>
               <input
                 type="number"
-                placeholder="الدفعة والمستلم"
+                placeholder="0 (تترك فارغة إذا كان السداد بسندات)"
                 value={paid}
                 onChange={(e) => setPaid(e.target.value ? Number(e.target.value) : "")}
                 className="w-full px-3.5 py-2.5 bg-slate-950/40 border border-slate-850 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-blue-500 transition-colors"
@@ -1245,6 +1455,14 @@ export const Installments: React.FC<InstallmentsProps> = ({
                       </td>
                       <td className="py-3.5 px-4 font-mono">
                         <span className="block text-slate-200 font-bold">{item.no}</span>
+                        {(() => {
+                          const renewedFrom = awExtractRenewedFrom(item.notes || "");
+                          return renewedFrom ? (
+                            <span className="inline-flex items-center gap-1 text-[9px] font-black text-cyan-400 bg-cyan-950/70 border border-cyan-800/60 px-1.5 py-0.5 rounded mt-0.5 whitespace-nowrap" title={`مجدد من العقد: ${renewedFrom}`}>
+                              🔄 مجدد من: {renewedFrom}
+                            </span>
+                          ) : null;
+                        })()}
                         <div className="flex flex-col gap-0.5 mt-0.5">
                           <span className="block text-[10px] text-amber-500/80 font-sans font-bold">{itemRegion || "القرية الرئيسية"}</span>
                           <span className="block text-[9px] text-blue-400 font-sans font-black">🏢 {awExtractTreasury(item.notes || "") || "خزنة التحصيل"}</span>
@@ -1291,7 +1509,27 @@ export const Installments: React.FC<InstallmentsProps> = ({
                         </span>
                       </td>
                       <td className="py-3.5 px-4 text-center">
-                        <div className="flex items-center justify-center gap-2">
+                        <div className="flex items-center justify-center gap-1.5">
+                          {((finalPerms?.installmentsAdd) || currentUser?.role === "admin") && (
+                            <button
+                              onClick={() => openRenewModal(item)}
+                              className="px-2.5 py-1.5 bg-cyan-500/15 hover:bg-cyan-500 text-cyan-400 hover:text-slate-950 border border-cyan-500/30 rounded-lg text-xs font-black transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                              title="تجديد العقد أو تمديد فترته"
+                            >
+                              <RotateCw className="w-3.5 h-3.5" />
+                              <span>تجديد</span>
+                            </button>
+                          )}
+                          {onCreateReceiptForContract && (
+                            <button
+                              onClick={() => onCreateReceiptForContract(item)}
+                              className="px-2.5 py-1.5 bg-emerald-500/15 hover:bg-emerald-500 text-emerald-400 hover:text-slate-950 border border-emerald-500/30 rounded-lg text-xs font-black transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                              title="تحرير سند قبض لهذا العقد فوراً"
+                            >
+                              <span>💰</span>
+                              <span>سند قبض</span>
+                            </button>
+                          )}
                           <button
                             onClick={() => setSelectedFileContract(item)}
                             className="px-3 py-1.5 bg-slate-950/40 border border-slate-800 text-xs font-bold text-blue-400 hover:text-white rounded-lg hover:bg-blue-600/25 transition-all cursor-pointer whitespace-nowrap"
@@ -1355,6 +1593,20 @@ export const Installments: React.FC<InstallmentsProps> = ({
             {/* Modal Body */}
             <div className="p-6 space-y-6">
               
+              {/* Renewal Origin Banner if applicable */}
+              {awExtractRenewedFrom(selectedFileContract.notes || "") && (
+                <div className="p-4 bg-cyan-950/40 border border-cyan-500/40 rounded-2xl flex items-center justify-between gap-3 text-cyan-300 shadow-sm">
+                  <div className="flex items-center gap-3 text-xs font-black">
+                    <span className="p-2 rounded-xl bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">🔄</span>
+                    <div>
+                      <span className="block text-white text-sm font-bold">عقد مجدد وممدد</span>
+                      <span className="text-slate-400 text-xs">تم إنشاء وتجديد هذا العقد استناداً للعقد السابق رقم: </span>
+                      <span className="font-mono text-cyan-300 font-black underline mr-1">{awExtractRenewedFrom(selectedFileContract.notes || "")}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Profile details grid */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="bg-slate-950/30 p-3.5 rounded-2xl border border-slate-850">
@@ -1695,6 +1947,37 @@ export const Installments: React.FC<InstallmentsProps> = ({
                 </button>
               )}
               
+              {((finalPerms?.installmentsAdd) || currentUser?.role === "admin") && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const c = selectedFileContract;
+                    openRenewModal(c);
+                  }}
+                  className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-black text-xs rounded-xl flex items-center gap-1.5 shadow transition-all cursor-pointer"
+                  title="تجديد هذا العقد أو تمديد فترته"
+                >
+                  <RotateCw className="w-3.5 h-3.5" />
+                  تجديد العقد
+                </button>
+              )}
+
+              {onCreateReceiptForContract && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const c = selectedFileContract;
+                    setSelectedFileContract(null);
+                    onCreateReceiptForContract(c);
+                  }}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl flex items-center gap-1.5 shadow transition-all cursor-pointer"
+                  title="تحرير سند قبض جديد لهذا العقد"
+                >
+                  <span>💰</span>
+                  تحرير سند قبض للعقد
+                </button>
+              )}
+
               {((finalPerms?.installmentsEdit) || currentUser?.role === "admin") && (
                 <button
                   type="button"
@@ -1908,6 +2191,327 @@ export const Installments: React.FC<InstallmentsProps> = ({
                 )}
               </button>
             </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* Dedicated Contract Renewal Modal */}
+      {renewTarget && (
+        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[1000] flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-cyan-500/30 rounded-3xl w-full max-w-3xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            
+            {/* Renewal Modal Header */}
+            <div className="px-6 py-5 bg-gradient-to-r from-slate-900 via-cyan-950/40 to-slate-900 border-b border-slate-800 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400 font-black text-lg">
+                  <RotateCw className="w-5 h-5 animate-spin-slow" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-white flex items-center gap-2">
+                    تجديد وتمديد العقد — {renewTarget.client}
+                  </h3>
+                  <p className="text-xs text-cyan-300/80 font-bold">
+                    إنشاء دورة تجديد جديدة أو تمديد فترة العقد السابق رقم (<span className="font-mono text-white">{renewTarget.no}</span>)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRenewTarget(null)}
+                className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Renewal Modal Body */}
+            <form onSubmit={handleExecuteRenewal} className="flex flex-col flex-1 overflow-hidden">
+              <div className="p-6 overflow-y-auto space-y-6 text-right">
+                
+                {/* Old Contract Snapshot Card */}
+                <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4 space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-850 pb-2">
+                    <span className="text-xs font-black text-slate-300">📋 بيانات العقد السابق المراد تجديده</span>
+                    <span className="text-[10px] px-2.5 py-0.5 rounded-full font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                      الحالة: {renewTarget.status}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                    <div>
+                      <span className="block text-[10px] text-slate-400">رقم العقد:</span>
+                      <span className="font-mono text-white font-black">{renewTarget.no}</span>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] text-slate-400">إجمالي المبلغ:</span>
+                      <span className="font-mono text-amber-400 font-bold">{Number(renewTarget.amount || 0).toLocaleString()} ريال</span>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] text-slate-400">المحصل سابقاً:</span>
+                      <span className="font-mono text-emerald-400 font-bold">{Number(renewTarget.paid || 0).toLocaleString()} ريال</span>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] text-slate-400">المتبقي السابق:</span>
+                      <span className="font-mono text-rose-400 font-black">{Number(renewTarget.remaining || 0).toLocaleString()} ريال</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Renewal Mode Selector */}
+                <div className="space-y-2">
+                  <label className="text-xs font-black text-slate-300">اختر آلية التجديد المطلوبة:</label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setRenewMode("new_contract")}
+                      className={`p-3.5 rounded-2xl border text-right transition-all flex items-start gap-3 cursor-pointer ${
+                        renewMode === "new_contract"
+                          ? "bg-cyan-500/15 border-cyan-500 text-white shadow-lg shadow-cyan-500/10"
+                          : "bg-slate-950/40 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700"
+                      }`}
+                    >
+                      <span className={`p-2 rounded-xl text-sm ${renewMode === "new_contract" ? "bg-cyan-500 text-slate-950" : "bg-slate-800 text-slate-400"}`}>
+                        📄
+                      </span>
+                      <div>
+                        <span className="block font-black text-xs">إنشاء عقد جديد مرتبط (موصى به)</span>
+                        <span className="block text-[10px] text-slate-400 mt-0.5">
+                          توليد عقد مستقل برقم جديد مع ربطه بالعقد السابق وسجلاته المحاسبية
+                        </span>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setRenewMode("extend_contract")}
+                      className={`p-3.5 rounded-2xl border text-right transition-all flex items-start gap-3 cursor-pointer ${
+                        renewMode === "extend_contract"
+                          ? "bg-cyan-500/15 border-cyan-500 text-white shadow-lg shadow-cyan-500/10"
+                          : "bg-slate-950/40 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700"
+                      }`}
+                    >
+                      <span className={`p-2 rounded-xl text-sm ${renewMode === "extend_contract" ? "bg-cyan-500 text-slate-950" : "bg-slate-800 text-slate-400"}`}>
+                        ⏱️
+                      </span>
+                      <div>
+                        <span className="block font-black text-xs">تمديد فترة وسداد نفس العقد</span>
+                        <span className="block text-[10px] text-slate-400 mt-0.5">
+                          تحديث تاريخ الانتهاء وزيادة عدد الأقساط والقيمة لنفس العقد الحالي
+                        </span>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Form Fields for Renewal */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                  {renewMode === "new_contract" && (
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-black text-slate-300">رقم العقد الجديد (تلقائي)</label>
+                      <input
+                        type="text"
+                        value={renewNewContractNo}
+                        onChange={(e) => setRenewNewContractNo(e.target.value)}
+                        required
+                        className="w-full px-3.5 py-2.5 bg-slate-950/60 border border-cyan-500/40 rounded-xl text-xs font-mono font-bold text-cyan-300 focus:outline-none"
+                      />
+                    </div>
+                  )}
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-black text-slate-300">تاريخ بدء التجديد</label>
+                    <input
+                      type="date"
+                      value={renewStartDate}
+                      onChange={(e) => setRenewStartDate(e.target.value)}
+                      required
+                      className="w-full px-3.5 py-2.5 bg-slate-950/60 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-cyan-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-black text-slate-300">دورية السداد</label>
+                    <select
+                      value={renewCycle}
+                      onChange={(e) => setRenewCycle(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-slate-950/60 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-cyan-500"
+                    >
+                      <option value="يومي">يومي</option>
+                      <option value="اسبوعي">أسبوعي</option>
+                      <option value="نصف شهر">نصف شهري (كل 15 يوم)</option>
+                      <option value="شهري">شهري</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-black text-slate-300">
+                      {renewMode === "new_contract" ? "عدد فترات/أقساط العقد الجديد" : "إضافة فترات/أقساط إضافية"}
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={renewPeriods}
+                      onChange={(e) => setRenewPeriods(e.target.value)}
+                      required
+                      className="w-full px-3.5 py-2.5 bg-slate-950/60 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-cyan-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-black text-slate-300">
+                      {renewMode === "new_contract" ? "قيمة العقد الجديد الأساسية (ريال)" : "قيمة التمديد الإضافية (ريال)"}
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={renewAmount}
+                      onChange={(e) => setRenewAmount(e.target.value)}
+                      required
+                      className="w-full px-3.5 py-2.5 bg-slate-950/60 border border-slate-800 rounded-xl text-xs font-black text-amber-400 focus:outline-none focus:border-cyan-500"
+                    />
+                  </div>
+
+                  {renewMode === "new_contract" && (
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-black text-slate-300">الدفعة المقدمة المدفوعة فوراً (ريال)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={renewDownPayment}
+                        onChange={(e) => setRenewDownPayment(e.target.value)}
+                        className="w-full px-3.5 py-2.5 bg-slate-950/60 border border-slate-800 rounded-xl text-xs font-black text-emerald-400 focus:outline-none focus:border-cyan-500"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Additional Options & Checkboxes */}
+                <div className="space-y-2.5 pt-2">
+                  {renewMode === "new_contract" && Number(renewTarget.remaining || 0) > 0 && (
+                    <label className="flex items-center gap-3 p-3 bg-amber-950/30 border border-amber-500/30 rounded-xl cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={renewIncludeRemaining}
+                        onChange={(e) => setRenewIncludeRemaining(e.target.checked)}
+                        className="w-4 h-4 rounded text-amber-500 focus:ring-0 focus:outline-none cursor-pointer"
+                      />
+                      <span className="text-xs font-bold text-amber-300">
+                        ترحيل وإضافة المتبقي من العقد السابق (<strong className="font-mono text-white">{Number(renewTarget.remaining).toLocaleString()} ريال</strong>) إلى إجمالي مبلغ العقد الجديد
+                      </span>
+                    </label>
+                  )}
+
+                  {renewMode === "new_contract" && (
+                    <label className="flex items-center gap-3 p-3 bg-slate-950/40 border border-slate-800 rounded-xl cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={renewCloseOld}
+                        onChange={(e) => setRenewCloseOld(e.target.checked)}
+                        className="w-4 h-4 rounded text-cyan-500 focus:ring-0 focus:outline-none cursor-pointer"
+                      />
+                      <span className="text-xs font-bold text-slate-300">
+                        إغلاق العقد القديم وتغيير حالته تلقائياً إلى (<span className="text-emerald-400">مكتمل</span>) عند إنشاء هذا التجديد
+                      </span>
+                    </label>
+                  )}
+                </div>
+
+                {/* Notes Input */}
+                <div className="space-y-1">
+                  <label className="text-[11px] font-black text-slate-300">ملاحظات التجديد</label>
+                  <input
+                    type="text"
+                    value={renewNotes}
+                    onChange={(e) => setRenewNotes(e.target.value)}
+                    placeholder="ملاحظات توثيق التجديد..."
+                    className="w-full px-3.5 py-2.5 bg-slate-950/60 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+
+                {/* Computed Renewal Financial Summary */}
+                {(() => {
+                  const periodsNum = Number(renewPeriods || 0);
+                  const baseAmount = Number(renewAmount || 0);
+                  const remainingToAdd = renewIncludeRemaining ? Number(renewTarget.remaining || 0) : 0;
+                  const totalAmount = baseAmount + remainingToAdd;
+                  const downPaymentNum = Number(renewDownPayment || 0);
+                  const discountNum = Number(renewDiscount || 0);
+                  const finalRemaining = Math.max(0, totalAmount - downPaymentNum - discountNum);
+                  const installmentVal = periodsNum > 0 ? Math.ceil(finalRemaining / periodsNum) : 0;
+
+                  let calcEndDate = "";
+                  if (periodsNum > 0 && renewStartDate) {
+                    const d = new Date(renewStartDate);
+                    if (renewCycle === "اسبوعي") {
+                      d.setDate(d.getDate() + (periodsNum * 7) - 1);
+                    } else if (renewCycle === "نصف شهر") {
+                      d.setDate(d.getDate() + (periodsNum * 15) - 1);
+                    } else if (renewCycle === "شهري") {
+                      d.setMonth(d.getMonth() + periodsNum);
+                      d.setDate(d.getDate() - 1);
+                    } else {
+                      d.setDate(d.getDate() + periodsNum - 1);
+                    }
+                    calcEndDate = d.toISOString().slice(0, 10);
+                  }
+
+                  return (
+                    <div className="p-4 bg-gradient-to-br from-cyan-950/30 to-slate-950 border border-cyan-500/30 rounded-2xl space-y-2">
+                      <span className="block text-[10px] font-black text-cyan-400 uppercase">
+                        📊 المعاينة المالية للتجديد:
+                      </span>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                        <div className="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
+                          <span className="block text-[10px] text-slate-400">إجمالي المبلغ:</span>
+                          <span className="font-mono text-amber-400 font-black">{totalAmount.toLocaleString()} ريال</span>
+                        </div>
+                        <div className="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
+                          <span className="block text-[10px] text-slate-400">المتبقي للتحصيل:</span>
+                          <span className="font-mono text-rose-400 font-black">{finalRemaining.toLocaleString()} ريال</span>
+                        </div>
+                        <div className="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
+                          <span className="block text-[10px] text-slate-400">قيمة القسط ({renewCycle}):</span>
+                          <span className="font-mono text-emerald-400 font-black">{installmentVal.toLocaleString()} ريال</span>
+                        </div>
+                        <div className="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
+                          <span className="block text-[10px] text-slate-400">تاريخ الانتهاء المتوقع:</span>
+                          <span className="font-mono text-cyan-300 font-bold">{calcEndDate || "غير محدد"}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+              </div>
+
+              {/* Renewal Modal Footer Actions */}
+              <div className="p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-end gap-3 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setRenewTarget(null)}
+                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-750 text-slate-300 font-black text-xs rounded-xl transition-all cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={isRenewing}
+                  className="px-6 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-black text-xs rounded-xl shadow-lg shadow-cyan-600/25 flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {isRenewing ? (
+                    <>
+                      <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                      جاري تنفيذ التجديد...
+                    </>
+                  ) : (
+                    <>
+                      <RotateCw className="w-4 h-4" />
+                      تأكيد وحفظ تجديد العقد
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
 
           </div>
         </div>
