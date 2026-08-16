@@ -3714,7 +3714,11 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       setReceiptCompanyId("");
       setRType("وارد");
       await loadEverything();
-      showToast("تم حفظ السند وتحديث العقد التابع بنجاح!");
+      if (linked && afterAmt <= 0 && rType !== "صادر") {
+        showToast(`🎉 تم سداد العقد (${linked.no}) بالكامل بنجاح! تم تحويل حالة العقد تلقائياً إلى (منتهي ومكتمل).`);
+      } else {
+        showToast("تم حفظ السند وتحديث العقد التابع بنجاح!");
+      }
     } catch (err: any) {
       console.error(err);
       showToast("فشل في مزامنة الرصيد المزدوج للعقود: " + (err?.message || err), "error");
@@ -5243,6 +5247,9 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       if (!rAmount) {
         setRAmount(linked.installment || linked.remaining || "");
       }
+      if (Number(linked.remaining || 0) <= 0 || linked.status === "مكتمل") {
+        showToast(`ℹ️ تنبيه: العقد (${linked.no}) منتهي ومسدد بالكامل مسبقاً (المتبقي: 0 ريال)`, "info");
+      }
     } else {
       setRSelectedInstallment(null);
     }
@@ -6084,40 +6091,73 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                         className="w-full px-3.5 py-2.5 bg-slate-950/40 border border-slate-800 rounded-xl text-xs font-bold text-amber-400 focus:outline-none focus:border-amber-500"
                       />
                       <datalist id="contractsListDatalist">
-                        {getInstallmentsForReceipt().map((x, idx) => (
-                          <option key={idx} value={`${x.no} | ${x.client} | ${x.identity}`} />
-                        ))}
+                        {getInstallmentsForReceipt().map((x, idx) => {
+                          const isDone = Number(x.remaining || 0) <= 0 || x.status === "مكتمل";
+                          return (
+                            <option
+                              key={idx}
+                              value={`${x.no} | ${x.client} | ${x.identity}`}
+                              label={`${x.no} - ${x.client} ${isDone ? '✅ (منتهي ومسدد بالكامل)' : `(المتبقي: ${Number(x.remaining || 0).toLocaleString()} ريال)`}`}
+                            />
+                          );
+                        })}
                       </datalist>
                     </div>
                     {rSelectedInstallment && (
-                      <div className="flex items-center gap-2 pt-1 text-[11px] font-black text-emerald-400">
+                      <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px] font-black text-emerald-400">
                         <span>✅ مرتبط بالعقد:</span>
                         <span className="font-mono text-white bg-slate-950 px-2 py-0.5 rounded border border-slate-800">{rSelectedInstallment.no}</span>
                         <span className="text-amber-300">{rSelectedInstallment.client}</span>
+                        {(Number(rSelectedInstallment.remaining || 0) <= 0 || rSelectedInstallment.status === "مكتمل") && (
+                          <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-md text-[10px] font-black">
+                            🎉 منتهي ومسدد بالكامل
+                          </span>
+                        )}
                       </div>
                     )}
                   </div>
 
                   {/* Financial Summary Header Card for Linked Contract */}
                   {rSelectedInstallment && (
-                    <div className="sm:col-span-4 bg-slate-950/80 border border-emerald-500/30 rounded-2xl p-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
-                      <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800">
-                        <span className="text-[10px] font-black text-slate-400 block">إجمالي قيمة العقد/المشروع</span>
-                        <span className="text-sm font-black text-white font-mono">{Number(rSelectedInstallment.amount || 0).toLocaleString()} ريال</span>
-                      </div>
-                      <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800">
-                        <span className="text-[10px] font-black text-slate-400 block">إجمالي المحصل سابقاً</span>
-                        <span className="text-sm font-black text-emerald-400 font-mono">{Number(rSelectedInstallment.paid || 0).toLocaleString()} ريال</span>
-                      </div>
-                      <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800">
-                        <span className="text-[10px] font-black text-slate-400 block">المتبقي للتحصيل (قبل السند)</span>
-                        <span className="text-sm font-black text-amber-400 font-mono">{Number(rSelectedInstallment.remaining || 0).toLocaleString()} ريال</span>
-                      </div>
-                      <div className="bg-slate-900/60 p-3 rounded-xl border border-emerald-500/40">
-                        <span className="text-[10px] font-black text-emerald-400 block">المتبقي المتوقع بعد القبض</span>
-                        <span className="text-sm font-black text-emerald-300 font-mono">
-                          {Math.max(0, Number(rSelectedInstallment.remaining || 0) - (rType === "صادر" ? -Number(rAmount || 0) : Number(rAmount || 0))).toLocaleString()} ريال
-                        </span>
+                    <div className="sm:col-span-4 space-y-3">
+                      {(Number(rSelectedInstallment.remaining || 0) <= 0 || rSelectedInstallment.status === "مكتمل") ? (
+                        <div className="bg-emerald-950/70 border border-emerald-500/50 rounded-2xl p-3.5 flex items-center gap-3 text-emerald-200 shadow-md">
+                          <span className="text-xl">🎉</span>
+                          <div className="text-xs font-black">
+                            <span className="block text-emerald-300 font-bold">تنبيه: هذا العقد منتهي وتم سداده بالكامل بنسبة 100% (المتبقي: 0 ريال).</span>
+                            <span className="text-[11px] text-slate-300 font-normal">تم استيفاء كامل مستحقات العقد المالية، ولا توجد مبالغ متبقية للتحصيل على هذا العقد.</span>
+                          </div>
+                        </div>
+                      ) : (
+                        Number(rAmount || 0) > 0 && Math.max(0, Number(rSelectedInstallment.remaining || 0) - (rType === "صادر" ? -Number(rAmount || 0) : Number(rAmount || 0))) === 0 && (
+                          <div className="bg-emerald-900/40 border border-emerald-500/40 rounded-2xl p-3 flex items-center gap-2.5 text-emerald-300">
+                            <span className="text-lg">✨</span>
+                            <span className="text-xs font-black">
+                              سداد كامل وإنهاء العقد: هذا السند سيسدد كامل المتبقي (0 ريال) ويحوّل حالة العقد تلقائياً إلى (منتهي ومكتمل).
+                            </span>
+                          </div>
+                        )
+                      )}
+
+                      <div className="bg-slate-950/80 border border-emerald-500/30 rounded-2xl p-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+                        <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800">
+                          <span className="text-[10px] font-black text-slate-400 block">إجمالي قيمة العقد/المشروع</span>
+                          <span className="text-sm font-black text-white font-mono">{Number(rSelectedInstallment.amount || 0).toLocaleString()} ريال</span>
+                        </div>
+                        <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800">
+                          <span className="text-[10px] font-black text-slate-400 block">إجمالي المحصل سابقاً</span>
+                          <span className="text-sm font-black text-emerald-400 font-mono">{Number(rSelectedInstallment.paid || 0).toLocaleString()} ريال</span>
+                        </div>
+                        <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800">
+                          <span className="text-[10px] font-black text-slate-400 block">المتبقي للتحصيل (قبل السند)</span>
+                          <span className="text-sm font-black text-amber-400 font-mono">{Number(rSelectedInstallment.remaining || 0).toLocaleString()} ريال</span>
+                        </div>
+                        <div className="bg-slate-900/60 p-3 rounded-xl border border-emerald-500/40">
+                          <span className="text-[10px] font-black text-emerald-400 block">المتبقي المتوقع بعد القبض</span>
+                          <span className="text-sm font-black text-emerald-300 font-mono">
+                            {Math.max(0, Number(rSelectedInstallment.remaining || 0) - (rType === "صادر" ? -Number(rAmount || 0) : Number(rAmount || 0))).toLocaleString()} ريال
+                          </span>
+                        </div>
                       </div>
                     </div>
                   )}

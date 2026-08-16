@@ -7,7 +7,7 @@ import React, { useState, useEffect } from "react";
 import {
   Plus, Search, User, Phone, MapPin, ClipboardList, Shield,
   Printer, Trash2, Edit2, FileText, CheckCircle, AlertTriangle, Eye, X, Globe,
-  RotateCw, RefreshCw, CalendarCheck
+  RotateCw, RefreshCw, CalendarCheck, Activity, CheckCircle2, Filter, RotateCcw
 } from "lucide-react";
 import { Installment, Project, User as AuthUser, Company, Worker } from "../types";
 import {
@@ -214,6 +214,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
 
   // Filters State
   const [qSearch, setQSearch] = useState("");
+  const [fContractLifecycle, setFContractLifecycle] = useState<"all" | "active" | "completed">("all");
   const [fType, setFType] = useState("");
   const [fClassification, setFClassification] = useState("");
   const [fStatus, setFStatus] = useState("");
@@ -649,11 +650,20 @@ export const Installments: React.FC<InstallmentsProps> = ({
     return true;
   });
 
+  const totalContractsCount = filteredInstallments.length;
+  const completedContractsCount = filteredInstallments.filter((x) => Number(x.remaining || 0) <= 0 || x.status === "مكتمل").length;
+  const activeContractsCount = totalContractsCount - completedContractsCount;
+
   const getVisibleList = () => {
     const list = filteredInstallments.filter((x) => {
       const t = getContractTiming(x);
-      const computedStatus = t.overdueDays > 0 ? "متأخر" : x.status;
+      const isFullyPaid = Number(x.remaining || 0) <= 0 || x.status === "مكتمل";
+      const computedStatus = isFullyPaid ? "مكتمل" : (t.overdueDays > 0 ? "متأخر" : x.status);
       const r = awExtractRegion(x.notes || "");
+
+      // Contract Lifecycle Filter (نشط / مكتمل)
+      if (fContractLifecycle === "active" && isFullyPaid) return false;
+      if (fContractLifecycle === "completed" && !isFullyPaid) return false;
 
       const txt = `${x.client} ${x.identity} ${x.phone} ${x.no} ${x.project} ${x.workplace} ${x.nationality} ${r}`.toLowerCase();
       const itemType = x.type === "daily" || !x.type ? "تقسيط" : x.type;
@@ -1316,15 +1326,124 @@ export const Installments: React.FC<InstallmentsProps> = ({
 
       {/* Filter and Tables Section */}
       <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
-        {/* Quick Filter Controls */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-8 gap-3 p-4 bg-slate-950/30 rounded-2xl border border-slate-850/80">
+        {/* Contract Status Quick Filter Tabs Header */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-black text-slate-400 flex items-center gap-1.5 ml-1">
+              <Filter className="w-3.5 h-3.5 text-amber-400" />
+              <span>حالة العقود:</span>
+            </span>
+
+            {/* All Contracts Tab */}
+            <button
+              type="button"
+              onClick={() => setFContractLifecycle("all")}
+              className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+                fContractLifecycle === "all"
+                  ? "bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20 ring-1 ring-amber-400"
+                  : "bg-slate-950/60 hover:bg-slate-800 text-slate-300 border border-slate-800"
+              }`}
+            >
+              <span>جميع العقود</span>
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono ${
+                fContractLifecycle === "all" ? "bg-slate-950/25 text-slate-950 font-black" : "bg-slate-800 text-slate-400"
+              }`}>
+                {totalContractsCount}
+              </span>
+            </button>
+
+            {/* Active / Ongoing Contracts Tab */}
+            <button
+              type="button"
+              onClick={() => setFContractLifecycle("active")}
+              className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+                fContractLifecycle === "active"
+                  ? "bg-blue-600 text-white shadow-md shadow-blue-500/25 ring-1 ring-blue-400"
+                  : "bg-slate-950/60 hover:bg-slate-800 text-slate-300 border border-slate-800"
+              }`}
+            >
+              <Activity className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+              <span>عقود نشطة وجارية</span>
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono ${
+                fContractLifecycle === "active" ? "bg-white/20 text-white font-black" : "bg-blue-500/15 text-blue-400"
+              }`}>
+                {activeContractsCount}
+              </span>
+            </button>
+
+            {/* Completed / Finished Contracts Tab */}
+            <button
+              type="button"
+              onClick={() => setFContractLifecycle("completed")}
+              className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+                fContractLifecycle === "completed"
+                  ? "bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/25 ring-1 ring-emerald-300"
+                  : "bg-slate-950/60 hover:bg-slate-800 text-slate-300 border border-slate-800"
+              }`}
+            >
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span>عقود منتهية ومكتملة</span>
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono ${
+                fContractLifecycle === "completed" ? "bg-slate-950/25 text-slate-950 font-black" : "bg-emerald-500/15 text-emerald-400"
+              }`}>
+                {completedContractsCount}
+              </span>
+            </button>
+          </div>
+
+          {/* Result counter and Reset Filters */}
+          <div className="flex items-center gap-2.5">
+            {(qSearch || fStatus || fType || fClassification || fNationality || fProject || fRegion || fContractLifecycle !== "all") && (
+              <button
+                type="button"
+                onClick={() => {
+                  setQSearch("");
+                  setFContractLifecycle("all");
+                  setFStatus("");
+                  setFType("");
+                  setFClassification("");
+                  setFNationality("");
+                  setFProject("");
+                  setFRegion("");
+                  setFSort("date_desc");
+                }}
+                className="px-3 py-1.5 rounded-xl text-xs font-bold text-rose-400 hover:text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 transition-all flex items-center gap-1.5 cursor-pointer"
+                title="إلغاء جميع الفلاتر والبحث"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>مسح الفلاتر</span>
+              </button>
+            )}
+            <div className="text-xs font-bold text-slate-400 font-sans">
+              المعروض: <span className="font-mono text-amber-400 font-black">{listToRender.length}</span> من <span className="font-mono text-slate-300">{totalContractsCount}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Quick Filter Controls Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-9 gap-2.5 p-4 bg-slate-950/30 rounded-2xl border border-slate-850/80">
           <input
             type="text"
-            placeholder="البحث باسم العميل أو العقد أو الجوال..."
+            placeholder="البحث باسم العميل أو العقد..."
             value={qSearch}
             onChange={(e) => setQSearch(e.target.value)}
             className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-blue-500"
           />
+          <select
+            value={fContractLifecycle}
+            onChange={(e) => setFContractLifecycle(e.target.value as any)}
+            className={`w-full px-3 py-2 border rounded-xl text-xs font-bold focus:outline-none transition-colors ${
+              fContractLifecycle === "active"
+                ? "bg-blue-950/60 border-blue-500/50 text-blue-300"
+                : fContractLifecycle === "completed"
+                ? "bg-emerald-950/60 border-emerald-500/50 text-emerald-300"
+                : "bg-slate-900 border-slate-800 text-white"
+            }`}
+          >
+            <option value="all">كل الحالات (نشط + مكتمل)</option>
+            <option value="active">⚡ العقود النشطة والجارية فقط</option>
+            <option value="completed">✅ العقود المنتهية والمكتملة فقط</option>
+          </select>
           <select
             value={fStatus}
             onChange={(e) => setFStatus(e.target.value)}
@@ -1425,18 +1544,26 @@ export const Installments: React.FC<InstallmentsProps> = ({
               {listToRender.length > 0 ? (
                 listToRender.map((item, idx) => {
                   const t = getContractTiming(item);
-                  const computedStatus = t.overdueDays > 0 ? "متأخر" : item.status;
+                  const isFullyPaid = Number(item.remaining || 0) <= 0 || item.status === "مكتمل";
+                  const computedStatus = isFullyPaid ? "مكتمل" : (t.overdueDays > 0 ? "متأخر" : item.status);
                   const itemRegion = awExtractRegion(item.notes || "");
 
                   return (
                     <tr
                       key={idx}
                       className={`hover:bg-slate-800/10 transition-colors ${
-                        computedStatus === "متأخر" ? "bg-rose-950/5" : ""
+                        isFullyPaid ? "bg-emerald-950/10" : computedStatus === "متأخر" ? "bg-rose-950/5" : ""
                       }`}
                     >
                       <td className="py-3.5 px-4">
-                        <span className="block font-black text-white">{item.client}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="block font-black text-white">{item.client}</span>
+                          {isFullyPaid && (
+                            <span className="inline-flex items-center gap-1 text-[8px] font-black text-emerald-300 bg-emerald-950/80 border border-emerald-700/60 px-1.5 py-0.5 rounded shadow-sm whitespace-nowrap">
+                              <span>✅</span> منتهي
+                            </span>
+                          )}
+                        </div>
                         <div className="flex flex-wrap items-center gap-1.5 mt-1">
                           <span className="text-[10px] text-slate-400 font-bold">{item.nationality || "غير محدد"}</span>
                           <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 text-blue-400 font-bold font-sans">
@@ -1502,31 +1629,45 @@ export const Installments: React.FC<InstallmentsProps> = ({
                           : "text-emerald-400"
                       }`}>{Number(item.remaining || 0).toLocaleString()}</td>
                       <td className="py-3.5 px-4">
-                        <span
-                          className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${
-                            computedStatus === "منتظم" || computedStatus === "مكتمل"
-                              ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                              : computedStatus === "متأخر"
-                              ? "bg-rose-500 text-white"
-                              : "bg-amber-500/10 text-amber-500 border border-amber-500/20"
-                          }`}
-                        >
-                          {computedStatus}
-                        </span>
+                        {isFullyPaid ? (
+                          <span
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm whitespace-nowrap"
+                            title="تم سداد هذا العقد بالكامل وهو الآن عقد منتهي ومكتمل"
+                          >
+                            <CheckCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                            <span>منتهي ومسدد</span>
+                          </span>
+                        ) : (
+                          <span
+                            className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${
+                              computedStatus === "منتظم"
+                                ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                                : computedStatus === "متأخر"
+                                ? "bg-rose-500 text-white"
+                                : "bg-amber-500/10 text-amber-500 border border-amber-500/20"
+                            }`}
+                          >
+                            {computedStatus}
+                          </span>
+                        )}
                       </td>
                       <td className="py-3.5 px-4 text-center">
                         <div className="flex items-center justify-center gap-1.5">
                           {((finalPerms?.installmentsAdd) || currentUser?.role === "admin") && (
                             <button
                               onClick={() => openRenewModal(item)}
-                              className="px-2.5 py-1.5 bg-cyan-500/15 hover:bg-cyan-500 text-cyan-400 hover:text-slate-950 border border-cyan-500/30 rounded-lg text-xs font-black transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap"
-                              title="تجديد العقد أو تمديد فترته"
+                              className={`px-2.5 py-1.5 rounded-lg text-xs font-black transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap ${
+                                isFullyPaid
+                                  ? "bg-cyan-500 hover:bg-cyan-400 text-slate-950 shadow-md shadow-cyan-500/20 ring-1 ring-cyan-300"
+                                  : "bg-cyan-500/15 hover:bg-cyan-500 text-cyan-400 hover:text-slate-950 border border-cyan-500/30"
+                              }`}
+                              title={isFullyPaid ? "تجديد العقد المنتهي لعميلك" : "تجديد العقد أو تمديد فترته"}
                             >
                               <RotateCw className="w-3.5 h-3.5" />
                               <span>تجديد</span>
                             </button>
                           )}
-                          {onCreateReceiptForContract && (
+                          {onCreateReceiptForContract && !isFullyPaid && (
                             <button
                               onClick={() => onCreateReceiptForContract(item)}
                               className="px-2.5 py-1.5 bg-emerald-500/15 hover:bg-emerald-500 text-emerald-400 hover:text-slate-950 border border-emerald-500/30 rounded-lg text-xs font-black transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap"
@@ -1599,6 +1740,38 @@ export const Installments: React.FC<InstallmentsProps> = ({
             {/* Modal Body */}
             <div className="p-6 space-y-6">
               
+              {/* Fully Paid & Finished Contract Notice Banner */}
+              {(Number(selectedFileContract.remaining || 0) <= 0 || selectedFileContract.status === "مكتمل") && (
+                <div className="p-4 bg-emerald-950/70 border border-emerald-500/50 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 text-emerald-300 shadow-xl relative overflow-hidden">
+                  <div className="flex items-center gap-3.5 text-xs font-black">
+                    <span className="p-2.5 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xl shrink-0">🎉</span>
+                    <div>
+                      <span className="block text-white text-base font-black flex items-center gap-2">
+                        <span>العقد منتهي وتم سداده بالكامل</span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500 text-slate-950 font-black">مسدد 100%</span>
+                      </span>
+                      <span className="text-emerald-200/90 text-xs font-bold leading-relaxed block mt-0.5">
+                        تم استيفاء كامل المبالغ المستحقة على العقد بنجاح (المتبقي: 0 ريال). العقد الآن بحالة "مكتمل / منتهي". يمكنك تجديد العقد لعميلك مباشرة بضغطة زر.
+                      </span>
+                    </div>
+                  </div>
+                  {((finalPerms?.installmentsAdd) || currentUser?.role === "admin") && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const c = selectedFileContract;
+                        setSelectedFileContract(null);
+                        openRenewModal(c);
+                      }}
+                      className="px-4 py-2.5 bg-cyan-400 hover:bg-cyan-300 text-slate-950 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-lg shrink-0 whitespace-nowrap"
+                    >
+                      <RotateCw className="w-4 h-4" />
+                      <span>تجديد العقد الآن</span>
+                    </button>
+                  )}
+                </div>
+              )}
+
               {/* Renewal Origin Banner if applicable */}
               {awExtractRenewedFrom(selectedFileContract.notes || "") && (
                 <div className="p-4 bg-cyan-950/40 border border-cyan-500/40 rounded-2xl flex items-center justify-between gap-3 text-cyan-300 shadow-sm">
