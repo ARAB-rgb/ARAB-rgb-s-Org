@@ -16,7 +16,7 @@ import { User as AuthUser, UserPerms, Installment, Quote, Receipt, Payment, Expe
 import {
   sb, logSession, getContractTiming, awExtractRegion, awCleanNotes, awExtractAttachment,
   awBuildNotesWithRegion, awBuildNotesWithRegionAndTreasury, awBuildNotesWithRegionAndTreasuryAndCapital, awExtractTreasury, awExtractCapital, generateNextNo,
-  awExtractCapitalSource, awExtractCapitalCompany, awExtractCapitalCollection,
+  awExtractCapitalSource, awExtractCapitalCompany, awExtractCapitalCollection, awExtractCapitalSplit, awGetSafeCapitalOutflow,
   awExtractWorkerContract, awExtractWorkerLeaves, awBuildWorkerNotes, awCleanWorkerNotes,
   getSupabaseCredentials, saveSupabaseCredentials, checkSupabaseHealth, isSupabaseHealthy,
   awExtractExternalNo, awBuildNotesWithRegionAndTreasuryAndExternalNo, awExtractClassification, awExtractCycle, awExtractReceiptType,
@@ -186,39 +186,142 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ value, onChange, label, p
 };
 
 const getStoredTreasuries = (companyId?: string | null, companiesList?: Company[]): string[] => {
-  const defaults = ["خزنة الشركة", "خزنة التحصيل", "خزنة التحويل", "نقاط البيع", "خزنة المقاولات"];
+  const defaults = ["خزنة الشركة", "خزنة التحصيل"];
   
   if (companyId && companyId !== "all" && companiesList) {
     const matched = companiesList.find(c => c.id === companyId);
-    if (matched && matched.treasuries && Array.isArray(matched.treasuries)) {
+    if (matched && matched.treasuries && Array.isArray(matched.treasuries) && matched.treasuries.length > 0) {
       return matched.treasuries;
     }
   }
 
-  if ((!companyId || companyId === "all") && companiesList && companiesList.length > 0) {
-    const allTreasuries = new Set<string>(defaults);
-    companiesList.forEach(c => {
-      if (c.treasuries && Array.isArray(c.treasuries)) {
-        c.treasuries.forEach(t => allTreasuries.add(t));
-      }
-    });
-    return Array.from(allTreasuries);
+  // Specific company from localStorage
+  if (companyId && companyId !== "all") {
+    const saved = localStorage.getItem(`aw_treasuries_${companyId}`);
+    if (saved) {
+      try {
+        const arr = JSON.parse(saved);
+        if (Array.isArray(arr) && arr.length > 0) {
+          return arr;
+        }
+      } catch {}
+    }
+    return defaults;
   }
 
-  const suffix = companyId && companyId !== "all" ? `_${companyId}` : "";
-  const saved = localStorage.getItem(`aw_treasuries${suffix}`);
+  // Combined across all companies if "all"
+  if ((!companyId || companyId === "all") && companiesList && companiesList.length > 0) {
+    const allTreasuries = new Set<string>();
+    let hasCustom = false;
+    companiesList.forEach(c => {
+      if (c.treasuries && Array.isArray(c.treasuries) && c.treasuries.length > 0) {
+        c.treasuries.forEach(t => allTreasuries.add(t));
+        hasCustom = true;
+      }
+    });
+    if (hasCustom && allTreasuries.size > 0) {
+      return Array.from(allTreasuries);
+    }
+  }
+
+  const saved = localStorage.getItem("aw_treasuries");
   if (saved) {
     try {
       const arr = JSON.parse(saved);
-      if (Array.isArray(arr)) {
+      if (Array.isArray(arr) && arr.length > 0) {
         return arr;
       }
     } catch {}
   }
-  try {
-    localStorage.setItem(`aw_treasuries${suffix}`, JSON.stringify(defaults));
-  } catch {}
   return defaults;
+};
+
+const getTreasuryTheme = (tName: string, index: number) => {
+  const clean = String(tName || "").trim();
+  if (clean.includes("شركة") || clean === "شركة") {
+    return {
+      border: "border-amber-500/20",
+      dot: "bg-amber-400 shadow-[0_0_8px_#f59e0b]",
+      label: "text-amber-500/80",
+      text: "text-amber-100",
+      glow: "shadow-amber-500/5 before:bg-amber-500/5",
+    };
+  }
+  if (clean.includes("تحصيل") || clean === "تحصيل") {
+    return {
+      border: "border-emerald-500/20",
+      dot: "bg-emerald-400 shadow-[0_0_8px_#10b981]",
+      label: "text-emerald-400",
+      text: "text-emerald-100",
+      glow: "shadow-emerald-500/5 before:bg-emerald-500/5",
+    };
+  }
+  if (clean.includes("تحويل")) {
+    return {
+      border: "border-cyan-500/20",
+      dot: "bg-cyan-400 shadow-[0_0_8px_#06b6d4]",
+      label: "text-cyan-400",
+      text: "text-cyan-100",
+      glow: "shadow-cyan-500/5 before:bg-cyan-500/5",
+    };
+  }
+  if (clean.includes("نقاط") || clean.includes("بيع") || clean.includes("مدى") || clean.includes("شبكة")) {
+    return {
+      border: "border-purple-500/20",
+      dot: "bg-purple-400 shadow-[0_0_8px_#a855f7]",
+      label: "text-purple-400",
+      text: "text-purple-100",
+      glow: "shadow-purple-500/5 before:bg-purple-500/5",
+    };
+  }
+  if (clean.includes("مقاولات") || clean.includes("مشاريع") || clean.includes("عمليات") || clean.includes("تشغيل")) {
+    return {
+      border: "border-blue-500/20",
+      dot: "bg-blue-400 shadow-[0_0_8px_#3b82f6]",
+      label: "text-blue-400",
+      text: "text-blue-100",
+      glow: "shadow-blue-500/5 before:bg-blue-500/5",
+    };
+  }
+
+  const cyclic = [
+    {
+      border: "border-rose-500/20",
+      dot: "bg-rose-400 shadow-[0_0_8px_#f43f5e]",
+      label: "text-rose-400",
+      text: "text-rose-100",
+      glow: "shadow-rose-500/5 before:bg-rose-500/5",
+    },
+    {
+      border: "border-teal-500/20",
+      dot: "bg-teal-400 shadow-[0_0_8px_#14b8a6]",
+      label: "text-teal-400",
+      text: "text-teal-100",
+      glow: "shadow-teal-500/5 before:bg-teal-500/5",
+    },
+    {
+      border: "border-indigo-500/20",
+      dot: "bg-indigo-400 shadow-[0_0_8px_#6366f1]",
+      label: "text-indigo-400",
+      text: "text-indigo-100",
+      glow: "shadow-indigo-500/5 before:bg-indigo-500/5",
+    },
+    {
+      border: "border-orange-500/20",
+      dot: "bg-orange-400 shadow-[0_0_8px_#f97316]",
+      label: "text-orange-400",
+      text: "text-orange-100",
+      glow: "shadow-orange-500/5 before:bg-orange-500/5",
+    },
+    {
+      border: "border-fuchsia-500/20",
+      dot: "bg-fuchsia-400 shadow-[0_0_8px_#d946ef]",
+      label: "text-fuchsia-400",
+      text: "text-fuchsia-100",
+      glow: "shadow-fuchsia-500/5 before:bg-fuchsia-500/5",
+    },
+  ];
+  return cyclic[index % cyclic.length];
 };
 
 const getCompanyActivity = (comp?: Company | null): string => {
@@ -5403,23 +5506,17 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
     );
   }
 
-  let companyCapitalInContracts = 0;
-  let collectionCapitalInContracts = 0;
+  // Active treasuries strictly belonging to the currently active / selected company
+  const activeCompanyTreasuries = getStoredTreasuries(selectedCompanyId, companies);
 
-  getVisibleInstallments().forEach((x) => {
-    const source = awExtractCapitalSource(x.notes || "");
-    const compAmount = awExtractCapitalCompany(x.notes || "");
-    const collAmount = awExtractCapitalCollection(x.notes || "");
-    const totalCap = awExtractCapital(x.notes || "");
-
-    if (source === "شركة") {
-      companyCapitalInContracts += totalCap;
-    } else if (source === "تحصيل") {
-      collectionCapitalInContracts += totalCap;
-    } else if (source === "كلاهما") {
-      companyCapitalInContracts += compAmount;
-      collectionCapitalInContracts += collAmount;
-    }
+  // Dynamic capital per treasury in visible contracts
+  const treasuryCapitals: Record<string, number> = {};
+  activeCompanyTreasuries.forEach((tName) => {
+    let sum = 0;
+    getVisibleInstallments().forEach((x) => {
+      sum += awGetSafeCapitalOutflow(x.notes || "", tName);
+    });
+    treasuryCapitals[tName] = sum;
   });
 
   return (
@@ -5580,27 +5677,41 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
           </div>
           
           <div className="flex flex-wrap items-center gap-3.5">
-            {/* رأس مال الشركة في العقود */}
-            <div className="bg-gradient-to-b from-slate-900/60 to-slate-950/60 border border-amber-500/20 px-4 py-2 rounded-2xl flex items-center gap-3 text-right shadow-lg shadow-amber-500/5 relative before:absolute before:inset-0 before:rounded-2xl before:bg-amber-500/5 before:pointer-events-none">
-              <div className="w-2.5 h-2.5 rounded-full bg-amber-400 shadow-[0_0_8px_#f59e0b] animate-pulse" />
-              <div>
-                <span className="block text-[8px] md:text-[9px] font-black text-amber-500/80 leading-normal uppercase">رأس مال الشركة بالعقود</span>
-                <span className="block text-sm font-black text-amber-100 font-mono">
-                  {companyCapitalInContracts.toLocaleString()} <span className="text-[10px] font-bold text-slate-400">ريال</span>
-                </span>
-              </div>
-            </div>
+            {/* Dynamic Treasury Capital Cards strictly per Company */}
+            {activeCompanyTreasuries.map((tName, idx) => {
+              const theme = getTreasuryTheme(tName, idx);
+              const val = treasuryCapitals[tName] || 0;
+              const cleanLabel = tName.startsWith("خزنة ") ? tName.slice(5) : tName;
+              return (
+                <div
+                  key={tName}
+                  className={`bg-gradient-to-b from-slate-900/60 to-slate-950/60 border ${theme.border} px-4 py-2 rounded-2xl flex items-center gap-3 text-right shadow-lg ${theme.glow} relative before:absolute before:inset-0 before:rounded-2xl before:pointer-events-none transition-all hover:scale-[1.02]`}
+                  title={`إجمالي رأس المال الممول من (${tName}) في عقود الشركة النشطة`}
+                >
+                  <div className={`w-2.5 h-2.5 rounded-full ${theme.dot} animate-pulse shrink-0`} />
+                  <div>
+                    <span className={`block text-[8px] md:text-[9px] font-black ${theme.label} leading-normal uppercase truncate max-w-[150px]`}>
+                      رأس مال {cleanLabel} بالعقود
+                    </span>
+                    <span className={`block text-sm font-black ${theme.text} font-mono`}>
+                      {val.toLocaleString()} <span className="text-[10px] font-bold text-slate-400">ريال</span>
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
 
-            {/* رأس مال التحصيل في العقود */}
-            <div className="bg-gradient-to-b from-slate-900/60 to-slate-950/60 border border-emerald-500/20 px-4 py-2 rounded-2xl flex items-center gap-3 text-right shadow-lg shadow-emerald-500/5 relative before:absolute before:inset-0 before:rounded-2xl before:bg-emerald-500/5 before:pointer-events-none">
-              <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#10b981] animate-pulse" />
-              <div>
-                <span className="block text-[8px] md:text-[9px] font-black text-emerald-400 leading-normal uppercase">رأس مال التحصيل بالعقود</span>
-                <span className="block text-sm font-black text-emerald-100 font-mono">
-                  {collectionCapitalInContracts.toLocaleString()} <span className="text-[10px] font-bold text-slate-400">ريال</span>
-                </span>
-              </div>
-            </div>
+            {(currentUser?.role === "admin" || can("treasury")) && (
+              <button
+                type="button"
+                onClick={() => openAddTreasuryDialog(selectedCompanyId !== "all" ? selectedCompanyId : undefined)}
+                className="text-[10px] font-black font-sans text-amber-300 bg-slate-900/80 hover:bg-slate-850 hover:text-amber-200 px-3 py-2 rounded-2xl border border-dashed border-amber-500/30 hover:border-amber-500/60 shadow-inner shrink-0 cursor-pointer flex items-center gap-1.5 transition-all"
+                title="إضافة خزنة جديدة للشركة النشطة"
+              >
+                <span className="text-xs font-black text-amber-400">➕</span>
+                <span>إضافة خزنة</span>
+              </button>
+            )}
 
             <button
               type="button"

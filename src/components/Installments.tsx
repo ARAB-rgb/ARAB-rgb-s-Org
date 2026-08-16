@@ -37,18 +37,12 @@ interface InstallmentsProps {
 }
 
 const getStoredTreasuries = (companyId?: string | null, companiesList?: Company[]): string[] => {
-  const defaults = ["خزنة الشركة", "خزنة التحصيل", "خزنة التحويل", "نقاط البيع", "خزنة المقاولات"];
+  const defaults = ["خزنة الشركة", "خزنة التحصيل"];
   
   if (companyId && companyId !== "all" && companiesList) {
     const matched = companiesList.find(c => c.id === companyId);
-    if (matched && matched.treasuries && Array.isArray(matched.treasuries)) {
-      const merged = [...matched.treasuries];
-      defaults.forEach(d => {
-        if (!merged.includes(d)) {
-          merged.push(d);
-        }
-      });
-      return merged;
+    if (matched && matched.treasuries && Array.isArray(matched.treasuries) && matched.treasuries.length > 0) {
+      return matched.treasuries;
     }
   }
 
@@ -58,13 +52,7 @@ const getStoredTreasuries = (companyId?: string | null, companiesList?: Company[
     try {
       const arr = JSON.parse(saved);
       if (Array.isArray(arr) && arr.length > 0) {
-        const merged = [...arr];
-        defaults.forEach(d => {
-          if (!merged.includes(d)) {
-            merged.push(d);
-          }
-        });
-        return merged;
+        return arr;
       }
     } catch {}
   }
@@ -243,7 +231,9 @@ export const Installments: React.FC<InstallmentsProps> = ({
   const [renewCycle, setRenewCycle] = useState<string>("يومي");
   const [renewAmount, setRenewAmount] = useState<string>("");
   const [renewDownPayment, setRenewDownPayment] = useState<string>("0");
-  const [renewIncludeRemaining, setRenewIncludeRemaining] = useState<boolean>(false);
+  // Balance adjustment choice: 'none' | 'add_remaining' | 'deduct_remaining' | 'custom_adjustment'
+  const [renewBalanceAction, setRenewBalanceAction] = useState<"none" | "add_remaining" | "deduct_remaining" | "custom_discount">("none");
+  const [renewCustomAdjustmentAmount, setRenewCustomAdjustmentAmount] = useState<string>("0");
   const [renewDiscount, setRenewDiscount] = useState<string>("0");
   const [renewNotes, setRenewNotes] = useState<string>("");
   const [renewCloseOld, setRenewCloseOld] = useState<boolean>(true);
@@ -274,7 +264,8 @@ export const Installments: React.FC<InstallmentsProps> = ({
 
     setRenewAmount(c.amount ? String(c.amount) : "");
     setRenewDownPayment("0");
-    setRenewIncludeRemaining(false);
+    setRenewBalanceAction("none");
+    setRenewCustomAdjustmentAmount("0");
     setRenewDiscount("0");
     setRenewNotes(`تجديد وتمديد للعقد السابق (${c.no})`);
     setRenewCloseOld(true);
@@ -288,10 +279,25 @@ export const Installments: React.FC<InstallmentsProps> = ({
     try {
       const periodsNum = Number(renewPeriods || 0);
       const baseAmount = Number(renewAmount || 0);
-      const remainingToAdd = renewIncludeRemaining ? Number(renewTarget.remaining || 0) : 0;
-      const totalAmount = baseAmount + remainingToAdd;
+      const oldRemaining = Number(renewTarget.remaining || 0);
+      
+      let balanceAdjustment = 0;
+      let balanceActionNote = "";
+      if (renewBalanceAction === "add_remaining") {
+        balanceAdjustment = oldRemaining;
+        balanceActionNote = ` | مضاف إليه متبقي العقد السابق (${oldRemaining.toLocaleString()} ريال)`;
+      } else if (renewBalanceAction === "deduct_remaining") {
+        balanceAdjustment = -oldRemaining;
+        balanceActionNote = ` | مخصوم منه متبقي العقد السابق (${oldRemaining.toLocaleString()} ريال)`;
+      } else if (renewBalanceAction === "custom_discount") {
+        const customAdj = Number(renewCustomAdjustmentAmount || 0);
+        balanceAdjustment = -customAdj;
+        balanceActionNote = ` | تم تطبيق خصم تسوية (${customAdj.toLocaleString()} ريال)`;
+      }
+
+      const totalAmount = Math.max(0, baseAmount + (balanceAdjustment > 0 ? balanceAdjustment : 0));
       const downPaymentNum = Number(renewDownPayment || 0);
-      const discountNum = Number(renewDiscount || 0);
+      const discountNum = Number(renewDiscount || 0) + (balanceAdjustment < 0 ? Math.abs(balanceAdjustment) : 0);
       const finalRemaining = Math.max(0, totalAmount - downPaymentNum - discountNum);
       const installmentVal = periodsNum > 0 ? Math.ceil(finalRemaining / periodsNum) : 0;
 
@@ -341,7 +347,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
           workplace: renewTarget.workplace || "",
           guarantor: renewTarget.guarantor || "",
           status: "منتظم",
-          notes: renewNotes.trim(),
+          notes: `${renewNotes.trim()}${balanceActionNote}`.trim(),
           region_input: awExtractRegion(renewTarget.notes || "") || (finalPerms?.region || ""),
           treasury_input: awExtractTreasury(renewTarget.notes || "") || "خزنة التحصيل",
           cycle_input: renewCycle,
@@ -394,7 +400,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
           installment: updatedInstallmentVal,
           end_date: calcEndDate || renewTarget.end_date,
           status: "منتظم",
-          notes: `${awCleanNotes(renewTarget.notes || "")} | تم تمديد وتجديد العقد بتاريخ ${renewStartDate}`,
+          notes: `${awCleanNotes(renewTarget.notes || "")} | تم تمديد وتجديد العقد بتاريخ ${renewStartDate}${balanceActionNote}`,
           region_input: awExtractRegion(renewTarget.notes || ""),
           treasury_input: awExtractTreasury(renewTarget.notes || ""),
           cycle_input: renewCycle,
@@ -2385,35 +2391,109 @@ export const Installments: React.FC<InstallmentsProps> = ({
                   )}
                 </div>
 
-                {/* Additional Options & Checkboxes */}
-                <div className="space-y-2.5 pt-2">
-                  {renewMode === "new_contract" && Number(renewTarget.remaining || 0) > 0 && (
-                    <label className="flex items-center gap-3 p-3 bg-amber-950/30 border border-amber-500/30 rounded-xl cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={renewIncludeRemaining}
-                        onChange={(e) => setRenewIncludeRemaining(e.target.checked)}
-                        className="w-4 h-4 rounded text-amber-500 focus:ring-0 focus:outline-none cursor-pointer"
-                      />
-                      <span className="text-xs font-bold text-amber-300">
-                        ترحيل وإضافة المتبقي من العقد السابق (<strong className="font-mono text-white">{Number(renewTarget.remaining).toLocaleString()} ريال</strong>) إلى إجمالي مبلغ العقد الجديد
-                      </span>
+                {/* Balance Adjustment & Migration Options (Add to new contract or deduct from new contract) */}
+                <div className="space-y-3 p-4 bg-slate-950/70 border border-slate-800 rounded-2xl">
+                  <div className="flex items-center justify-between border-b border-slate-850 pb-2">
+                    <label className="text-xs font-black text-slate-200 flex items-center gap-1.5">
+                      <span>⚖️</span>
+                      <span>معالجة رصيد العقد السابق (إضافة أو خصم):</span>
                     </label>
-                  )}
+                    <span className="text-[11px] font-mono font-bold text-amber-400">
+                      متبقي العقد السابق: {Number(renewTarget.remaining || 0).toLocaleString()} ريال
+                    </span>
+                  </div>
 
-                  {renewMode === "new_contract" && (
-                    <label className="flex items-center gap-3 p-3 bg-slate-950/40 border border-slate-800 rounded-xl cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={renewCloseOld}
-                        onChange={(e) => setRenewCloseOld(e.target.checked)}
-                        className="w-4 h-4 rounded text-cyan-500 focus:ring-0 focus:outline-none cursor-pointer"
-                      />
-                      <span className="text-xs font-bold text-slate-300">
-                        إغلاق العقد القديم وتغيير حالته تلقائياً إلى (<span className="text-emerald-400">مكتمل</span>) عند إنشاء هذا التجديد
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    {/* Option 1: No adjustment */}
+                    <button
+                      type="button"
+                      onClick={() => setRenewBalanceAction("none")}
+                      className={`p-3 rounded-xl border text-right transition-all cursor-pointer ${
+                        renewBalanceAction === "none"
+                          ? "bg-slate-800 border-cyan-500 text-white font-bold"
+                          : "bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center ${renewBalanceAction === "none" ? "border-cyan-400 bg-cyan-400" : "border-slate-600"}`}>
+                          {renewBalanceAction === "none" && <span className="w-1.5 h-1.5 rounded-full bg-slate-950"></span>}
+                        </span>
+                        <span className="text-xs font-black">بدون تسوية رصيد</span>
+                      </div>
+                      <span className="block text-[10px] text-slate-500 mt-1 mr-5">بدء العقد الجديد بالقيمة المدخلة فقط</span>
+                    </button>
+
+                    {/* Option 2: Add remaining to new contract */}
+                    <button
+                      type="button"
+                      onClick={() => setRenewBalanceAction("add_remaining")}
+                      className={`p-3 rounded-xl border text-right transition-all cursor-pointer ${
+                        renewBalanceAction === "add_remaining"
+                          ? "bg-amber-950/40 border-amber-500 text-amber-200 font-bold shadow-md shadow-amber-950/40"
+                          : "bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center ${renewBalanceAction === "add_remaining" ? "border-amber-400 bg-amber-400" : "border-slate-600"}`}>
+                          {renewBalanceAction === "add_remaining" && <span className="w-1.5 h-1.5 rounded-full bg-slate-950"></span>}
+                        </span>
+                        <span className="text-xs font-black text-amber-300">➕ إضافة للعقد الجديد</span>
+                      </div>
+                      <span className="block text-[10px] text-amber-400/80 mt-1 mr-5">
+                        إضافة +{Number(renewTarget.remaining || 0).toLocaleString()} ريال لإجمالي العقد
                       </span>
-                    </label>
-                  )}
+                    </button>
+
+                    {/* Option 3: Deduct remaining from new contract */}
+                    <button
+                      type="button"
+                      onClick={() => setRenewBalanceAction("deduct_remaining")}
+                      className={`p-3 rounded-xl border text-right transition-all cursor-pointer ${
+                        renewBalanceAction === "deduct_remaining"
+                          ? "bg-rose-950/40 border-rose-500 text-rose-200 font-bold shadow-md shadow-rose-950/40"
+                          : "bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center ${renewBalanceAction === "deduct_remaining" ? "border-rose-400 bg-rose-400" : "border-slate-600"}`}>
+                          {renewBalanceAction === "deduct_remaining" && <span className="w-1.5 h-1.5 rounded-full bg-slate-950"></span>}
+                        </span>
+                        <span className="text-xs font-black text-rose-300">➖ خصم من العقد الجديد</span>
+                      </div>
+                      <span className="block text-[10px] text-rose-400/80 mt-1 mr-5">
+                        خصم -{Number(renewTarget.remaining || 0).toLocaleString()} ريال من قيمة العقد
+                      </span>
+                    </button>
+                  </div>
+
+                  {/* Custom discount / extra discount row */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-850/60">
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-black text-slate-300">خصم إضافي / تخفيض تسوية (ريال)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={renewDiscount}
+                        onChange={(e) => setRenewDiscount(e.target.value)}
+                        className="w-full px-3.5 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-bold text-rose-400 focus:outline-none focus:border-cyan-500"
+                        placeholder="0"
+                      />
+                    </div>
+
+                    {renewMode === "new_contract" && (
+                      <div className="flex items-center pt-5">
+                        <label className="flex items-center gap-2 text-xs text-slate-300 font-bold cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={renewCloseOld}
+                            onChange={(e) => setRenewCloseOld(e.target.checked)}
+                            className="w-4 h-4 rounded text-cyan-500 focus:ring-0 focus:outline-none cursor-pointer"
+                          />
+                          <span>إغلاق العقد القديم وتعيينه (<span className="text-emerald-400">مكتمل</span>)</span>
+                        </label>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Notes Input */}
@@ -2432,10 +2512,18 @@ export const Installments: React.FC<InstallmentsProps> = ({
                 {(() => {
                   const periodsNum = Number(renewPeriods || 0);
                   const baseAmount = Number(renewAmount || 0);
-                  const remainingToAdd = renewIncludeRemaining ? Number(renewTarget.remaining || 0) : 0;
-                  const totalAmount = baseAmount + remainingToAdd;
+                  const oldRemaining = Number(renewTarget.remaining || 0);
+
+                  let balanceAdjustment = 0;
+                  if (renewBalanceAction === "add_remaining") {
+                    balanceAdjustment = oldRemaining;
+                  } else if (renewBalanceAction === "deduct_remaining") {
+                    balanceAdjustment = -oldRemaining;
+                  }
+
+                  const totalAmount = Math.max(0, baseAmount + (balanceAdjustment > 0 ? balanceAdjustment : 0));
                   const downPaymentNum = Number(renewDownPayment || 0);
-                  const discountNum = Number(renewDiscount || 0);
+                  const discountNum = Number(renewDiscount || 0) + (balanceAdjustment < 0 ? Math.abs(balanceAdjustment) : 0);
                   const finalRemaining = Math.max(0, totalAmount - downPaymentNum - discountNum);
                   const installmentVal = periodsNum > 0 ? Math.ceil(finalRemaining / periodsNum) : 0;
 
@@ -2457,9 +2545,21 @@ export const Installments: React.FC<InstallmentsProps> = ({
 
                   return (
                     <div className="p-4 bg-gradient-to-br from-cyan-950/30 to-slate-950 border border-cyan-500/30 rounded-2xl space-y-2">
-                      <span className="block text-[10px] font-black text-cyan-400 uppercase">
-                        📊 المعاينة المالية للتجديد:
-                      </span>
+                      <div className="flex items-center justify-between">
+                        <span className="block text-[10px] font-black text-cyan-400 uppercase">
+                          📊 المعاينة المالية للتجديد:
+                        </span>
+                        {renewBalanceAction === "add_remaining" && (
+                          <span className="text-[10px] font-black text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-500/30">
+                            ➕ تم إضافة متبقي سابق (+{oldRemaining.toLocaleString()} ر.س)
+                          </span>
+                        )}
+                        {renewBalanceAction === "deduct_remaining" && (
+                          <span className="text-[10px] font-black text-rose-400 bg-rose-950/60 px-2 py-0.5 rounded border border-rose-500/30">
+                            ➖ تم خصم متبقي سابق (-{oldRemaining.toLocaleString()} ر.س)
+                          </span>
+                        )}
+                      </div>
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                         <div className="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
                           <span className="block text-[10px] text-slate-400">إجمالي المبلغ:</span>

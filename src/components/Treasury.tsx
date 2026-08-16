@@ -24,25 +24,29 @@ interface TreasuryProps {
 }
 
 const getStoredTreasuries = (companyId?: string, companiesList?: Company[]): string[] => {
-  const defaults = ["خزنة الشركة", "خزنة التحصيل", "خزنة التحويل", "نقاط البيع", "خزنة المقاولات"];
+  const defaults = ["خزنة الشركة", "خزنة التحصيل"];
   
   // If specific company, load from DB
   if (companyId && companyId !== "all" && companiesList) {
     const matched = companiesList.find(c => c.id === companyId);
-    if (matched && matched.treasuries && Array.isArray(matched.treasuries)) {
+    if (matched && matched.treasuries && Array.isArray(matched.treasuries) && matched.treasuries.length > 0) {
       return matched.treasuries;
     }
   }
 
   // Combined across all companies if "all"
   if ((!companyId || companyId === "all") && companiesList && companiesList.length > 0) {
-    const allTreasuries = new Set<string>(defaults);
+    const allTreasuries = new Set<string>();
+    let hasCustom = false;
     companiesList.forEach(c => {
-      if (c.treasuries && Array.isArray(c.treasuries)) {
+      if (c.treasuries && Array.isArray(c.treasuries) && c.treasuries.length > 0) {
         c.treasuries.forEach(t => allTreasuries.add(t));
+        hasCustom = true;
       }
     });
-    return Array.from(allTreasuries);
+    if (hasCustom && allTreasuries.size > 0) {
+      return Array.from(allTreasuries);
+    }
   }
 
   const suffix = companyId && companyId !== "all" ? `_${companyId}` : "";
@@ -50,14 +54,11 @@ const getStoredTreasuries = (companyId?: string, companiesList?: Company[]): str
   if (saved) {
     try {
       const arr = JSON.parse(saved);
-      if (Array.isArray(arr)) {
+      if (Array.isArray(arr) && arr.length > 0) {
         return arr;
       }
     } catch {}
   }
-  try {
-    localStorage.setItem(`aw_treasuries${suffix}`, JSON.stringify(defaults));
-  } catch {}
   return defaults;
 };
 

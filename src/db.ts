@@ -684,34 +684,63 @@ export function awExtractCapitalCollection(notes: string): number {
 
 export function awExtractCapitalSplit(notes: string, treasuryName: string): number {
   const text = String(notes || "");
+  const cleanName = String(treasuryName || "").trim();
+  if (!cleanName) return 0;
+
   // Escaping special characters for Regex safety
-  const escapedName = treasuryName.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+  const escapedName = cleanName.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
   const regex = new RegExp(`\\[رأس_المال_تقسيم_${escapedName}:\\s*(\\d+(\\.\\d+)?)\\]`);
   const m = text.match(regex);
   if (m) return Number(m[1]);
 
+  // Alternate: try matching without "خزنة " prefix
+  const altName = cleanName.replace(/^خزنة\s+/, "").trim();
+  if (altName && altName !== cleanName) {
+    const escapedAlt = altName.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const regexAlt = new RegExp(`\\[رأس_المال_تقسيم_${escapedAlt}:\\s*(\\d+(\\.\\d+)?)\\]`);
+    const mAlt = text.match(regexAlt);
+    if (mAlt) return Number(mAlt[1]);
+  }
+
+  // Alternate: try matching with "خزنة " prefix if not present
+  if (!cleanName.startsWith("خزنة ")) {
+    const prefixed = `خزنة ${cleanName}`;
+    const escapedPrefixed = prefixed.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const regexPrefixed = new RegExp(`\\[رأس_المال_تقسيم_${escapedPrefixed}:\\s*(\\d+(\\.\\d+)?)\\]`);
+    const mPrefixed = text.match(regexPrefixed);
+    if (mPrefixed) return Number(mPrefixed[1]);
+  }
+
   // Backward compatibility
-  if (treasuryName === "خزنة الشركة") {
-    const mLegacy = text.match(/\[رأس_المال_شركة:\s*(\d+(\.\d+)?)\]/);
+  if (cleanName === "خزنة الشركة" || cleanName === "شركة" || altName === "الشركة") {
+    const mLegacy = text.match(/\[رأس_المال_شركة:\s*(\\d+(\\.\\d+)?)\\]/);
     if (mLegacy) return Number(mLegacy[1]);
   }
-  if (treasuryName === "خزنة التحصيل") {
-    const mLegacy = text.match(/\[رأس_المال_تحصيل:\s*(\d+(\.\d+)?)\]/);
+  if (cleanName === "خزنة التحصيل" || cleanName === "تحصيل" || altName === "التحصيل") {
+    const mLegacy = text.match(/\[رأس_المال_تحصيل:\s*(\\d+(\\.\\d+)?)\\]/);
     if (mLegacy) return Number(mLegacy[1]);
   }
   return 0;
 }
 
 export function awGetSafeCapitalOutflow(notes: string, safeName: string): number {
-  const source = awExtractCapitalSource(notes);
+  const source = String(awExtractCapitalSource(notes) || "").trim();
   const totalCap = awExtractCapital(notes);
+  const cleanSafe = String(safeName || "").trim();
+  if (!cleanSafe) return 0;
   
   if (source === "كلاهما") {
-    return awExtractCapitalSplit(notes, safeName);
+    return awExtractCapitalSplit(notes, cleanSafe);
   }
   
-  const isCompanySafe = safeName === "خزنة الشركة";
-  const isCollectionSafe = safeName === "خزنة التحصيل";
+  // If specific split exists for this safe
+  const splitAmount = awExtractCapitalSplit(notes, cleanSafe);
+  if (splitAmount > 0) {
+    return splitAmount;
+  }
+
+  const isCompanySafe = cleanSafe === "خزنة الشركة" || cleanSafe === "شركة" || cleanSafe.replace(/^خزنة\s+/, "") === "الشركة";
+  const isCollectionSafe = cleanSafe === "خزنة التحصيل" || cleanSafe === "تحصيل" || cleanSafe.replace(/^خزنة\s+/, "") === "التحصيل";
   
   if (isCompanySafe && (source === "شركة" || source === "خزنة الشركة")) {
     return totalCap;
@@ -720,8 +749,8 @@ export function awGetSafeCapitalOutflow(notes: string, safeName: string): number
     return totalCap;
   }
   
-  // Custom safe matching
-  if (source === safeName) {
+  // Custom safe matching (direct or normalized)
+  if (source === cleanSafe || source.replace(/^خزنة\s+/, "") === cleanSafe.replace(/^خزنة\s+/, "")) {
     return totalCap;
   }
   
