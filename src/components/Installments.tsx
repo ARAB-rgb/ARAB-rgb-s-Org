@@ -38,6 +38,7 @@ interface InstallmentsProps {
     options: {
       transferReceipts: boolean;
       transferPayments: boolean;
+      transferNotesAndFiles?: boolean;
       transferRemainingDebt?: boolean;
       sourceContractAction: "close_as_transferred" | "delete_source" | "keep_and_recalc";
       reason?: string;
@@ -465,6 +466,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
   const [transferSearchQuery, setTransferSearchQuery] = useState<string>("");
   const [transferAction, setTransferAction] = useState<"close_as_transferred" | "delete_source" | "keep_and_recalc">("close_as_transferred");
   const [transferDebtTogether, setTransferDebtTogether] = useState<boolean>(false);
+  const [transferFilesAndNotes, setTransferFilesAndNotes] = useState<boolean>(true);
   const [transferReason, setTransferReason] = useState<string>("");
   const [isTransferring, setIsTransferring] = useState<boolean>(false);
 
@@ -498,11 +500,6 @@ export const Installments: React.FC<InstallmentsProps> = ({
       return;
     }
 
-    if (!transferReason.trim()) {
-      alert("يرجى كتابة سبب النقل للأغراض التدقيقية والرقابية!");
-      return;
-    }
-
     const target = installments.find(i => i.id === transferTargetId);
     if (!target) return;
 
@@ -510,17 +507,9 @@ export const Installments: React.FC<InstallmentsProps> = ({
 
     const actionText = 
       transferAction === "close_as_transferred" ? "إغلاق وتصفير العقد المصدر كعقد مدمج ومنقول" :
-      transferAction === "delete_source" ? "حذف نهائي للعقد المصدر بعد نقل السندات" : "إبقاء العقد المصدر مع إعادة احتساب رصيده";
+      transferAction === "delete_source" ? "حذف نهائي للعقد المصدر بعد نقل السندات والملفات" : "إبقاء العقد المصدر مع إعادة احتساب رصيده";
 
-    const confirmMsg = `تأكيد نقل العقد وسداداته:
-• العقد المصدر: [${transferSourceContract.no} - ${transferSourceContract.client}]
-• عدد السندات المنقولة: ${sourceReceiptsList.length} سند بقيمة إجمالية (${sourceReceiptsSum.toLocaleString()} ريال)
-• العقد المستهدف: [${target.no} - ${target.client}]
-• الإجراء على العقد المصدر: ${actionText}
-${transferDebtTogether ? `• دمج المديونية المتبقية: إضافة (${sourceRemaining.toLocaleString()} ريال) إلى قيمة العقد المستهدف\n` : ""}
-هل ترغب في تنفيذ العملية وتحديث المراكز المالية والقيود الآن؟`;
-
-    if (!confirm(confirmMsg)) return;
+    const reasonToUse = transferReason.trim() || "نقل ودمج ملفات وسندات العقد";
 
     setIsTransferring(true);
     try {
@@ -531,9 +520,10 @@ ${transferDebtTogether ? `• دمج المديونية المتبقية: إضا
           {
             transferReceipts: true,
             transferPayments: true,
+            transferNotesAndFiles: transferFilesAndNotes,
             transferRemainingDebt: transferDebtTogether,
             sourceContractAction: transferAction,
-            reason: transferReason.trim(),
+            reason: reasonToUse,
           }
         );
 
@@ -541,6 +531,7 @@ ${transferDebtTogether ? `• دمج المديونية المتبقية: إضا
           setTransferSourceContract(null);
           setTransferTargetId("");
           setTransferReason("");
+          setTransferSearchQuery("");
           if (selectedFileContract) {
             setSelectedFileContract(null);
           }
@@ -1932,13 +1923,9 @@ ${transferDebtTogether ? `• دمج المديونية المتبقية: إضا
                               {(currentUser?.role === "admin" || finalPerms?.installmentsDelete) && (
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    if (confirm(`هل أنت متأكد من حذف العقد الخاص بـ (${item.client}) ورقم العقد (${item.no}) بشكل نهائي؟ لا يمكن التراجع عن هذا الإجراء!`)) {
-                                      onDeleteInstallment(item.id);
-                                    }
-                                  }}
+                                  onClick={() => onDeleteInstallment(item.id)}
                                   className="p-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/20 rounded-xl transition-all cursor-pointer"
-                                  title="حذف العقد"
+                                  title="حذف العقد نهائياً"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </button>
@@ -2293,13 +2280,9 @@ ${transferDebtTogether ? `• دمج المديونية المتبقية: إضا
                       {(currentUser?.role === "admin" || finalPerms?.installmentsDelete) && (
                         <button
                           type="button"
-                          onClick={() => {
-                            if (confirm(`هل أنت متأكد من حذف العقد الخاص بـ (${item.client}) ورقم العقد (${item.no}) بشكل نهائي؟`)) {
-                              onDeleteInstallment(item.id);
-                            }
-                          }}
+                          onClick={() => onDeleteInstallment(item.id)}
                           className="p-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/20 rounded-xl transition-all cursor-pointer"
-                          title="حذف العقد"
+                          title="حذف العقد نهائياً"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -2752,12 +2735,10 @@ ${transferDebtTogether ? `• دمج المديونية المتبقية: إضا
                 <button
                   type="button"
                   onClick={() => {
-                    if (confirm("تأكيد حذف العقد بشكل نهائي؟ لا يمكن التراجع!")) {
-                      onDeleteInstallment(selectedFileContract.id);
-                      setSelectedFileContract(null);
-                    }
+                    onDeleteInstallment(selectedFileContract.id);
+                    setSelectedFileContract(null);
                   }}
-                  className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs rounded-xl flex items-center gap-1 shadow transition-all mr-auto"
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs rounded-xl flex items-center gap-1 shadow transition-all mr-auto cursor-pointer"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   حذف العقد
@@ -3680,6 +3661,20 @@ ${transferDebtTogether ? `• دمج المديونية المتبقية: إضا
                   </label>
                 </div>
 
+                {/* Transfer Files & Notes Option */}
+                <label className="flex items-center gap-2.5 p-3 rounded-xl bg-slate-950/60 border border-slate-800 cursor-pointer hover:border-amber-500/40 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={transferFilesAndNotes}
+                    onChange={(e) => setTransferFilesAndNotes(e.target.checked)}
+                    className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                  />
+                  <div className="text-xs">
+                    <span className="text-white font-bold">📁 نقل ودمج ملفات ومرفقات وبيانات العقد: </span>
+                    <span className="text-amber-300">ترحيل الملاحظات، الكفيل، مقر العمل، والبيانات التعريفية للعقد المستهدف.</span>
+                  </div>
+                </label>
+
                 {/* Transfer Debt Option */}
                 {Number(transferSourceContract.remaining || 0) > 0 && (
                   <label className="flex items-center gap-2.5 p-3 rounded-xl bg-slate-950/60 border border-slate-800 cursor-pointer hover:border-amber-500/40 transition-colors">
@@ -3702,15 +3697,14 @@ ${transferDebtTogether ? `• دمج المديونية المتبقية: إضا
                 {/* Reason Input */}
                 <div className="space-y-1.5">
                   <label className="block text-xs font-bold text-slate-300">
-                    السبب الرقابي والتدقيقي للنقل والتحويل <span className="text-rose-400">*</span>
+                    السبب أو البيان لعملية النقل (اختياري)
                   </label>
                   <input
                     type="text"
                     value={transferReason}
                     onChange={(e) => setTransferReason(e.target.value)}
-                    placeholder="مثال: دمج حسابات العميل، تصحيح تسجيل سندات بالخطأ، تسوية تعاقدية..."
+                    placeholder="مثال: دمج ملفات العميل وسداداته، تسوية تعاقدية..."
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-amber-500"
-                    required
                   />
                 </div>
               </div>

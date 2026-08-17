@@ -2985,7 +2985,7 @@ export default function App() {
   };
 
   const onDeleteInstallment = (id: string) => {
-    if (!can("installmentsDelete")) {
+    if (currentUser?.role !== "admin" && !can("installmentsDelete")) {
       showToast("⚠️ عذراً، لا تملك صلاحية حذف العقود الماليّة!", "error");
       return;
     }
@@ -2993,7 +2993,7 @@ export default function App() {
     const instName = inst ? `${inst.no} - ${inst.client || ""}` : id;
     triggerConfirm(
       "حذف ملف العقد والأقساط",
-      `هل أنت متأكد من حذف عقد العميل "${instName}" بشكل نهائي؟ سيؤدي هذا الإجراء لمسح كافة بيانات السجل والالتزامات المرتبطة. يتطلب هذا الإجراء توثيق سبب الحذف رقابياً.`,
+      `هل أنت متأكد من حذف عقد العميل "${instName}" بشكل نهائي من قاعدة البيانات؟ سيتم مسح بطاقة العقد والالتزامات المرتبطة.`,
       async (reason) => {
         setIsLoading(true);
         try {
@@ -3002,18 +3002,22 @@ export default function App() {
             showToast(error.message, "error");
             return;
           }
+          // Unlink any receipts tied to this installment so database stays clean
+          await sb.from("receipts").update({ installment_id: null }).eq("installment_id", id);
+          await sb.from("payments").update({ installment_id: null }).eq("installment_id", id);
+
           const logMsg = `حذف ملف عقد تقسيط: ${instName}` + (reason ? ` [السبب: ${reason}]` : "");
           await logSession(currentUser!, logMsg);
           await loadEverything();
-          showToast("تم مسح مستندات العقد كاملاً");
+          showToast(`تم حذف العقد (${instName}) بنجاح`);
         } catch {
           showToast("فشل في استكمال حذف المستند", "error");
         } finally {
           setIsLoading(false);
         }
       },
-      true,
-      "اكتب هنا سبب حذف عقد التقسيط للأرشفة والرقابة التدقيقية..."
+      false,
+      "اكتب هنا سبب الحذف (اختياري)..."
     );
   };
 
@@ -3088,6 +3092,7 @@ export default function App() {
     options: {
       transferReceipts: boolean;
       transferPayments: boolean;
+      transferNotesAndFiles?: boolean;
       transferRemainingDebt?: boolean;
       sourceContractAction: "close_as_transferred" | "delete_source" | "keep_and_recalc";
       reason?: string;
@@ -3172,7 +3177,23 @@ export default function App() {
         }).eq("id", target.id);
       }
 
-      // 4. Handle Source Contract Action
+      // 4. Transfer Files & Extra Contract Data (Workplace, Guarantor, Notes) if requested
+      if (options.transferNotesAndFiles) {
+        const cleanSourceNotes = awCleanNotes(source.notes || "");
+        const cleanTargetNotes = awCleanNotes(target.notes || "");
+        let mergedNotes = cleanTargetNotes;
+        if (cleanSourceNotes && !cleanTargetNotes.includes(cleanSourceNotes)) {
+          mergedNotes = `${cleanTargetNotes ? cleanTargetNotes + " | " : ""}[ملاحظات ومرفقات منقولة من ${source.no}: ${cleanSourceNotes}]`;
+        }
+        await sb.from("installments").update({
+          notes: mergedNotes || target.notes,
+          workplace: target.workplace || source.workplace || "",
+          guarantor: target.guarantor || source.guarantor || "",
+          nationality: target.nationality || source.nationality || "",
+        }).eq("id", target.id);
+      }
+
+      // 5. Handle Source Contract Action
       if (options.sourceContractAction === "delete_source") {
         await sb.from("installments").delete().eq("id", sourceContractId);
       } else if (options.sourceContractAction === "close_as_transferred") {
@@ -3198,7 +3219,7 @@ export default function App() {
         await recalcLinkedContractFromReceipts(sourceContractId);
       }
 
-      // 5. Recalculate target contract financials
+      // 6. Recalculate target contract financials
       await recalcLinkedContractFromReceipts(target.id);
 
       // Append note to target contract
@@ -3210,13 +3231,13 @@ export default function App() {
         notes: updatedTargetNotes
       }).eq("id", target.id);
 
-      // 6. Log session for auditing
-      const logMsg = `نقل العقد وسداداته: تم نقل سندات ومدفوعات العقد (${source.no} - ${source.client}) إلى العقد المستهدف (${target.no} - ${target.client}) [الإجراء على المصدر: ${options.sourceContractAction}]` +
-        (options.reason ? ` [السبب: ${options.reason}]` : "");
+      // 7. Log session for auditing
+      const effectiveReason = options.reason?.trim() || "نقل ودمج ملفات وسندات العقد";
+      const logMsg = `نقل العقد وسداداته: تم نقل سندات ومدفوعات العقد (${source.no} - ${source.client}) إلى العقد المستهدف (${target.no} - ${target.client}) [الإجراء على المصدر: ${options.sourceContractAction}] [السبب: ${effectiveReason}]`;
       await logSession(currentUser!, logMsg);
 
       await loadEverything();
-      showToast(`تم نقل العقد وسداداته بنجاح إلى العقد رقم ${target.no} (${target.client})`);
+      showToast(`تم نقل ملفات وسندات العقد بنجاح إلى العقد رقم ${target.no} (${target.client})`);
       return true;
     } catch (err: any) {
       console.error("Transfer contract error:", err);
