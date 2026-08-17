@@ -280,6 +280,20 @@ export const HRModule: React.FC<HRProps> = ({
   // Print templates
   const [printContract, setPrintContract] = useState<HrContract | null>(null);
   const [viewProfileId, setViewProfileId] = useState<string | null>(null);
+  const [printPayrollSlip, setPrintPayrollSlip] = useState<{
+    emp: HrEmployee;
+    basicSalary: number;
+    allowances: number;
+    journalsTotal: number;
+    deductionsTotal: number;
+    advancesTotal: number;
+    netSalary: number;
+    paidPayroll?: HrPayroll;
+    empJournals: HrJournal[];
+    empDeds: HrDeduction[];
+    month: string;
+  } | null>(null);
+  const [showMonthPayrollPrint, setShowMonthPayrollPrint] = useState<boolean>(false);
 
   // Ledger state
   const [ledgerEmployeeId, setLedgerEmployeeId] = useState<string>("");
@@ -950,16 +964,46 @@ export const HRModule: React.FC<HRProps> = ({
     }
   };
 
-  // PDF Export simple browser print helper
+  // PDF Export simple browser print helper (opens isolated print window for pristine PDF rendering)
   const handlePrint = (elementId: string) => {
     const printContent = document.getElementById(elementId);
-    const originalContent = document.body.innerHTML;
-    if (printContent) {
-      document.body.innerHTML = printContent.innerHTML;
+    if (!printContent) return;
+
+    const printWindow = window.open("", "_blank", "width=900,height=800");
+    if (!printWindow) {
+      // Fallback in case popup is blocked
       window.print();
-      document.body.innerHTML = originalContent;
-      window.location.reload(); // reload to restore React state cleanly
+      return;
     }
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html dir="rtl" lang="ar">
+        <head>
+          <meta charset="utf-8" />
+          <title>كشف مسير الرواتب - شركة عرب وورلد</title>
+          <script src="https://cdn.tailwindcss.com"></script>
+          <style>
+            @media print {
+              body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+              @page { size: auto; margin: 12mm; }
+            }
+            body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #fff; color: #0f172a; margin: 0; padding: 20px; }
+          </style>
+        </head>
+        <body>
+          <div class="max-w-4xl mx-auto">
+            ${printContent.innerHTML}
+          </div>
+          <script>
+            setTimeout(() => {
+              window.print();
+            }, 350);
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
   };
 
   return (
@@ -1310,6 +1354,16 @@ export const HRModule: React.FC<HRProps> = ({
                 />
               </div>
 
+              <button
+                type="button"
+                onClick={() => setShowMonthPayrollPrint(true)}
+                className="bg-sky-600 hover:bg-sky-500 text-white font-black text-xs px-4 py-2.5 rounded-xl flex items-center gap-2 shadow-lg transition-all"
+                title="تصدير كشف مسير الرواتب المعتمد للشهر المختار بصيغة PDF / طباعة"
+              >
+                <Printer className="w-4 h-4" />
+                <span>تصدير كشف رواتب الشهر (PDF)</span>
+              </button>
+
               {can("hr_salaries_view") && (
                 <button
                   onClick={async () => {
@@ -1522,38 +1576,64 @@ export const HRModule: React.FC<HRProps> = ({
                           )}
                         </td>
                         <td className="p-4 text-left">
-                          {paidPayroll ? (
-                            <div className="flex items-center justify-end gap-2">
-                              <span className="text-[10px] text-slate-500 font-mono">تم الصرف: {paidPayroll.paid_at?.slice(0, 10)}</span>
-                              <button
-                                onClick={() => handleDeletePayroll(paidPayroll.id)}
-                                title="إلغاء وحذف مسير السداد"
-                                className="p-1.5 bg-white/5 hover:bg-rose-500/20 text-rose-400 rounded-lg border border-white/5 transition-all"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          ) : (
+                          <div className="flex items-center justify-end gap-2">
                             <button
+                              type="button"
                               onClick={() => {
-                                setPaySalaryForm({
-                                  employee: emp,
+                                setPrintPayrollSlip({
+                                  emp,
                                   basicSalary,
                                   allowances,
                                   journalsTotal,
                                   deductionsTotal,
                                   advancesTotal,
                                   netSalary,
-                                  treasury: "خزنة التحصيل",
-                                  method: "نقداً",
-                                  notes: ""
+                                  paidPayroll,
+                                  empJournals,
+                                  empDeds,
+                                  month: selectedMonth
                                 });
                               }}
-                              className="bg-amber-500 hover:bg-amber-600 text-slate-950 px-3 py-1.5 rounded-xl text-[11px] font-black shadow-lg transition-all"
+                              className="px-2.5 py-1.5 bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border border-sky-500/30 rounded-xl text-[11px] font-black flex items-center gap-1 transition-all cursor-pointer"
+                              title="تصدير وطباعة كشف راتب الموظف (PDF) مفصل بالتأخيرات والسلف واليوميات"
                             >
-                              صرف وسداد الراتب
+                              <Printer className="w-3.5 h-3.5" />
+                              <span>كشف الراتب (PDF)</span>
                             </button>
-                          )}
+
+                            {paidPayroll ? (
+                              <>
+                                <span className="text-[10px] text-slate-500 font-mono hidden sm:inline">تم الصرف: {paidPayroll.paid_at?.slice(0, 10)}</span>
+                                <button
+                                  onClick={() => handleDeletePayroll(paidPayroll.id)}
+                                  title="إلغاء وحذف مسير السداد"
+                                  className="p-1.5 bg-white/5 hover:bg-rose-500/20 text-rose-400 rounded-lg border border-white/5 transition-all cursor-pointer"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                onClick={() => {
+                                  setPaySalaryForm({
+                                    employee: emp,
+                                    basicSalary,
+                                    allowances,
+                                    journalsTotal,
+                                    deductionsTotal,
+                                    advancesTotal,
+                                    netSalary,
+                                    treasury: "خزنة التحصيل",
+                                    method: "نقداً",
+                                    notes: ""
+                                  });
+                                }}
+                                className="bg-amber-500 hover:bg-amber-600 text-slate-950 px-3 py-1.5 rounded-xl text-[11px] font-black shadow-lg transition-all cursor-pointer"
+                              >
+                                صرف وسداد الراتب
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -2311,6 +2391,410 @@ export const HRModule: React.FC<HRProps> = ({
           </div>
         </div>
       )}
+
+      {/* Individual Employee Payroll Slip Print Modal (PDF) */}
+      {printPayrollSlip && (() => {
+        const { emp, basicSalary, allowances, journalsTotal, deductionsTotal, advancesTotal, netSalary, paidPayroll, empJournals, empDeds, month } = printPayrollSlip;
+        const totalGross = basicSalary + allowances + journalsTotal;
+        const totalDeducted = deductionsTotal + advancesTotal;
+        const companyName = companies.find(c => c.id === activeCompanyId)?.name || "شركة عرب وورلد للمقاولات العامة والتقسيط";
+
+        return (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50">
+            <div className="bg-slate-900 border border-white/10 rounded-3xl p-6 max-w-3xl w-full max-h-[92vh] overflow-y-auto space-y-6 text-right shadow-2xl">
+              <div className="flex justify-between items-center border-b border-white/10 pb-3">
+                <div className="flex items-center gap-2">
+                  <Printer className="w-5 h-5 text-sky-400" />
+                  <h3 className="text-sm font-black text-white">معاينة كشف راتب الموظف (PDF / طباعة): {emp.name}</h3>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handlePrint("payroll-slip-print-area")}
+                    className="bg-sky-500 hover:bg-sky-400 text-slate-950 font-black text-xs px-4 py-2 rounded-xl flex items-center gap-2 shadow-lg transition-all"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>تصدير وطباعة PDF</span>
+                  </button>
+                  <button
+                    onClick={() => setPrintPayrollSlip(null)}
+                    className="bg-white/5 hover:bg-white/10 text-slate-300 px-3 py-2 rounded-xl text-xs font-bold"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Printable PDF Area */}
+              <div id="payroll-slip-print-area" className="bg-white text-slate-900 p-8 rounded-2xl border border-slate-200 space-y-6 text-xs text-right shadow-sm leading-normal">
+                {/* Header with Company Logo / Title */}
+                <div className="flex justify-between items-start border-b-2 border-slate-900 pb-4">
+                  <div className="text-right">
+                    <h2 className="text-lg font-black text-slate-900 tracking-tight">{companyName}</h2>
+                    <p className="text-[11px] font-bold text-slate-600 mt-0.5">قسم الموارد البشرية وإدارة الرواتب والأجور</p>
+                    <p className="text-[10px] text-slate-500 font-mono">سجل رقمي معتمد</p>
+                  </div>
+                  <div className="text-left leading-relaxed">
+                    <div className="text-base font-black text-sky-700 bg-sky-50 px-3 py-1 rounded-lg border border-sky-200">
+                      كشف راتب موظف لشهر: {month}
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-1 font-mono">
+                      تاريخ الطباعة: {new Date().toLocaleDateString("ar-SA")}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Employee Info Matrix */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                  <div>
+                    <span className="block text-[10px] text-slate-500 font-bold">اسم الموظف</span>
+                    <strong className="text-xs text-slate-900">{emp.name}</strong>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] text-slate-500 font-bold">الرقم الوظيفي</span>
+                    <strong className="text-xs font-mono text-slate-900">{emp.employee_no || "-"}</strong>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] text-slate-500 font-bold">الهوية / الإقامة</span>
+                    <strong className="text-xs font-mono text-slate-900">{emp.id_iqama || "-"}</strong>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] text-slate-500 font-bold">المسمى الوظيفي</span>
+                    <strong className="text-xs text-slate-900">{emp.job_title || "-"}</strong>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] text-slate-500 font-bold">القسم / الفرع</span>
+                    <strong className="text-xs text-slate-900">{emp.department || "عام"} - {emp.branch || emp.project || "عام"}</strong>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] text-slate-500 font-bold">نظام الأجر</span>
+                    <strong className="text-xs text-slate-900">
+                      {emp.payment_method === "monthly" ? "راتب شهري ثابت" : `يوميات (${emp.daily_rate} ريال/يوم)`}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] text-slate-500 font-bold">الحساب البنكي / IBAN</span>
+                    <strong className="text-xs font-mono text-slate-900">{emp.iban || emp.bank_account || "نقداً"}</strong>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] text-slate-500 font-bold">حالة السداد للشهر</span>
+                    <strong className={`text-xs ${paidPayroll ? "text-emerald-700 font-black" : "text-amber-700 font-bold"}`}>
+                      {paidPayroll ? `مسدد بالسند: ${paidPayroll.voucher_no}` : "بانتظار الصرف"}
+                    </strong>
+                  </div>
+                </div>
+
+                {/* Earnings & Deductions Tables in Two Columns */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Earnings (المستحقات والإضافات) */}
+                  <div className="border border-emerald-200 rounded-xl overflow-hidden bg-emerald-50/30">
+                    <div className="bg-emerald-700 text-white px-3 py-2 font-black text-xs flex justify-between items-center">
+                      <span>(+) الاستحقاقات والإضافات</span>
+                      <span className="font-mono">{(totalGross || 0).toLocaleString()} ريال</span>
+                    </div>
+                    <table className="w-full text-right text-xs">
+                      <tbody>
+                        {emp.payment_method === "monthly" && (
+                          <>
+                            <tr className="border-b border-emerald-100">
+                              <td className="p-2 text-slate-700">الراتب الأساسي</td>
+                              <td className="p-2 text-left font-mono font-bold text-slate-900">{(basicSalary || 0).toLocaleString()} ريال</td>
+                            </tr>
+                            <tr className="border-b border-emerald-100">
+                              <td className="p-2 text-slate-700">البدلات (سكن، نقل، أخرى)</td>
+                              <td className="p-2 text-left font-mono font-bold text-slate-900">{(allowances || 0).toLocaleString()} ريال</td>
+                            </tr>
+                          </>
+                        )}
+                        {empJournals.length > 0 ? (
+                          empJournals.map(j => (
+                            <tr key={j.id} className="border-b border-emerald-100">
+                              <td className="p-2 text-slate-700">
+                                يومية: {j.date} {j.project ? `(${j.project})` : ""}
+                                <span className="block text-[9px] text-slate-500">ساعات عمل: {j.work_hours || 8} • إضافي: {j.overtime_hours || 0}</span>
+                              </td>
+                              <td className="p-2 text-left font-mono font-bold text-slate-900">{(j.total_entitled || 0).toLocaleString()} ريال</td>
+                            </tr>
+                          ))
+                        ) : (
+                          emp.payment_method !== "monthly" && (
+                            <tr>
+                              <td colSpan={2} className="p-3 text-center text-slate-400 text-[10px]">لا توجد يوميات مسجلة لهذا الشهر</td>
+                            </tr>
+                          )
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Deductions & Advances (الاستقطاعات والتأخيرات والسلف) */}
+                  <div className="border border-rose-200 rounded-xl overflow-hidden bg-rose-50/30">
+                    <div className="bg-rose-700 text-white px-3 py-2 font-black text-xs flex justify-between items-center">
+                      <span>(-) الاستقطاعات والسلف والتأخيرات</span>
+                      <span className="font-mono">{(totalDeducted || 0).toLocaleString()} ريال</span>
+                    </div>
+                    <table className="w-full text-right text-xs">
+                      <tbody>
+                        {empDeds.length > 0 ? (
+                          empDeds.map(d => (
+                            <tr key={d.id} className="border-b border-rose-100">
+                              <td className="p-2 text-slate-700">
+                                <span className="font-bold text-rose-800">[{d.type}]</span> {d.reason || "خصم مستقطع"}
+                                <span className="block text-[9px] text-slate-500">تاريخ القيد: {d.date}</span>
+                              </td>
+                              <td className="p-2 text-left font-mono font-bold text-rose-700">{(d.amount || 0).toLocaleString()} ريال</td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td colSpan={2} className="p-4 text-center text-slate-400 text-[10px]">
+                              لا توجد سلفيات أو تأخيرات أو خصميات مسجلة لهذا الشهر
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Net Summary Calculation Banner */}
+                <div className="bg-slate-900 text-white p-4 rounded-xl flex flex-col sm:flex-row justify-between items-center gap-3">
+                  <div className="flex items-center gap-6">
+                    <div>
+                      <span className="text-[10px] text-slate-400 block font-bold">إجمالي المستحق</span>
+                      <span className="font-mono font-bold text-emerald-400">{(totalGross || 0).toLocaleString()} ريال</span>
+                    </div>
+                    <div className="text-slate-500 font-bold text-sm">-</div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block font-bold">إجمالي الاستقطاعات والسلف</span>
+                      <span className="font-mono font-bold text-rose-400">{(totalDeducted || 0).toLocaleString()} ريال</span>
+                    </div>
+                  </div>
+                  <div className="text-left border-t sm:border-t-0 sm:border-r border-slate-700 pt-2 sm:pt-0 sm:pr-6">
+                    <span className="text-[10px] text-amber-400 block font-black">صافي الراتب المستحق للصرف</span>
+                    <span className="text-2xl font-black font-mono text-amber-300">
+                      {(netSalary || 0).toLocaleString()} <span className="text-sm font-sans font-bold">ريال سعودي</span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* Signatures & Notes */}
+                <div className="grid grid-cols-3 gap-6 pt-6 text-center border-t border-slate-200">
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold block mb-8">إعداد ومراجعة الموارد البشرية</span>
+                    <div className="border-t border-dashed border-slate-400 pt-1 text-[10px] text-slate-700 font-bold">التوقيع / الختم</div>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold block mb-8">الاعتماد المالي والإدارة</span>
+                    <div className="border-t border-dashed border-slate-400 pt-1 text-[10px] text-slate-700 font-bold">التوقيع / الختم</div>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold block mb-8">إقرار واستلام الموظف</span>
+                    <div className="border-t border-dashed border-slate-400 pt-1 text-[10px] text-slate-700 font-bold">توقيع المستلم</div>
+                  </div>
+                </div>
+
+                <div className="text-center text-[9px] text-slate-400 border-t border-slate-100 pt-2">
+                  تم استخراج هذا الكشف آلياً بواسطة نظام إدارة الموارد البشرية والرواتب - {companyName}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-white/10">
+                <button
+                  onClick={() => handlePrint("payroll-slip-print-area")}
+                  className="bg-sky-500 hover:bg-sky-400 text-slate-950 font-black text-xs px-5 py-2.5 rounded-xl flex items-center gap-2 shadow-lg transition-all"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>طباعة كشف الراتب (PDF)</span>
+                </button>
+                <button
+                  onClick={() => setPrintPayrollSlip(null)}
+                  className="bg-white/5 border border-white/5 text-slate-300 px-5 py-2.5 rounded-xl text-xs font-black"
+                >
+                  إغلاق
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Month Whole Payroll Matrix Print Modal (PDF) */}
+      {showMonthPayrollPrint && (() => {
+        const companyName = companies.find(c => c.id === activeCompanyId)?.name || "شركة عرب وورلد للمقاولات العامة والتقسيط";
+        let monthTotalBasic = 0;
+        let monthTotalJournals = 0;
+        let monthTotalDeds = 0;
+        let monthTotalAdvances = 0;
+        let monthTotalNet = 0;
+
+        return (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50">
+            <div className="bg-slate-900 border border-white/10 rounded-3xl p-6 max-w-5xl w-full max-h-[92vh] overflow-y-auto space-y-6 text-right shadow-2xl">
+              <div className="flex justify-between items-center border-b border-white/10 pb-3">
+                <div className="flex items-center gap-2">
+                  <Printer className="w-5 h-5 text-sky-400" />
+                  <h3 className="text-sm font-black text-white">معاينة مسير الرواتب الجماعي لشهر: {selectedMonth}</h3>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handlePrint("month-payroll-print-area")}
+                    className="bg-sky-500 hover:bg-sky-400 text-slate-950 font-black text-xs px-4 py-2 rounded-xl flex items-center gap-2 shadow-lg transition-all"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>تصدير وطباعة PDF</span>
+                  </button>
+                  <button
+                    onClick={() => setShowMonthPayrollPrint(false)}
+                    className="bg-white/5 hover:bg-white/10 text-slate-300 px-3 py-2 rounded-xl text-xs font-bold"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Printable Area for whole month */}
+              <div id="month-payroll-print-area" className="bg-white text-slate-900 p-8 rounded-2xl border border-slate-200 space-y-6 text-xs text-right shadow-sm leading-normal">
+                {/* Header */}
+                <div className="flex justify-between items-start border-b-2 border-slate-900 pb-4">
+                  <div className="text-right">
+                    <h2 className="text-xl font-black text-slate-900 tracking-tight">{companyName}</h2>
+                    <p className="text-xs font-bold text-slate-600 mt-1">كشف مسير رواتب وأجور الموظفين والعمال الشامل</p>
+                  </div>
+                  <div className="text-left leading-relaxed">
+                    <div className="text-base font-black text-sky-700 bg-sky-50 px-3 py-1 rounded-lg border border-sky-200">
+                      شهر الاستحقاق: {selectedMonth}
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-1 font-mono">
+                      عدد الموظفين: {employees.length} موظف
+                    </div>
+                  </div>
+                </div>
+
+                {/* Table of all employees */}
+                <div className="overflow-x-auto border border-slate-300 rounded-xl">
+                  <table className="w-full text-right text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-800 font-black border-b border-slate-300 text-[11px]">
+                        <th className="p-2.5 border-l border-slate-300">#</th>
+                        <th className="p-2.5 border-l border-slate-300">اسم الموظف</th>
+                        <th className="p-2.5 border-l border-slate-300">الوظيفة / المشروع</th>
+                        <th className="p-2.5 border-l border-slate-300">نظام الأجر</th>
+                        <th className="p-2.5 border-l border-slate-300">الأساسي والبدلات</th>
+                        <th className="p-2.5 border-l border-slate-300">اليوميات والإضافي</th>
+                        <th className="p-2.5 border-l border-slate-300">الخصميات والتأخير</th>
+                        <th className="p-2.5 border-l border-slate-300">السلف المستقطعة</th>
+                        <th className="p-2.5 border-l border-slate-300">صافي المستحق</th>
+                        <th className="p-2.5">حالة الصرف</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {employees.map((emp, idx) => {
+                        const empJournals = journals.filter(j => j.employee_id === emp.id && j.date.startsWith(selectedMonth) && j.status === "معتمدة");
+                        const journalsTotal = empJournals.reduce((s, j) => s + j.total_entitled, 0);
+
+                        const empDeds = deductions.filter(d => d.employee_id === emp.id && d.month_applied === selectedMonth && d.status === "معتمد");
+                        const deductionsTotal = empDeds.filter(d => d.type !== "سلفة").reduce((s, d) => s + d.amount, 0);
+                        const advancesTotal = empDeds.filter(d => d.type === "سلفة").reduce((s, d) => s + d.amount, 0);
+
+                        const basicSalary = emp.payment_method === "monthly" ? (emp.basic_salary || 0) : 0;
+                        const allowances = emp.payment_method === "monthly" ? (emp.allowances || 0) : 0;
+                        const grossBasicAllow = basicSalary + allowances;
+
+                        const gross = grossBasicAllow + journalsTotal;
+                        const netSalary = gross - (deductionsTotal + advancesTotal);
+
+                        monthTotalBasic += grossBasicAllow;
+                        monthTotalJournals += journalsTotal;
+                        monthTotalDeds += deductionsTotal;
+                        monthTotalAdvances += advancesTotal;
+                        monthTotalNet += netSalary;
+
+                        const paidPayroll = payrolls.find(p => p.employee_id === emp.id && p.month === selectedMonth && p.status === "مدفوع بالكامل");
+
+                        return (
+                          <tr key={emp.id} className="border-b border-slate-200 hover:bg-slate-50">
+                            <td className="p-2 font-mono text-center border-l border-slate-200">{idx + 1}</td>
+                            <td className="p-2 font-bold text-slate-900 border-l border-slate-200">{emp.name}</td>
+                            <td className="p-2 text-[10px] text-slate-600 border-l border-slate-200">{emp.job_title} • {emp.project || "عام"}</td>
+                            <td className="p-2 text-[10px] border-l border-slate-200">
+                              {emp.payment_method === "monthly" ? "شهري" : `يوميات (${emp.daily_rate})`}
+                            </td>
+                            <td className="p-2 font-mono border-l border-slate-200">
+                              {grossBasicAllow > 0 ? `${grossBasicAllow.toLocaleString()} ريال` : "-"}
+                            </td>
+                            <td className="p-2 font-mono border-l border-slate-200 font-bold text-amber-700">
+                              {journalsTotal > 0 ? `${journalsTotal.toLocaleString()} ريال` : "-"}
+                            </td>
+                            <td className="p-2 font-mono border-l border-slate-200 text-rose-700">
+                              {deductionsTotal > 0 ? `${deductionsTotal.toLocaleString()} ريال` : "-"}
+                            </td>
+                            <td className="p-2 font-mono border-l border-slate-200 text-purple-700">
+                              {advancesTotal > 0 ? `${advancesTotal.toLocaleString()} ريال` : "-"}
+                            </td>
+                            <td className="p-2 font-mono border-l border-slate-200 font-black text-emerald-800">
+                              {netSalary.toLocaleString()} ريال
+                            </td>
+                            <td className="p-2 text-[10px] font-bold">
+                              {paidPayroll ? (
+                                <span className="text-emerald-700 font-black">مدفوع ({paidPayroll.voucher_no})</span>
+                              ) : (
+                                <span className="text-amber-700">بانتظار الصرف</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-slate-900 text-white font-black text-[11px]">
+                        <td colSpan={4} className="p-3 text-center">الإجمالي العام لشهر ({selectedMonth})</td>
+                        <td className="p-3 font-mono">{monthTotalBasic.toLocaleString()} ريال</td>
+                        <td className="p-3 font-mono text-amber-300">{monthTotalJournals.toLocaleString()} ريال</td>
+                        <td className="p-3 font-mono text-rose-300">{monthTotalDeds.toLocaleString()} ريال</td>
+                        <td className="p-3 font-mono text-purple-300">{monthTotalAdvances.toLocaleString()} ريال</td>
+                        <td className="p-3 font-mono text-emerald-300">{monthTotalNet.toLocaleString()} ريال</td>
+                        <td className="p-3"></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+
+                {/* Signatures */}
+                <div className="grid grid-cols-3 gap-6 pt-8 text-center border-t border-slate-200">
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold block mb-8">إعداد الموارد البشرية</span>
+                    <div className="border-t border-dashed border-slate-400 pt-1 text-[10px] text-slate-700 font-bold">التوقيع والختم</div>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold block mb-8">المدير المالي</span>
+                    <div className="border-t border-dashed border-slate-400 pt-1 text-[10px] text-slate-700 font-bold">التوقيع والختم</div>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold block mb-8">اعتماد الإدارة العامة</span>
+                    <div className="border-t border-dashed border-slate-400 pt-1 text-[10px] text-slate-700 font-bold">التوقيع والختم</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-white/10">
+                <button
+                  onClick={() => handlePrint("month-payroll-print-area")}
+                  className="bg-sky-500 hover:bg-sky-400 text-slate-950 font-black text-xs px-5 py-2.5 rounded-xl flex items-center gap-2 shadow-lg transition-all"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>طباعة مسير الشهر (PDF)</span>
+                </button>
+                <button
+                  onClick={() => setShowMonthPayrollPrint(false)}
+                  className="bg-white/5 border border-white/5 text-slate-300 px-5 py-2.5 rounded-xl text-xs font-black"
+                >
+                  إغلاق
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Employee Add/Edit Modal */}
       {employeeForm && (

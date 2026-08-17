@@ -9,7 +9,7 @@ import {
   Printer, Trash2, Edit2, FileText, CheckCircle, AlertTriangle, Eye, X, Globe,
   RotateCw, RefreshCw, CalendarCheck, Activity, CheckCircle2, Filter, RotateCcw,
   ChevronDown, ChevronUp, LayoutGrid, Table as TableIcon, Calendar, Clock, DollarSign,
-  Maximize2, Minimize2, Info
+  Maximize2, Minimize2, Info, ArrowRightLeft
 } from "lucide-react";
 import { Installment, Project, User as AuthUser, Company, Worker } from "../types";
 import {
@@ -32,6 +32,17 @@ interface InstallmentsProps {
   onDeleteInstallment: (id: string) => void;
   onPrintContract: (id: string) => void;
   onMigrateInstallment?: (installmentId: string, targetCompanyId: string, reason?: string) => Promise<boolean>;
+  onTransferContractAndPayments?: (
+    sourceContractId: string,
+    targetContractId: string,
+    options: {
+      transferReceipts: boolean;
+      transferPayments: boolean;
+      transferRemainingDebt?: boolean;
+      sourceContractAction: "close_as_transferred" | "delete_source" | "keep_and_recalc";
+      reason?: string;
+    }
+  ) => Promise<boolean>;
   onCreateReceiptForContract?: (installment: Installment) => void;
   receipts: any[];
   companies?: Company[];
@@ -71,6 +82,7 @@ export const Installments: React.FC<InstallmentsProps> = ({
   onDeleteInstallment,
   onPrintContract,
   onMigrateInstallment,
+  onTransferContractAndPayments,
   onCreateReceiptForContract,
   receipts,
   companies,
@@ -446,6 +458,98 @@ export const Installments: React.FC<InstallmentsProps> = ({
 
   // Modal Detail State
   const [selectedFileContract, setSelectedFileContract] = useState<Installment | null>(null);
+
+  // Contract & Payments Transfer Modal State
+  const [transferSourceContract, setTransferSourceContract] = useState<Installment | null>(null);
+  const [transferTargetId, setTransferTargetId] = useState<string>("");
+  const [transferSearchQuery, setTransferSearchQuery] = useState<string>("");
+  const [transferAction, setTransferAction] = useState<"close_as_transferred" | "delete_source" | "keep_and_recalc">("close_as_transferred");
+  const [transferDebtTogether, setTransferDebtTogether] = useState<boolean>(false);
+  const [transferReason, setTransferReason] = useState<string>("");
+  const [isTransferring, setIsTransferring] = useState<boolean>(false);
+
+  // Receipts linked to currently selected transfer source contract
+  const sourceReceiptsList = transferSourceContract
+    ? receipts.filter(r => r.installment_id === transferSourceContract.id || (transferSourceContract.no && r.contract_no === transferSourceContract.no))
+    : [];
+  const sourceReceiptsSum = sourceReceiptsList.reduce((acc, r) => acc + Number(r.amount || 0), 0);
+
+  // Filter available target contracts
+  const getAvailableTransferTargets = () => {
+    if (!transferSourceContract) return [];
+    return installments.filter((item) => {
+      if (item.id === transferSourceContract.id) return false;
+      if (!transferSearchQuery.trim()) return true;
+      const q = transferSearchQuery.toLowerCase();
+      return (
+        (item.no && item.no.toLowerCase().includes(q)) ||
+        (item.client && item.client.toLowerCase().includes(q)) ||
+        (item.phone && item.phone.includes(q)) ||
+        (item.identity && item.identity.includes(q)) ||
+        (item.project && item.project.toLowerCase().includes(q))
+      );
+    });
+  };
+
+  const handleExecuteTransfer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!transferSourceContract || !transferTargetId) {
+      alert("يرجى اختيار العقد المستهدف لنقل السدادات إليه أولاً!");
+      return;
+    }
+
+    if (!transferReason.trim()) {
+      alert("يرجى كتابة سبب النقل للأغراض التدقيقية والرقابية!");
+      return;
+    }
+
+    const target = installments.find(i => i.id === transferTargetId);
+    if (!target) return;
+
+    const sourceRemaining = Number(transferSourceContract.remaining || 0);
+
+    const actionText = 
+      transferAction === "close_as_transferred" ? "إغلاق وتصفير العقد المصدر كعقد مدمج ومنقول" :
+      transferAction === "delete_source" ? "حذف نهائي للعقد المصدر بعد نقل السندات" : "إبقاء العقد المصدر مع إعادة احتساب رصيده";
+
+    const confirmMsg = `تأكيد نقل العقد وسداداته:
+• العقد المصدر: [${transferSourceContract.no} - ${transferSourceContract.client}]
+• عدد السندات المنقولة: ${sourceReceiptsList.length} سند بقيمة إجمالية (${sourceReceiptsSum.toLocaleString()} ريال)
+• العقد المستهدف: [${target.no} - ${target.client}]
+• الإجراء على العقد المصدر: ${actionText}
+${transferDebtTogether ? `• دمج المديونية المتبقية: إضافة (${sourceRemaining.toLocaleString()} ريال) إلى قيمة العقد المستهدف\n` : ""}
+هل ترغب في تنفيذ العملية وتحديث المراكز المالية والقيود الآن؟`;
+
+    if (!confirm(confirmMsg)) return;
+
+    setIsTransferring(true);
+    try {
+      if (onTransferContractAndPayments) {
+        const success = await onTransferContractAndPayments(
+          transferSourceContract.id,
+          transferTargetId,
+          {
+            transferReceipts: true,
+            transferPayments: true,
+            transferRemainingDebt: transferDebtTogether,
+            sourceContractAction: transferAction,
+            reason: transferReason.trim(),
+          }
+        );
+
+        if (success) {
+          setTransferSourceContract(null);
+          setTransferTargetId("");
+          setTransferReason("");
+          if (selectedFileContract) {
+            setSelectedFileContract(null);
+          }
+        }
+      }
+    } finally {
+      setIsTransferring(false);
+    }
+  };
 
   useEffect(() => {
     if (selectedFileContract) {
@@ -1806,6 +1910,24 @@ export const Installments: React.FC<InstallmentsProps> = ({
                                 </button>
                               )}
 
+                              {/* Transfer Contract & Payments Button */}
+                              {onTransferContractAndPayments && ((finalPerms?.installmentsEdit) || currentUser?.role === "admin") && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setTransferSourceContract(item);
+                                    setTransferTargetId("");
+                                    setTransferReason("");
+                                    setTransferSearchQuery("");
+                                  }}
+                                  className="px-2.5 py-1.5 bg-amber-500/15 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-amber-500/30 rounded-xl text-xs font-black transition-all flex items-center gap-1 cursor-pointer shadow-sm"
+                                  title="نقل العقد وسداداته إلى أي عقد يتم اختياره"
+                                >
+                                  <ArrowRightLeft className="w-3.5 h-3.5" />
+                                  <span>نقل وسدادات</span>
+                                </button>
+                              )}
+
                               {/* Delete Button */}
                               {(currentUser?.role === "admin" || finalPerms?.installmentsDelete) && (
                                 <button
@@ -2145,6 +2267,24 @@ export const Installments: React.FC<InstallmentsProps> = ({
                           >
                             <RotateCw className="w-3.5 h-3.5" />
                             <span>تجديد</span>
+                          </button>
+                        )}
+
+                        {/* Transfer Contract & Payments */}
+                        {onTransferContractAndPayments && ((finalPerms?.installmentsEdit) || currentUser?.role === "admin") && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setTransferSourceContract(item);
+                              setTransferTargetId("");
+                              setTransferReason("");
+                              setTransferSearchQuery("");
+                            }}
+                            className="px-3 py-1.5 bg-amber-500/15 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-amber-500/30 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                            title="نقل العقد وسداداته إلى عقد آخر يتم اختياره"
+                          >
+                            <ArrowRightLeft className="w-3.5 h-3.5" />
+                            <span>نقل وسدادات العقد</span>
                           </button>
                         )}
                       </div>
@@ -2570,10 +2710,44 @@ export const Installments: React.FC<InstallmentsProps> = ({
                 </div>
               )}
 
+              {/* نقل وسدادات العقد إلى عقد آخر */}
+              {onTransferContractAndPayments && ((finalPerms?.installmentsEdit) || currentUser?.role === "admin") && (
+                <div className="border border-blue-500/20 bg-blue-500/5 p-5 rounded-2xl space-y-3.5 mt-2">
+                  <div className="flex items-center justify-between">
+                    <h5 className="text-sm font-black text-blue-300 flex items-center gap-1.5">
+                      <ArrowRightLeft className="w-4 h-4 text-amber-400" />
+                      <span>نقل العقد وسداداته إلى عقد آخر</span>
+                    </h5>
+                    <span className="text-[10px] font-bold text-slate-400">
+                      سندات مرتبطة: <strong className="text-amber-400">{activeReceipts.length} سند</strong>
+                    </span>
+                  </div>
+                  <p className="text-[11px] font-bold text-slate-300 leading-relaxed font-sans">
+                    يتيح لك هذا الخيار نقل كافة سندات القبض والدفعات المسجلة تحت هذا العقد إلى أي عقد آخر مسجل في النظام، مع إمكانية دمج المديونية وتحديث الأرصدة المالية لكلا العقدين فورياً وبشكل موثق رقابياً.
+                  </p>
+                  <div className="flex justify-end pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const c = selectedFileContract;
+                        setTransferSourceContract(c);
+                        setTransferTargetId("");
+                        setTransferReason("");
+                        setTransferSearchQuery("");
+                      }}
+                      className="px-4 py-2 rounded-xl text-xs font-black bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 flex items-center gap-1.5 transition-all shadow-lg shadow-amber-500/15 cursor-pointer"
+                    >
+                      <ArrowRightLeft className="w-3.5 h-3.5" />
+                      <span>فتح نافذة نقل وسدادات العقد</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
             </div>
 
             {/* Modal Actions */}
-            <div className="sticky bottom-0 bg-slate-900 border-t border-slate-800 p-4 shrink-0 flex justify-end gap-3 z-10">
+            <div className="sticky bottom-0 bg-slate-900 border-t border-slate-800 p-4 shrink-0 flex justify-end gap-3 z-10 flex-wrap">
               {(currentUser?.role === "admin" || finalPerms?.installmentsDelete) && (
                 <button
                   type="button"
@@ -2587,6 +2761,24 @@ export const Installments: React.FC<InstallmentsProps> = ({
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   حذف العقد
+                </button>
+              )}
+
+              {onTransferContractAndPayments && ((finalPerms?.installmentsEdit) || currentUser?.role === "admin") && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const c = selectedFileContract;
+                    setTransferSourceContract(c);
+                    setTransferTargetId("");
+                    setTransferReason("");
+                    setTransferSearchQuery("");
+                  }}
+                  className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl flex items-center gap-1.5 shadow transition-all cursor-pointer"
+                  title="نقل العقد وسداداته إلى أي عقد يتم اختياره"
+                >
+                  <ArrowRightLeft className="w-3.5 h-3.5" />
+                  <span>نقل وسدادات العقد</span>
                 </button>
               )}
               
@@ -3248,6 +3440,309 @@ export const Installments: React.FC<InstallmentsProps> = ({
                   )}
                 </button>
               </div>
+            </form>
+
+          </div>
+        </div>
+      )}
+
+      {/* Contract & Payments Transfer Modal */}
+      {transferSourceContract && (
+        <div className="fixed inset-0 z-[1000] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 w-full max-w-3xl max-h-[92vh] overflow-y-auto rounded-3xl shadow-2xl flex flex-col">
+            
+            {/* Header */}
+            <div className="sticky top-0 bg-slate-900 px-6 py-5 border-b border-slate-800 flex justify-between items-center z-10">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center text-lg shrink-0">
+                  <ArrowRightLeft className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-base font-black text-white flex items-center gap-2">
+                    <span>نقل العقد وسداداته إلى عقد آخر</span>
+                    <span className="text-[11px] font-mono text-amber-400 bg-slate-950 px-2 py-0.5 rounded-lg border border-slate-800">
+                      {transferSourceContract.no}
+                    </span>
+                  </h4>
+                  <p className="text-xs text-slate-400 font-bold mt-0.5">
+                    نقل كافة سندات القبض والدفعات من العقد الحالي إلى أي عقد مستهدف مع إعادة احتساب المركز المالي فوراً
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTransferSourceContract(null)}
+                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
+                title="إغلاق"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <form onSubmit={handleExecuteTransfer} className="p-6 space-y-6 flex-1">
+              
+              {/* Source Contract Summary Card */}
+              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4.5 space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-850 pb-2">
+                  <span className="text-xs font-black text-amber-400 flex items-center gap-1.5">
+                    <span>📤</span> بيانات العقد المصدر (المُراد نقله):
+                  </span>
+                  <span className="text-xs font-bold text-slate-300">
+                    العميل: <strong className="text-white">{transferSourceContract.client}</strong>
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                  <div className="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
+                    <span className="block text-[10px] text-slate-400 mb-0.5">قيمة العقد الكلية:</span>
+                    <span className="font-mono text-white font-black">{Number(transferSourceContract.amount || 0).toLocaleString()} ريال</span>
+                  </div>
+                  <div className="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
+                    <span className="block text-[10px] text-slate-400 mb-0.5">المدفوع الحالي:</span>
+                    <span className="font-mono text-emerald-400 font-black">{Number(transferSourceContract.paid || 0).toLocaleString()} ريال</span>
+                  </div>
+                  <div className="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
+                    <span className="block text-[10px] text-slate-400 mb-0.5">المتبقي المطلوب:</span>
+                    <span className="font-mono text-rose-400 font-black">{Number(transferSourceContract.remaining || 0).toLocaleString()} ريال</span>
+                  </div>
+                  <div className="bg-slate-900/80 p-2.5 rounded-xl border border-amber-500/30 bg-amber-500/5">
+                    <span className="block text-[10px] text-amber-300 mb-0.5">السندات المرتبطة للنقل:</span>
+                    <span className="font-mono text-amber-400 font-black">
+                      {sourceReceiptsList.length} سند ({sourceReceiptsSum.toLocaleString()} ريال)
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Target Contract Selector */}
+              <div className="space-y-3">
+                <label className="block text-xs font-black text-white flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <span>🎯</span> اختر العقد المستهدف (المحوّل إليه السدادات):
+                  </span>
+                  <span className="text-[11px] text-slate-400 font-normal">
+                    (اختر من قائمة العقود المسجلة)
+                  </span>
+                </label>
+
+                {/* Search filter for targets */}
+                <div className="relative">
+                  <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={transferSearchQuery}
+                    onChange={(e) => setTransferSearchQuery(e.target.value)}
+                    placeholder="ابحث برقم العقد، اسم العميل، رقم الهاتف أو الهوية..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pr-10 pl-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                {/* Target contract select dropdown / list */}
+                <select
+                  value={transferTargetId}
+                  onChange={(e) => setTransferTargetId(e.target.value)}
+                  size={5}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500 cursor-pointer scrollbar-thin divide-y divide-slate-850"
+                  required
+                >
+                  {getAvailableTransferTargets().length > 0 ? (
+                    getAvailableTransferTargets().map((tgt) => {
+                      const tgtCompany = companies?.find(c => c.id === tgt.company_id)?.name || "";
+                      return (
+                        <option
+                          key={tgt.id}
+                          value={tgt.id}
+                          className="p-2.5 hover:bg-slate-900 rounded-lg cursor-pointer text-white font-bold my-0.5 flex justify-between"
+                        >
+                          {tgt.no} — {tgt.client} | القيمة: {Number(tgt.amount || 0).toLocaleString()} ر.س | المتبقي: {Number(tgt.remaining || 0).toLocaleString()} ر.س {tgtCompany ? `(${tgtCompany})` : ""}
+                        </option>
+                      );
+                    })
+                  ) : (
+                    <option disabled value="" className="p-3 text-center text-slate-500">
+                      لا توجد عقود مطابقة لشروط البحث
+                    </option>
+                  )}
+                </select>
+              </div>
+
+              {/* Target Contract Live Preview & Simulation */}
+              {(() => {
+                const target = installments.find(i => i.id === transferTargetId);
+                if (!target) return null;
+
+                const targetCurrentPaid = Number(target.paid || 0);
+                const targetCurrentAmount = Number(target.amount || 0);
+                const targetCurrentRemaining = Number(target.remaining || 0);
+                const targetNewPaid = targetCurrentPaid + sourceReceiptsSum;
+                const sourceRemaining = Number(transferSourceContract.remaining || 0);
+                const targetNewAmount = targetCurrentAmount + (transferDebtTogether ? sourceRemaining : 0);
+                const targetNewRemaining = Math.max(0, targetNewAmount - targetNewPaid);
+
+                return (
+                  <div className="bg-gradient-to-br from-blue-950/40 to-slate-950 border border-blue-500/30 rounded-2xl p-4.5 space-y-3 shadow-lg">
+                    <div className="flex items-center justify-between border-b border-blue-500/20 pb-2">
+                      <span className="text-xs font-black text-blue-300 flex items-center gap-1.5">
+                        <span>📥</span> معاينة العقد المستهدف بعد استلام السدادات:
+                      </span>
+                      <span className="text-xs font-mono font-bold text-white">
+                        [{target.no} - {target.client}]
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                      <div className="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
+                        <span className="block text-[10px] text-slate-400 mb-0.5">القيمة الإجمالية الجديدة:</span>
+                        <span className="font-mono text-white font-black">{targetNewAmount.toLocaleString()} ريال</span>
+                        {transferDebtTogether && sourceRemaining > 0 && (
+                          <span className="block text-[9px] text-amber-300 mt-0.5">+{sourceRemaining.toLocaleString()} دمج مديونية</span>
+                        )}
+                      </div>
+                      <div className="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
+                        <span className="block text-[10px] text-slate-400 mb-0.5">المدفوع الجديد:</span>
+                        <span className="font-mono text-emerald-400 font-black">{targetNewPaid.toLocaleString()} ريال</span>
+                        <span className="block text-[9px] text-emerald-300 mt-0.5">+{sourceReceiptsSum.toLocaleString()} سندات منقولة</span>
+                      </div>
+                      <div className="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
+                        <span className="block text-[10px] text-slate-400 mb-0.5">المتبقي المطلوب الجديد:</span>
+                        <span className="font-mono text-cyan-300 font-black">{targetNewRemaining.toLocaleString()} ريال</span>
+                        <span className="block text-[9px] text-slate-400 mt-0.5">السابق: {targetCurrentRemaining.toLocaleString()} ريال</span>
+                      </div>
+                      <div className="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
+                        <span className="block text-[10px] text-slate-400 mb-0.5">حالة العقد المتوقعة:</span>
+                        <span className={`text-xs font-black ${targetNewRemaining <= 0 ? "text-emerald-400" : "text-blue-300"}`}>
+                          {targetNewRemaining <= 0 ? "✅ مكتمل ومسدد بالكامل" : "⚡ جاري / منتظم"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Execution Options */}
+              <div className="space-y-4 pt-1 border-t border-slate-850">
+                <span className="block text-xs font-black text-slate-300">⚙️ خيارات المعالجة والإجراء على العقد المصدر:</span>
+
+                <div className="space-y-2.5">
+                  <label className={`flex items-start gap-3 p-3 rounded-xl border transition-colors cursor-pointer ${
+                    transferAction === "close_as_transferred" ? "bg-amber-500/10 border-amber-500/40 text-white" : "bg-slate-950/40 border-slate-800 text-slate-300 hover:bg-slate-900"
+                  }`}>
+                    <input
+                      type="radio"
+                      name="transfer_action"
+                      checked={transferAction === "close_as_transferred"}
+                      onChange={() => setTransferAction("close_as_transferred")}
+                      className="mt-1 accent-amber-500 cursor-pointer"
+                    />
+                    <div>
+                      <strong className="block text-xs text-amber-300">إغلاق وتصفير العقد المصدر كعقد مدمج ومنقول (موصى به)</strong>
+                      <span className="block text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                        يتم تحويل حالة العقد المصدر إلى "مكتمل" وتصفير المتبقي مع توثيق عملية النقل في الأرشيف لضمان السلامة الرقابية.
+                      </span>
+                    </div>
+                  </label>
+
+                  <label className={`flex items-start gap-3 p-3 rounded-xl border transition-colors cursor-pointer ${
+                    transferAction === "delete_source" ? "bg-rose-500/10 border-rose-500/40 text-white" : "bg-slate-950/40 border-slate-800 text-slate-300 hover:bg-slate-900"
+                  }`}>
+                    <input
+                      type="radio"
+                      name="transfer_action"
+                      checked={transferAction === "delete_source"}
+                      onChange={() => setTransferAction("delete_source")}
+                      className="mt-1 accent-rose-500 cursor-pointer"
+                    />
+                    <div>
+                      <strong className="block text-xs text-rose-300">حذف العقد المصدر نهائياً من النظام بعد ترحيل كافة السندات</strong>
+                      <span className="block text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                        يتم ترحيل جميع السندات والدفعات أولاً ثم حذف بطاقة العقد المصدر بالكامل من قاعدة البيانات.
+                      </span>
+                    </div>
+                  </label>
+
+                  <label className={`flex items-start gap-3 p-3 rounded-xl border transition-colors cursor-pointer ${
+                    transferAction === "keep_and_recalc" ? "bg-blue-500/10 border-blue-500/40 text-white" : "bg-slate-950/40 border-slate-800 text-slate-300 hover:bg-slate-900"
+                  }`}>
+                    <input
+                      type="radio"
+                      name="transfer_action"
+                      checked={transferAction === "keep_and_recalc"}
+                      onChange={() => setTransferAction("keep_and_recalc")}
+                      className="mt-1 accent-blue-500 cursor-pointer"
+                    />
+                    <div>
+                      <strong className="block text-xs text-blue-300">إبقاء العقد المصدر نشطاً مع إعادة احتساب رصيده المتبقي</strong>
+                      <span className="block text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                        يتم نقل السندات فقط إلى العقد المستهدف، وإعادة احتساب رصيد العقد المصدر وفق السندات المتبقية لديه.
+                      </span>
+                    </div>
+                  </label>
+                </div>
+
+                {/* Transfer Debt Option */}
+                {Number(transferSourceContract.remaining || 0) > 0 && (
+                  <label className="flex items-center gap-2.5 p-3 rounded-xl bg-slate-950/60 border border-slate-800 cursor-pointer hover:border-amber-500/40 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={transferDebtTogether}
+                      onChange={(e) => setTransferDebtTogether(e.target.checked)}
+                      className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                    />
+                    <div className="text-xs">
+                      <span className="text-white font-bold">دمج المديونية المتبقية: </span>
+                      <span className="text-amber-300 font-mono font-bold">
+                        إضافة مبلغ ({Number(transferSourceContract.remaining || 0).toLocaleString()} ريال)
+                      </span>
+                      <span className="text-slate-400"> إلى إجمالي قيمة العقد المستهدف.</span>
+                    </div>
+                  </label>
+                )}
+
+                {/* Reason Input */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-300">
+                    السبب الرقابي والتدقيقي للنقل والتحويل <span className="text-rose-400">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={transferReason}
+                    onChange={(e) => setTransferReason(e.target.value)}
+                    placeholder="مثال: دمج حسابات العميل، تصحيح تسجيل سندات بالخطأ، تسوية تعاقدية..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-amber-500"
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Modal Footer Actions */}
+              <div className="p-4 bg-slate-950 border-t border-slate-800 -mx-6 -mb-6 flex items-center justify-end gap-3 rounded-b-3xl shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setTransferSourceContract(null)}
+                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-750 text-slate-300 font-black text-xs rounded-xl transition-all cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={isTransferring || !transferTargetId}
+                  className="px-6 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-amber-500/20 flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {isTransferring ? (
+                    <>
+                      <span className="w-3.5 h-3.5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin"></span>
+                      <span>جاري تنفيذ النقل وتحديث القيود...</span>
+                    </>
+                  ) : (
+                    <>
+                      <ArrowRightLeft className="w-4 h-4" />
+                      <span>تأكيد وتنفيذ نقل العقد والسدادات</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
             </form>
 
           </div>

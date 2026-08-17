@@ -3082,6 +3082,151 @@ export default function App() {
     }
   };
 
+  const onTransferContractAndPayments = async (
+    sourceContractId: string,
+    targetContractId: string,
+    options: {
+      transferReceipts: boolean;
+      transferPayments: boolean;
+      transferRemainingDebt?: boolean;
+      sourceContractAction: "close_as_transferred" | "delete_source" | "keep_and_recalc";
+      reason?: string;
+    }
+  ): Promise<boolean> => {
+    if (!can("installmentsEdit") && currentUser?.role !== "admin") {
+      showToast("⚠️ عذراً، لا تملك الصلاحية اللازمة لنقل العقود والسدادات!", "error");
+      return false;
+    }
+
+    setIsLoading(true);
+    try {
+      const source = installments.find(i => i.id === sourceContractId);
+      const target = installments.find(i => i.id === targetContractId);
+
+      if (!source || !target) {
+        showToast("عذراً، لم يتم العثور على أحد العقدين المحددين في النظام", "error");
+        return false;
+      }
+
+      if (sourceContractId === targetContractId) {
+        showToast("لا يمكن نقل العقد وسداداته إلى نفس العقد!", "error");
+        return false;
+      }
+
+      const transferDate = new Date().toISOString().slice(0, 10);
+      const transferAuditTag = `[تم تحويله ونقله من العقد رقم: ${source.no} (${source.client})]`;
+
+      // 1. Transfer receipts (سندات القبض)
+      if (options.transferReceipts !== false) {
+        const { data: recByInst } = await sb.from("receipts").select("*").eq("installment_id", sourceContractId);
+        const { data: recByNo } = source.no ? await sb.from("receipts").select("*").eq("contract_no", source.no) : { data: [] };
+
+        const allSourceReceipts = new Map<string, any>();
+        (recByInst || []).forEach((r: any) => { if (r?.id) allSourceReceipts.set(r.id, r); });
+        (recByNo || []).forEach((r: any) => { if (r?.id) allSourceReceipts.set(r.id, r); });
+
+        for (const r of Array.from(allSourceReceipts.values())) {
+          const currentNotes = String(r.notes || "");
+          const updatedNotes = currentNotes.includes(transferAuditTag) ? currentNotes : `${currentNotes} ${transferAuditTag}`.trim();
+          await sb.from("receipts").update({
+            installment_id: target.id,
+            contract_no: target.no,
+            company_id: target.company_id || source.company_id,
+            notes: updatedNotes,
+          }).eq("id", r.id);
+        }
+      }
+
+      // 2. Transfer payments (سندات الصرف)
+      if (options.transferPayments !== false) {
+        const { data: payByInst } = await sb.from("payments").select("*").eq("installment_id", sourceContractId);
+        const { data: payByNo } = source.no ? await sb.from("payments").select("*").eq("contract_no", source.no) : { data: [] };
+
+        const allSourcePayments = new Map<string, any>();
+        (payByInst || []).forEach((p: any) => { if (p?.id) allSourcePayments.set(p.id, p); });
+        (payByNo || []).forEach((p: any) => { if (p?.id) allSourcePayments.set(p.id, p); });
+
+        for (const p of Array.from(allSourcePayments.values())) {
+          const currentNotes = String(p.notes || "");
+          const updatedNotes = currentNotes.includes(transferAuditTag) ? currentNotes : `${currentNotes} ${transferAuditTag}`.trim();
+          await sb.from("payments").update({
+            installment_id: target.id,
+            contract_no: target.no,
+            company_id: target.company_id || source.company_id,
+            notes: updatedNotes,
+          }).eq("id", p.id);
+        }
+      }
+
+      // 3. If transferRemainingDebt is requested
+      if (options.transferRemainingDebt && Number(source.remaining || 0) > 0) {
+        const debtTransferred = Number(source.remaining || 0);
+        const currentTargetAmount = Number(target.amount || 0);
+        const newTargetAmount = currentTargetAmount + debtTransferred;
+        const targetNotesUpdated = (target.notes ? `${target.notes} | ` : "") +
+          `[تم دمج ونقل مديونية متبقية قدرها ${debtTransferred.toLocaleString()} ريال من العقد رقم ${source.no}]`;
+
+        await sb.from("installments").update({
+          amount: newTargetAmount,
+          notes: targetNotesUpdated
+        }).eq("id", target.id);
+      }
+
+      // 4. Handle Source Contract Action
+      if (options.sourceContractAction === "delete_source") {
+        await sb.from("installments").delete().eq("id", sourceContractId);
+      } else if (options.sourceContractAction === "close_as_transferred") {
+        const updatedSourceNotes = (source.notes ? `${source.notes} | ` : "") +
+          `[تم نقل العقد وسداداته بالكامل إلى العقد رقم: ${target.no} (${target.client}) بتاريخ ${transferDate}]` +
+          (options.reason ? ` [السبب: ${options.reason}]` : "");
+
+        await sb.from("installments").update({
+          status: "مكتمل",
+          remaining: 0,
+          notes: updatedSourceNotes
+        }).eq("id", sourceContractId);
+      } else {
+        // keep_and_recalc
+        const updatedSourceNotes = (source.notes ? `${source.notes} | ` : "") +
+          `[تم تحويل ونقل السندات إلى العقد رقم: ${target.no} بتاريخ ${transferDate}]` +
+          (options.reason ? ` [السبب: ${options.reason}]` : "");
+
+        await sb.from("installments").update({
+          notes: updatedSourceNotes
+        }).eq("id", sourceContractId);
+
+        await recalcLinkedContractFromReceipts(sourceContractId);
+      }
+
+      // 5. Recalculate target contract financials
+      await recalcLinkedContractFromReceipts(target.id);
+
+      // Append note to target contract
+      const updatedTargetNotes = (target.notes ? `${target.notes} | ` : "") +
+        `[تم استلام سندات وسدادات منقولة من العقد رقم: ${source.no} (${source.client}) بتاريخ ${transferDate}]` +
+        (options.reason ? ` [السبب: ${options.reason}]` : "");
+
+      await sb.from("installments").update({
+        notes: updatedTargetNotes
+      }).eq("id", target.id);
+
+      // 6. Log session for auditing
+      const logMsg = `نقل العقد وسداداته: تم نقل سندات ومدفوعات العقد (${source.no} - ${source.client}) إلى العقد المستهدف (${target.no} - ${target.client}) [الإجراء على المصدر: ${options.sourceContractAction}]` +
+        (options.reason ? ` [السبب: ${options.reason}]` : "");
+      await logSession(currentUser!, logMsg);
+
+      await loadEverything();
+      showToast(`تم نقل العقد وسداداته بنجاح إلى العقد رقم ${target.no} (${target.client})`);
+      return true;
+    } catch (err: any) {
+      console.error("Transfer contract error:", err);
+      showToast("حدث خطأ أثناء تنفيذ عملية نقل العقد وسداداته", "error");
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Print popup styling logic matching screenshot details
   const onPrintContract = (id: string) => {
     const x = installments.find((a) => a.id === id);
@@ -3347,6 +3492,249 @@ ${attachment ? `
       w.document.close();
     } catch (e) {
       console.warn("Exception during Popups window.open printing:", e);
+    }
+  };
+
+  const onPrintPayment = (p: Payment) => {
+    const assocCompanyId = p.company_id || "arab_world";
+    const compLogo = localStorage.getItem(`aw_company_logo_${assocCompanyId}`) || "";
+    const comp = companies.find((c) => c.id === assocCompanyId) || companies[0];
+    const compName = comp?.name || "شركة عرب وورلد للمقاولات";
+    const crNumber = comp?.commercial_register || comp?.record_no || "1010777555";
+    const taxNumber = comp?.tax_no || "لا يوجد";
+    const phone = comp?.phone || "0556446888";
+    const address = comp?.address || "المملكة العربية السعودية";
+    const attachment = awExtractAttachment(p.notes || "");
+    const treasury = awExtractTreasury(p.notes || "") || "خزنة الشركة";
+    const region = awExtractRegion(p.notes || "") || "الفرع الرئيسي";
+    const beneficiaryType = awExtractBeneficiaryType(p.notes || "", p.worker_id, p.to_name) || (p.worker_id ? "عامل / فني" : "مستفيد عام");
+    const cleanNotes = awCleanNotes(p.notes || "");
+
+    try {
+      const w = window.open("", "_blank");
+      if (!w) {
+        showToast("تنبيه: ملقم المتصفح حظر نافذة الطباعة التلقائية!", "info");
+        return;
+      }
+
+      w.document.write(`
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>سند صرف مالي - رقم ${p.no}</title>
+<style>
+*{box-sizing:border-box;font-family:Tahoma,Arial}
+body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
+.page{width:210mm;min-height:297mm;margin:auto;background:white;padding:20mm;box-shadow:0 10px 35px #0002;position:relative;border-radius:12px}
+.head{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #dc2626;padding-bottom:18px;margin-bottom:20px}
+.brand{text-align:center;flex:1}
+.brand h1{margin:0;font-size:26px;color:#07153a}
+.brand p{margin:6px 0 0;color:#dc2626;font-weight:bold;font-size:12px}
+.logo{width:54px;height:65px;position:relative;margin:auto}
+.logo:before,.logo:after{content:"";position:absolute;border:5px solid #111827;border-left:0;border-bottom:0;transform:skewY(-25deg)}
+.logo:before{width:30px;height:55px;right:18px;top:0}
+.logo:after{width:16px;height:45px;right:8px;top:10px;border-color:#dc2626}
+.title{background:linear-gradient(90deg,#07153a,#dc2626);color:white;text-align:center;padding:12px;border-radius:10px;font-size:20px;margin:20px 0;letter-spacing:1px;font-weight:bold}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+.box{border:1px solid #d9dee8;border-radius:10px;padding:9.5px;background:#fbfcff;min-height:54px}
+.box b{display:block;color:#991b1b;margin-bottom:4px;font-size:11px}
+.box span{font-size:13.5px;font-weight:bold}
+.amount-wrapper{text-align:center;background:#fef2f2;border:2px dashed #f87171;border-radius:12px;padding:18px;margin:25px 0}
+.amount-wrapper b{display:block;color:#991b1b;font-size:14px;margin-bottom:6px}
+.amount-wrapper span{font-size:28px;color:#dc2626;font-weight:900;font-family:monospace}
+.signs{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:45px}
+.sign{height:100px;border-top:1px dashed #777;padding-top:10px;text-align:center;color:#333;font-weight:bold;font-size:12px}
+.footer{position:absolute;bottom:12mm;left:20mm;right:20mm;text-align:center;color:#666;font-size:10px;border-top:1px solid #eee;padding-top:10px}
+.no-print{position:fixed;top:15px;left:15px;display:flex;gap:8px}
+.no-print button{border:0;border-radius:10px;padding:10px 15px;color:white;cursor:pointer;font-weight:bold}
+.print{background:#dc2626}.close{background:#64748b}
+@media print{body{background:white;padding:0}.page{box-shadow:none;margin:0;width:auto;min-height:auto}.no-print{display:none}}
+</style>
+</head>
+<body>
+<div class="no-print">
+<button class="print" onclick="window.print()">طباعة / حفظ PDF</button>
+<button class="close" onclick="window.close()">إغلاق</button>
+</div>
+<div class="page">
+  <div class="head">
+    <div style="width:120px;text-align:center;display:flex;align-items:center;justify-content:center">
+      ${compLogo ? `<img src="${compLogo}" style="max-height:65px;max-width:120px;object-fit:contain" referrerPolicy="no-referrer" />` : `<div class="logo"></div>`}
+    </div>
+    <div class="brand">
+      <h1>${compName}</h1>
+      <p>السجل: ${crNumber} | الرقم الضريبي: ${taxNumber} | الجوال: ${phone}</p>
+      <p style="color:#07153a;font-size:11px;margin-top:2px;">${address}</p>
+    </div>
+    <div style="width:120px;font-size:11px;line-height:1.7"><b>رقم السند:</b><br>${p.no}<br><b>التاريخ:</b><br>${p.date}</div>
+  </div>
+  <div class="title">سند صرف مالي مقيد محاسبيًا</div>
+  <div class="grid">
+    <div class="box"><b>يصرف للمكرم / المستفيد</b><span>${p.to_name}</span></div>
+    <div class="box"><b>صفة وجهة المستفيد</b><span>${beneficiaryType}</span></div>
+    <div class="box"><b>طريقة ووسيلة الصرف</b><span>${p.method || "نقدي"}</span></div>
+    <div class="box"><b>الفرع الإداري للصرف</b><span>${region}</span></div>
+    <div class="box"><b>الصندوق / الخزنة المسحوب منها</b><span>🏦 ${treasury}</span></div>
+    <div class="box"><b>المشروع التابع</b><span>${p.project || "عام"}</span></div>
+    <div class="box"><b>رقم العقد التابع (إن وجد)</b><span>${p.contract_no || "سند عام غير تابع لعقد"}</span></div>
+    <div class="box"><b>المتبقي قبل الصرف</b><span>${p.remaining_before !== undefined && p.remaining_before !== null ? Number(p.remaining_before).toLocaleString() + " ريال" : "—"}</span></div>
+    <div class="box"><b>المتبقي بعد الصرف</b><span>${p.remaining_after !== undefined && p.remaining_after !== null ? Number(p.remaining_after).toLocaleString() + " ريال" : "—"}</span></div>
+    <div class="box" style="grid-column: span 3"><b>البيان وملاحظات الصرف بالكامل</b><span>${cleanNotes || "لا توجد ملاحظات إضافية."}</span></div>
+  </div>
+  <div class="amount-wrapper">
+    <b>المبلغ المصروف رقماً وقدره</b>
+    <span>-${Number(p.amount || 0).toLocaleString()} ريال سعودي</span>
+  </div>
+  <div class="signs">
+    <div class="sign">محرر السند والإعداد</div>
+    <div class="sign">المحاسبة والاعتماد لدى ${compName}</div>
+    <div class="sign">توقيع أو بصمة المستلم (المقبوض لأمره)</div>
+  </div>
+  <div class="footer">
+    تم ترحيل وقيد سند الصرف ماليًا في الدفتر اليومي العام وخصمه من الصندوق وتوثيق المستندات إلكترونيًا لدى ${compName}.
+  </div>
+</div>
+${attachment ? `
+<div class="page" style="page-break-before: always; margin-top: 30px; text-align: center;">
+  <div class="head">
+    <div style="width:120px;text-align:center;display:flex;align-items:center;justify-content:center">
+      ${compLogo ? `<img src="${compLogo}" style="max-height:65px;max-width:120px;object-fit:contain" referrerPolicy="no-referrer" />` : `<div class="logo"></div>`}
+    </div>
+    <div class="brand"><h1>${compName}</h1><p>مرفقات ومستندات سند الصرف الإثباتية</p></div>
+    <div style="width:120px;font-size:11px;line-height:1.7"><b>رقم السند:</b><br>${p.no}</div>
+  </div>
+  <div class="title" style="margin-bottom: 30px;">ملحق إثبات المعاملة والمرفقات المرفوعة</div>
+  <div style="border: 2px dashed #cbd5e1; border-radius: 16px; padding: 15px; background: #fff; display: inline-block; max-width: 100%;">
+    <img src="${attachment}" style="max-width: 100%; max-height: 180mm; object-fit: contain; border-radius: 8px;" referrerPolicy="no-referrer" />
+  </div>
+  <div class="footer">المرفق الإلكتروني المعتمد لسند الصرف رقم ${p.no}</div>
+</div>
+` : ""}
+</body>
+</html>`);
+      w.document.close();
+    } catch (e) {
+      console.warn("Exception during Popups window.open printing:", e);
+    }
+  };
+
+  const onPrintExpense = (e: Expense) => {
+    const assocCompanyId = e.company_id || "arab_world";
+    const compLogo = localStorage.getItem(`aw_company_logo_${assocCompanyId}`) || "";
+    const comp = companies.find((c) => c.id === assocCompanyId) || companies[0];
+    const compName = comp?.name || "شركة عرب وورلد للمقاولات";
+    const crNumber = comp?.commercial_register || comp?.record_no || "1010777555";
+    const taxNumber = comp?.tax_no || "لا يوجد";
+    const phone = comp?.phone || "0556446888";
+    const address = comp?.address || "المملكة العربية السعودية";
+    const attachment = awExtractAttachment(e.notes || "");
+    const treasury = awExtractTreasury(e.notes || "") || "خزنة الشركة";
+    const cleanNotes = awCleanNotes(e.notes || "");
+
+    try {
+      const w = window.open("", "_blank");
+      if (!w) {
+        showToast("تنبيه: ملقم المتصفح حظر نافذة الطباعة التلقائية!", "info");
+        return;
+      }
+
+      w.document.write(`
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>سند قيد مصروف - رقم ${e.no}</title>
+<style>
+*{box-sizing:border-box;font-family:Tahoma,Arial}
+body{margin:0;background:#f4f6fa;color:#07153a;padding:24px}
+.page{width:210mm;min-height:297mm;margin:auto;background:white;padding:20mm;box-shadow:0 10px 35px #0002;position:relative;border-radius:12px}
+.head{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #f59e0b;padding-bottom:18px;margin-bottom:20px}
+.brand{text-align:center;flex:1}
+.brand h1{margin:0;font-size:26px;color:#07153a}
+.brand p{margin:6px 0 0;color:#d97706;font-weight:bold;font-size:12px}
+.logo{width:54px;height:65px;position:relative;margin:auto}
+.logo:before,.logo:after{content:"";position:absolute;border:5px solid #111827;border-left:0;border-bottom:0;transform:skewY(-25deg)}
+.logo:before{width:30px;height:55px;right:18px;top:0}
+.logo:after{width:16px;height:45px;right:8px;top:10px;border-color:#f59e0b}
+.title{background:linear-gradient(90deg,#07153a,#f59e0b);color:white;text-align:center;padding:12px;border-radius:10px;font-size:20px;margin:20px 0;letter-spacing:1px;font-weight:bold}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+.box{border:1px solid #d9dee8;border-radius:10px;padding:9.5px;background:#fbfcff;min-height:54px}
+.box b{display:block;color:#b45309;margin-bottom:4px;font-size:11px}
+.box span{font-size:13.5px;font-weight:bold}
+.amount-wrapper{text-align:center;background:#fffbeb;border:2px dashed #fcd34d;border-radius:12px;padding:18px;margin:25px 0}
+.amount-wrapper b{display:block;color:#92400e;font-size:14px;margin-bottom:6px}
+.amount-wrapper span{font-size:28px;color:#b45309;font-weight:900;font-family:monospace}
+.signs{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:45px}
+.sign{height:100px;border-top:1px dashed #777;padding-top:10px;text-align:center;color:#333;font-weight:bold;font-size:12px}
+.footer{position:absolute;bottom:12mm;left:20mm;right:20mm;text-align:center;color:#666;font-size:10px;border-top:1px solid #eee;padding-top:10px}
+.no-print{position:fixed;top:15px;left:15px;display:flex;gap:8px}
+.no-print button{border:0;border-radius:10px;padding:10px 15px;color:white;cursor:pointer;font-weight:bold}
+.print{background:#f59e0b;color:#1e293b}.close{background:#64748b}
+@media print{body{background:white;padding:0}.page{box-shadow:none;margin:0;width:auto;min-height:auto}.no-print{display:none}}
+</style>
+</head>
+<body>
+<div class="no-print">
+<button class="print" onclick="window.print()">طباعة / حفظ PDF</button>
+<button class="close" onclick="window.close()">إغلاق</button>
+</div>
+<div class="page">
+  <div class="head">
+    <div style="width:120px;text-align:center;display:flex;align-items:center;justify-content:center">
+      ${compLogo ? `<img src="${compLogo}" style="max-height:65px;max-width:120px;object-fit:contain" referrerPolicy="no-referrer" />` : `<div class="logo"></div>`}
+    </div>
+    <div class="brand">
+      <h1>${compName}</h1>
+      <p>السجل: ${crNumber} | الرقم الضريبي: ${taxNumber} | الجوال: ${phone}</p>
+      <p style="color:#07153a;font-size:11px;margin-top:2px;">${address}</p>
+    </div>
+    <div style="width:120px;font-size:11px;line-height:1.7"><b>رقم المصروف:</b><br>${e.no}<br><b>التاريخ:</b><br>${e.date}</div>
+  </div>
+  <div class="title">سند قيد مصروف مالي ومستند إثبات</div>
+  <div class="grid">
+    <div class="box"><b>اسم وبند المصروف</b><span>${e.name}</span></div>
+    <div class="box"><b>فئة وتصنيف المصروف</b><span>📁 ${e.category}</span></div>
+    <div class="box"><b>المورد / المستفيد</b><span>${e.supplier || "مورد كلي / جهة عامة"}</span></div>
+    <div class="box"><b>المشروع التابع</b><span>${e.project || "عام"}</span></div>
+    <div class="box"><b>الصندوق / الخزنة الممولة</b><span>🏦 ${treasury}</span></div>
+    <div class="box"><b>الشركة التابعة</b><span>${compName}</span></div>
+    <div class="box" style="grid-column: span 3"><b>البيان والملاحظات التفصيلية</b><span>${cleanNotes || "لا توجد ملاحظات إضافية."}</span></div>
+  </div>
+  <div class="amount-wrapper">
+    <b>إجمالي قيمة المصروف المسجل رقماً وقدره</b>
+    <span>-${Number(e.amount || 0).toLocaleString()} ريال سعودي</span>
+  </div>
+  <div class="signs">
+    <div class="sign">محرر قيد المصروف</div>
+    <div class="sign">المراجعة والرقابة المالية لدى ${compName}</div>
+    <div class="sign">اعتماد الإدارة والمدير المسؤول</div>
+  </div>
+  <div class="footer">
+    تم توثيق قيد المصروف وخصمه ماليًا من الصندوق المعتمد وتوثيق المستند إلكترونيًا لدى ${compName}.
+  </div>
+</div>
+${attachment ? `
+<div class="page" style="page-break-before: always; margin-top: 30px; text-align: center;">
+  <div class="head">
+    <div style="width:120px;text-align:center;display:flex;align-items:center;justify-content:center">
+      ${compLogo ? `<img src="${compLogo}" style="max-height:65px;max-width:120px;object-fit:contain" referrerPolicy="no-referrer" />` : `<div class="logo"></div>`}
+    </div>
+    <div class="brand"><h1>${compName}</h1><p>مرفقات وفاتورة المصروف الإثباتية</p></div>
+    <div style="width:120px;font-size:11px;line-height:1.7"><b>رقم المصروف:</b><br>${e.no}</div>
+  </div>
+  <div class="title" style="margin-bottom: 30px;">ملحق إثبات المعاملة وفاتورة الشراء المرفوعة</div>
+  <div style="border: 2px dashed #cbd5e1; border-radius: 16px; padding: 15px; background: #fff; display: inline-block; max-width: 100%;">
+    <img src="${attachment}" style="max-width: 100%; max-height: 180mm; object-fit: contain; border-radius: 8px;" referrerPolicy="no-referrer" />
+  </div>
+  <div class="footer">المرفق الإلكتروني المعتمد لسند المصروف رقم ${e.no}</div>
+</div>
+` : ""}
+</body>
+</html>`);
+      w.document.close();
+    } catch (err) {
+      console.warn("Exception during Popups window.open printing:", err);
     }
   };
 
@@ -3922,6 +4310,9 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
               : `تعديل سند الصرف رقم: ${row.no}`)
           : `تحرير سند صرف صادر مالي رقم: ${row.no}`
       );
+      const targetContractNo = paySelectedInstallment ? paySelectedInstallment.no : (row.contract_no || "");
+      const finalRem = payRemAfter;
+
       setEditPaymentId(null);
       setPayTo("");
       setPayAmount("");
@@ -3935,7 +4326,14 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
       setPaySelectedInstallment(null);
       setPayBeneficiaryType("شخص");
       await loadEverything();
-      showToast("تم قيّد سند الصرف بنجاح وتحديث أرصدة العمل المرتبط.");
+
+      if (targetContractNo && finalRem !== undefined) {
+        showToast(`✅ تم حفظ سند الصرف بنجاح! الرصيد المتبقي الجديد للعقد (${targetContractNo}) هو: ${Number(finalRem).toLocaleString()} ريال.`, "success");
+      } else if (payWorkerId && finalRem !== undefined) {
+        showToast(`✅ تم حفظ سند الصرف بنجاح! الرصيد المتبقي لحساب المستفيد هو: ${Number(finalRem).toLocaleString()} ريال.`, "success");
+      } else {
+        showToast("✅ تم قيّد سند الصرف بنجاح وخصمه من الصندوق وتحديث السجلات المالية.");
+      }
     } catch {
       showToast("خطأ في القيود المحاسبية للصرف", "error");
     } finally {
@@ -5764,6 +6162,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
               onDeleteInstallment={onDeleteInstallment}
               onPrintContract={onPrintContract}
               onMigrateInstallment={onMigrateInstallment}
+              onTransferContractAndPayments={onTransferContractAndPayments}
               onCreateReceiptForContract={handleCreateReceiptForContract}
               receipts={getVisibleReceipts()}
               companies={getAuthorizedCompanies()}
@@ -6366,33 +6765,36 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                       <option value="نقداً" className="text-white">💵 نقداً</option>
                     </select>
 
-                    <div className="flex flex-wrap items-center gap-2 bg-slate-950/40 p-1.5 rounded-xl border border-slate-850/60">
-                      <div className="flex items-center gap-1 px-1">
-                        <span className="text-[10px] font-black text-slate-400">من:</span>
+                    {/* Date Range Filter */}
+                    <div className="flex flex-wrap items-center gap-2 bg-slate-950/60 p-1.5 rounded-xl border border-slate-800">
+                      <div className="flex items-center gap-1.5 px-1.5">
+                        <Calendar className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span className="text-[11px] font-bold text-slate-300">من تاريخ:</span>
                         <input
                           type="date"
                           value={rFromDate}
                           onChange={(e) => setRFromDate(e.target.value)}
-                          className="bg-slate-950/60 border border-slate-800 rounded-lg px-2 py-1 text-xs text-white font-mono focus:outline-none focus:border-emerald-500"
+                          className="bg-slate-900 border border-slate-700/80 rounded-lg px-2 py-1 text-xs text-white font-mono focus:outline-none focus:border-emerald-500 hover:border-slate-600 transition-colors"
                         />
                       </div>
-                      <div className="flex items-center gap-1 px-1">
-                        <span className="text-[10px] font-black text-slate-400">إلى:</span>
+                      <div className="flex items-center gap-1.5 px-1.5">
+                        <span className="text-[11px] font-bold text-slate-300">إلى تاريخ:</span>
                         <input
                           type="date"
                           value={rToDate}
                           onChange={(e) => setRToDate(e.target.value)}
-                          className="bg-slate-950/60 border border-slate-800 rounded-lg px-2 py-1 text-xs text-white font-mono focus:outline-none focus:border-emerald-500"
+                          className="bg-slate-900 border border-slate-700/80 rounded-lg px-2 py-1 text-xs text-white font-mono focus:outline-none focus:border-emerald-500 hover:border-slate-600 transition-colors"
                         />
                       </div>
                       {(rFromDate || rToDate) && (
                         <button
+                          type="button"
                           onClick={() => {
                             setRFromDate("");
                             setRToDate("");
                           }}
-                          className="text-[10px] font-bold text-red-400 hover:text-red-300 px-2 py-1 rounded bg-red-950/40 border border-red-900/40 transition-colors"
-                          title="إعادة تعيين نطاق التواريخ"
+                          className="text-[10px] font-bold text-rose-300 hover:text-white px-2 py-1 rounded-lg bg-rose-950/60 hover:bg-rose-900/80 border border-rose-800/60 transition-colors cursor-pointer"
+                          title="إعادة تعيين تفريغ نطاق التواريخ"
                         >
                           تفريغ
                         </button>
@@ -6981,6 +7383,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                                     </div>
                                   </td>
                                   <td className="py-3 px-3 text-center space-x-1">
+                                    <button onClick={() => onPrintPayment(p)} className="p-1 text-emerald-400 hover:text-white" title="طباعة سند الصرف"><Printer className="w-3.5 h-3.5" /></button>
                                     <button onClick={() => { setEditPaymentId(p.id); setPayTo(p.to_name || ""); setPayAmount(p.amount || ""); setPayDate(p.date || ""); setPayProject(p.project || ""); setPayMethod(p.method || ""); setPayNotes(awCleanNotes(p.notes || "")); setPayAttachment(awExtractAttachment(p.notes || "") || ""); setPayTreasury(awExtractTreasury(p.notes || "") || "خزنة الشركة"); setPaymentCompanyId(p.company_id || ""); setPayWorkerId(p.worker_id || ""); setPayBeneficiaryType(awExtractBeneficiaryType(p.notes || "", p.worker_id, p.to_name)); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
                                     <button
                                       onClick={() => {
@@ -7048,9 +7451,19 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                                             <div className="text-slate-400 text-left font-mono text-[9px]">{p.created_at ? new Date(p.created_at).toLocaleString("ar-EG") : "—"}</div>
                                           </div>
                                         </div>
-                                        <div className="md:col-span-3 bg-slate-950/25 p-3 rounded-xl border border-slate-850 mt-1">
-                                          <span className="text-[10px] font-black text-slate-400 block mb-1">البيان والملاحظات بالكامل:</span>
-                                          <p className="text-slate-200 text-xs font-bold leading-relaxed whitespace-pre-wrap">{p.notes ? awCleanNotes(p.notes) : "لا توجد ملاحظات."}</p>
+                                        <div className="md:col-span-3 bg-slate-950/25 p-3 rounded-xl border border-slate-850 mt-1 flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
+                                          <div className="flex-1">
+                                            <span className="text-[10px] font-black text-slate-400 block mb-1">البيان والملاحظات بالكامل:</span>
+                                            <p className="text-slate-200 text-xs font-bold leading-relaxed whitespace-pre-wrap">{p.notes ? awCleanNotes(p.notes) : "لا توجد ملاحظات."}</p>
+                                          </div>
+                                          <button
+                                            type="button"
+                                            onClick={() => onPrintPayment(p)}
+                                            className="px-3.5 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all self-end md:self-auto cursor-pointer"
+                                          >
+                                            <Printer className="w-3.5 h-3.5" />
+                                            <span>طباعة سند الصرف</span>
+                                          </button>
                                         </div>
                                       </div>
                                     </td>
@@ -7354,6 +7767,7 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                                   </div>
                                 </td>
                                 <td className="py-3 px-3 text-center space-x-1">
+                                  <button onClick={() => onPrintExpense(e)} className="p-1 text-emerald-400 hover:text-white" title="طباعة سند المصروف"><Printer className="w-3.5 h-3.5" /></button>
                                   <button onClick={() => { setEditExpenseId(e.id); setEName(e.name || ""); setECategory(e.category || ""); setEAmount(e.amount || ""); setEDate(e.date || ""); setEProject(e.project || ""); setESupplier(e.supplier || ""); setENotes(awCleanNotes(e.notes || "")); setEAttachment(awExtractAttachment(e.notes || "") || ""); setETreasury(awExtractTreasury(e.notes || "") || "خزنة الشركة"); setExpenseCompanyId(e.company_id || ""); }} className="p-1 text-blue-400 hover:text-white"><Edit2 className="w-3.5 h-3.5" /></button>
                                   <button
                                     onClick={() => {
@@ -7424,9 +7838,19 @@ td{border:1px solid #d8dee9;padding:9px;text-align:center;font-weight:600}
                                       </div>
 
                                       {/* Notes */}
-                                      <div className="md:col-span-3 bg-slate-950/25 p-3 rounded-xl border border-slate-850 mt-1">
-                                        <span className="text-[10px] font-black text-slate-400 block mb-1">الملاحظات والبيان التفصيلي بالكامل:</span>
-                                        <p className="text-slate-200 text-xs font-bold leading-relaxed whitespace-pre-wrap">{e.notes ? awCleanNotes(e.notes) : "لا توجد ملاحظات إضافية مسجلة."}</p>
+                                      <div className="md:col-span-3 bg-slate-950/25 p-3 rounded-xl border border-slate-850 mt-1 flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
+                                        <div className="flex-1">
+                                          <span className="text-[10px] font-black text-slate-400 block mb-1">الملاحظات والبيان التفصيلي بالكامل:</span>
+                                          <p className="text-slate-200 text-xs font-bold leading-relaxed whitespace-pre-wrap">{e.notes ? awCleanNotes(e.notes) : "لا توجد ملاحظات إضافية مسجلة."}</p>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => onPrintExpense(e)}
+                                          className="px-3.5 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all self-end md:self-auto cursor-pointer"
+                                        >
+                                          <Printer className="w-3.5 h-3.5" />
+                                          <span>طباعة سند المصروف</span>
+                                        </button>
                                       </div>
                                     </div>
                                   </td>
